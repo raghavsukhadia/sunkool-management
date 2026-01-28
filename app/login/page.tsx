@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,14 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
-  const supabase = createClient()
+  const supabaseRef = useRef<any>(null)
+
+  const getSupabase = () => {
+    if (!supabaseRef.current) {
+      supabaseRef.current = createClient()
+    }
+    return supabaseRef.current
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -24,6 +31,7 @@ export default function LoginPage() {
     setError(null)
 
     try {
+      const supabase = getSupabase()
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
