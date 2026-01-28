@@ -93,7 +93,7 @@ export default function CustomersPage() {
   async function onSubmit(data: CustomerFormValues) {
     setIsSubmitting(true)
     setError(null)
-    setSuccess(false)
+    setSuccess(null)
 
     try {
       let result

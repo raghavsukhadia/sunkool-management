@@ -5,8 +5,11 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Order Management System",
-  description: "Professional Order Management System",
+  title: "Sunkool OMS - Order Management System",
+  description: "Professional Order Management System for Sunkool",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({

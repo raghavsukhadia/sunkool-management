@@ -95,7 +95,7 @@ export default function CourierPage() {
   async function onSubmit(data: CourierFormValues) {
     setIsSubmitting(true)
     setError(null)
-    setSuccess(false)
+    setSuccess(null)
 
     try {
       const result = await createCourierCompany({

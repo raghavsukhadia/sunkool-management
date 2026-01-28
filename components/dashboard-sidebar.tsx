@@ -14,10 +14,12 @@ import {
   LogOut,
   Home,
   Menu,
-  X
+  X,
+  Users
 } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
+import SunkoolLogo from "@/components/SunkoolLogo"
 
 export default function DashboardSidebar({
   children,
@@ -64,16 +66,17 @@ export default function DashboardSidebar({
       >
         <div className="flex flex-col h-full">
           {/* Logo/Header */}
-          <div className="flex items-center justify-between h-16 px-6 border-b border-slate-700">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                <Package className="w-5 h-5 text-white" />
+          <div className="flex items-center justify-between h-20 px-4 border-b border-slate-700 bg-gradient-to-r from-slate-800 to-slate-900">
+            <Link href="/dashboard" className="flex items-center space-x-3 hover:opacity-90 transition-opacity flex-1">
+              <SunkoolLogo variant="dark" size="md" />
+              <div className="hidden sm:flex flex-col">
+                <h2 className="text-white font-bold text-sm leading-none">Sunkool</h2>
+                <p className="text-slate-400 text-xs font-medium">OMS</p>
               </div>
-              <span className="text-lg font-semibold">OMS</span>
-            </div>
+            </Link>
             <button
               onClick={() => setSidebarOpen(false)}
-              className="lg:hidden text-slate-400 hover:text-white"
+              className="lg:hidden text-slate-400 hover:text-white transition-colors"
             >
               <X className="w-5 h-5" />
             </button>

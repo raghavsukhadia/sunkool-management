@@ -811,19 +811,32 @@ export default function OrderDetailsPage() {
     }
   }
 
-  const handleRemoveItem = async (itemId: string) => {
-    if (!confirm("Are you sure you want to remove this item from the order?")) {
-      return
-    }
-
+  const handleRemoveItem = async (itemId: string, itemName?: string) => {
     try {
-      const result = await removeItemFromOrder(itemId)
+      const result = await removeItemFromOrder(itemId) as any
+      
       if (result.success) {
         setSuccess("Item removed from order successfully!")
         await loadOrderDetails()
         setTimeout(() => setSuccess(null), 2000)
       } else {
-        setError(result.error || "Failed to remove item")
+        // Check if this is a dispatched item error
+        if (result.canCreateReturn && result.dispatchedQuantity) {
+          const confirmReturn = confirm(
+            `${result.error}\n\nWould you like to create a return dispatch now?\n\nThis will:\n1. Create a return record for ${result.dispatchedQuantity} dispatched units\n2. Allow you to delete the item afterwards\n\nClick OK to proceed with return dispatch, or Cancel to keep the item.`
+          )
+          
+          if (confirmReturn) {
+            // User wants to create return dispatch
+            setError("Return dispatch feature coming soon. For now, please contact support to process the return before deleting this item.")
+            // TODO: Implement return dispatch UI
+            // This would open a modal/dialog to create the return dispatch
+          } else {
+            setError(result.error)
+          }
+        } else {
+          setError(result.error || "Failed to remove item")
+        }
       }
     } catch (err: any) {
       setError(err.message || "An error occurred")
@@ -3188,8 +3201,17 @@ export default function OrderDetailsPage() {
                           ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
                           : inventoryItem?.item_name || `Item`
 
+                        // Get already dispatched quantity from dispatches - FIX: Show context
+                        const alreadyDispatched = dispatches.reduce((sum, d) => {
+                          const dispatchQtyForItem = d.dispatch_items?.reduce((itemSum: number, di: any) => {
+                            return di.order_items?.id === item.id ? itemSum + di.quantity : itemSum
+                          }, 0) || 0
+                          return sum + dispatchQtyForItem
+                        }, 0)
+
                         const dispatchQty = dispatchQuantities[item.id] || 0
-                        const remainingQty = item.quantity - dispatchQty
+                        const remainingQty = item.quantity - alreadyDispatched - dispatchQty
+                        const maxAvailableToDispatch = item.quantity - alreadyDispatched
 
                         return (
                           <div key={item.id} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
@@ -3201,6 +3223,18 @@ export default function OrderDetailsPage() {
                                 )}
                                 <div className="text-sm text-gray-600 mt-1">
                                   Order Quantity: <span className="font-semibold">{item.quantity}</span>
+                                  {alreadyDispatched > 0 && (
+                                    <>
+                                      <span className="mx-1">|</span>
+                                      Already Dispatched: <span className="font-semibold text-green-600">{alreadyDispatched}</span>
+                                    </>
+                                  )}
+                                  {maxAvailableToDispatch > 0 && (
+                                    <>
+                                      <span className="mx-1">|</span>
+                                      Remaining: <span className="font-semibold text-blue-600">{maxAvailableToDispatch}</span>
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -3212,7 +3246,7 @@ export default function OrderDetailsPage() {
                                 <Input
                                   type="number"
                                   min="0"
-                                  max={item.quantity}
+                                  max={maxAvailableToDispatch}
                                   value={dispatchQty}
                                   onChange={(e) => handleDispatchQuantityChange(item.id, parseInt(e.target.value) || 0)}
                                   disabled={dispatchType === "full" || dispatching}
@@ -3234,7 +3268,7 @@ export default function OrderDetailsPage() {
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={() => handleDispatchQuantityChange(item.id, item.quantity)}
+                                    onClick={() => handleDispatchQuantityChange(item.id, maxAvailableToDispatch)}
                                     disabled={dispatching}
                                     className="h-9 text-xs"
                                   >

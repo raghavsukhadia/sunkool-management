@@ -59,6 +59,25 @@ async function generateNextOrderNumber(): Promise<string> {
   }
 }
 
+// Check if an order item has been dispatched and get details
+export async function getOrderItemDispatchStatus(orderItemId: string) {
+  const supabase = await createClient()
+  
+  const { data: dispatchItems } = await supabase
+    .from("dispatch_items")
+    .select("quantity, dispatches!inner(dispatch_date, dispatch_type, shipment_status)")
+    .eq("order_item_id", orderItemId)
+  
+  const totalDispatched = dispatchItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
+  
+  return {
+    hasBeenDispatched: totalDispatched > 0,
+    totalDispatched,
+    dispatchCount: dispatchItems?.length || 0,
+    dispatchDetails: dispatchItems || []
+  }
+}
+
 // Create a new order
 export async function createOrder(formData: {
   customer_id: string
@@ -382,6 +401,25 @@ export async function updateOrderItemQuantity(orderItemId: string, quantity: num
     return { success: false, error: "Quantity must be greater than 0" }
   }
 
+  // Check how much has already been dispatched - CRITICAL FIX
+  const { data: dispatchItems, error: dispatchError } = await supabase
+    .from("dispatch_items")
+    .select("quantity")
+    .eq("order_item_id", orderItemId)
+  
+  if (dispatchError) {
+    return { success: false, error: `Failed to check dispatch status: ${dispatchError.message}` }
+  }
+  
+  const dispatchedQty = dispatchItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
+  
+  if (quantity < dispatchedQty) {
+    return { 
+      success: false, 
+      error: `Cannot reduce quantity to ${quantity}. Already dispatched: ${dispatchedQty} units. New quantity must be at least ${dispatchedQty}.` 
+    }
+  }
+
   const { error } = await supabase
     .from("order_items")
     .update({ quantity })
@@ -408,6 +446,34 @@ export async function updateOrderItemQuantity(orderItemId: string, quantity: num
 // Remove item from order
 export async function removeItemFromOrder(orderItemId: string) {
   const supabase = await createClient()
+
+  // Check if item has been dispatched - CRITICAL FIX
+  const { data: dispatchItems, error: checkError } = await supabase
+    .from("dispatch_items")
+    .select("id")
+    .eq("order_item_id", orderItemId)
+    .limit(1)
+  
+  if (checkError) {
+    return { success: false, error: `Failed to check dispatch status: ${checkError.message}` }
+  }
+  
+  if (dispatchItems && dispatchItems.length > 0) {
+    // Get dispatch quantity details
+    const { data: detailedDispatch } = await supabase
+      .from("dispatch_items")
+      .select("quantity, dispatches!inner(dispatch_date, dispatch_type)")
+      .eq("order_item_id", orderItemId)
+    
+    const totalDispatched = detailedDispatch?.reduce((sum, item) => sum + item.quantity, 0) || 0
+    
+    return { 
+      success: false, 
+      error: `Cannot delete this item - ${totalDispatched} units have already been dispatched. To remove this item, first create a return dispatch for the dispatched units, then try deleting again.`,
+      canCreateReturn: true,
+      dispatchedQuantity: totalDispatched
+    }
+  }
 
   // Get order_id before deleting
   const { data: orderItem } = await supabase
@@ -487,15 +553,34 @@ export async function createDispatch(
     return { success: false, error: itemsError.message }
   }
 
-  // Validate dispatch quantities
+  // Validate dispatch quantities - FIX: Check cumulative quantities
   for (const dispatchItem of dispatchItems) {
     const orderItem = orderItems?.find(item => item.id === dispatchItem.order_item_id)
     if (!orderItem) {
       return { success: false, error: `Order item ${dispatchItem.order_item_id} not found` }
     }
-    if (dispatchItem.quantity > orderItem.quantity) {
-      return { success: false, error: `Dispatch quantity cannot exceed order quantity for item` }
+    
+    // Get previously dispatched quantity for this item
+    const { data: previousDispatch, error: prevError } = await supabase
+      .from("dispatch_items")
+      .select("quantity")
+      .eq("order_item_id", dispatchItem.order_item_id)
+    
+    if (prevError) {
+      return { success: false, error: `Failed to check previous dispatches: ${prevError.message}` }
     }
+    
+    const previouslyDispatched = previousDispatch?.reduce((sum, item) => sum + item.quantity, 0) || 0
+    const totalWillBeDispatched = previouslyDispatched + dispatchItem.quantity
+    
+    // Validate total dispatched doesn't exceed order quantity
+    if (totalWillBeDispatched > orderItem.quantity) {
+      return { 
+        success: false, 
+        error: `Cannot dispatch ${dispatchItem.quantity} units for this item. Already dispatched: ${previouslyDispatched}, Order quantity: ${orderItem.quantity}. Remaining available: ${orderItem.quantity - previouslyDispatched}` 
+      }
+    }
+    
     if (dispatchItem.quantity <= 0) {
       return { success: false, error: "Dispatch quantity must be greater than 0" }
     }
@@ -604,6 +689,104 @@ export async function createDispatch(
   revalidatePath("/dashboard/orders")
   
   return { success: true, data: dispatch }
+}
+
+// Create a return dispatch (for handling returned items)
+export async function createReturnDispatch(
+  orderId: string,
+  returnItems: Array<{ order_item_id: string; quantity: number; reason?: string }>,
+  notes?: string
+) {
+  const supabase = await createClient()
+
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return { success: false, error: "User not authenticated" }
+  }
+
+  // Get user profile
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", user.id)
+    .single()
+
+  if (!profile) {
+    return { success: false, error: "User profile not found" }
+  }
+
+  // Validate return items
+  if (!returnItems || returnItems.length === 0) {
+    return { success: false, error: "No items to return" }
+  }
+
+  // Validate that items were actually dispatched
+  for (const returnItem of returnItems) {
+    const { data: dispatchedItems } = await supabase
+      .from("dispatch_items")
+      .select("quantity")
+      .eq("order_item_id", returnItem.order_item_id)
+    
+    const totalDispatched = dispatchedItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
+    
+    if (totalDispatched < returnItem.quantity) {
+      return { 
+        success: false, 
+        error: `Cannot return ${returnItem.quantity} units. Only ${totalDispatched} units were dispatched.` 
+      }
+    }
+  }
+
+  // Create return dispatch record
+  const { data: returnDispatch, error: returnError } = await supabase
+    .from("dispatches")
+    .insert({
+      order_id: orderId,
+      dispatch_type: "return",
+      dispatch_date: new Date().toISOString().split('T')[0],
+      notes: notes || "Return dispatch",
+      shipment_status: "returned",
+      created_by: profile.id,
+    })
+    .select()
+    .single()
+
+  if (returnError) {
+    return { success: false, error: returnError.message }
+  }
+
+  // Create return dispatch items
+  const { data: fullOrderItems } = await supabase
+    .from("order_items")
+    .select("id, inventory_item_id, product_id")
+    .in("id", returnItems.map(ri => ri.order_item_id))
+
+  const returnDispatchItems = returnItems.map(ri => {
+    const fullOrderItem = fullOrderItems?.find(item => item.id === ri.order_item_id)
+    return {
+      dispatch_id: returnDispatch.id,
+      order_item_id: ri.order_item_id,
+      inventory_item_id: fullOrderItem?.inventory_item_id || null,
+      product_id: fullOrderItem?.product_id || null,
+      quantity: -ri.quantity, // Negative quantity to indicate return
+    }
+  })
+
+  const { error: returnItemsError } = await supabase
+    .from("dispatch_items")
+    .insert(returnDispatchItems)
+
+  if (returnItemsError) {
+    // Rollback
+    await supabase.from("dispatches").delete().eq("id", returnDispatch.id)
+    return { success: false, error: returnItemsError.message }
+  }
+
+  revalidatePath(`/dashboard/orders/${orderId}`)
+  revalidatePath("/dashboard/orders")
+  
+  return { success: true, data: returnDispatch }
 }
 
 // Get dispatches for an order
@@ -724,6 +907,28 @@ export async function updateOrderPayment(
 ) {
   const supabase = await createClient()
 
+  // Validate payment status - CRITICAL FIX: Orders must be dispatched before marking paid
+  if (paymentStatus === 'complete' || paymentStatus === 'partial') {
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("order_status")
+      .eq("id", orderId)
+      .single()
+    
+    if (orderError || !order) {
+      return { success: false, error: "Order not found" }
+    }
+    
+    // Check that order is in a dispatched state before payment
+    const dispatchedStates = ['Partial Dispatch', 'Dispatched', 'Delivered']
+    if (!dispatchedStates.includes(order.order_status)) {
+      return { 
+        success: false, 
+        error: `Cannot mark order as paid. Order must be dispatched first. Current status: "${order.order_status}"` 
+      }
+    }
+  }
+
   const updateData: any = {}
   if (invoiceNumber !== undefined) {
     updateData.invoice_number = invoiceNumber || null
@@ -843,6 +1048,40 @@ export async function updateOrder(
   }
 ) {
   const supabase = await createClient()
+
+  // Validate status transitions if status is being updated - CRITICAL FIX
+  if (formData.order_status !== undefined) {
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("order_status")
+      .eq("id", orderId)
+      .single()
+    
+    if (orderError || !order) {
+      return { success: false, error: "Order not found" }
+    }
+    
+    const currentStatus = order.order_status
+    const newStatus = formData.order_status
+    
+    // Define valid state transitions
+    const validTransitions: Record<string, string[]> = {
+      'Pending': ['Approved', 'Cancelled'],
+      'Approved': ['In Production', 'Pending', 'Cancelled'],
+      'In Production': ['Partial Dispatch', 'Dispatched', 'Approved', 'Cancelled'],
+      'Partial Dispatch': ['In Production', 'Dispatched', 'Cancelled'],
+      'Dispatched': ['Delivered', 'Partial Dispatch', 'Cancelled'],
+      'Delivered': ['Cancelled'],
+      'Cancelled': []
+    }
+    
+    if (!validTransitions[currentStatus]?.includes(newStatus)) {
+      return { 
+        success: false, 
+        error: `Invalid status transition: Cannot change from "${currentStatus}" to "${newStatus}". Valid next statuses: ${validTransitions[currentStatus]?.join(', ') || 'None'}` 
+      }
+    }
+  }
 
   const updateData: any = {}
   if (formData.sales_order_number !== undefined) {

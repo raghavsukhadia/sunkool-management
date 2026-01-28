@@ -62,7 +62,7 @@ export default function OrdersPage() {
     try {
       const result = await getAllOrders()
       if (result.success && result.data) {
-        setOrders(result.data as Order[])
+        setOrders(result.data as any as Order[])
       } else {
         setError(result.error || "Failed to load orders")
       }
