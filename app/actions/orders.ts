@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache"
 // Generate next internal order number in sequence (SK01, SK02, SK03...)
 async function generateNextOrderNumber(): Promise<string> {
   const supabase = await createClient()
-  
+
   // Get all existing internal order numbers that match the SK## pattern
   const { data: orders, error } = await supabase
     .from("orders")
@@ -62,14 +62,14 @@ async function generateNextOrderNumber(): Promise<string> {
 // Check if an order item has been dispatched and get details
 export async function getOrderItemDispatchStatus(orderItemId: string) {
   const supabase = await createClient()
-  
+
   const { data: dispatchItems } = await supabase
     .from("dispatch_items")
     .select("quantity, dispatches!inner(dispatch_date, dispatch_type, shipment_status)")
     .eq("order_item_id", orderItemId)
-  
+
   const totalDispatched = dispatchItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
-  
+
   return {
     hasBeenDispatched: totalDispatched > 0,
     totalDispatched,
@@ -156,14 +156,14 @@ export async function createOrder(formData: {
   revalidatePath("/dashboard/orders")
   revalidatePath("/dashboard/orders/new")
   revalidatePath("/dashboard/follow-up")
-  
+
   return { success: true, data: order }
 }
 
 // Get all customers for dropdown
 export async function getCustomersForOrder() {
   const supabase = await createClient()
-  
+
   const { data, error } = await supabase
     .from("customers")
     .select("id, name, email, phone")
@@ -180,7 +180,7 @@ export async function getCustomersForOrder() {
 // Get all orders for the orders list page
 export async function getAllOrders() {
   const supabase = await createClient()
-  
+
   const { data: orders, error } = await supabase
     .from("orders")
     .select(`
@@ -235,7 +235,7 @@ export async function getAllOrders() {
 // Get order details with customer and items
 export async function getOrderDetails(orderId: string) {
   const supabase = await createClient()
-  
+
   // Get order with customer info
   const { data: order, error: orderError } = await supabase
     .from("orders")
@@ -252,7 +252,7 @@ export async function getOrderDetails(orderId: string) {
     `)
     .eq("id", orderId)
     .single()
-  
+
   // Note: internal_order_number is included in the * selector
 
   if (orderError) {
@@ -266,20 +266,20 @@ export async function getOrderDetails(orderId: string) {
     .eq("order_id", orderId)
     .order("created_at", { ascending: true })
 
-  return { 
-    success: true, 
+  return {
+    success: true,
     data: {
       ...order,
       items: orderItems || []
-    }, 
-    error: null 
+    },
+    error: null
   }
 }
 
 // Get inventory items for order (parent items with sub-items)
 export async function getInventoryItemsForOrder() {
   const supabase = await createClient()
-  
+
   // Get all parent items (items without parent)
   const { data: items, error } = await supabase
     .from("inventory_items")
@@ -406,17 +406,17 @@ export async function updateOrderItemQuantity(orderItemId: string, quantity: num
     .from("dispatch_items")
     .select("quantity")
     .eq("order_item_id", orderItemId)
-  
+
   if (dispatchError) {
     return { success: false, error: `Failed to check dispatch status: ${dispatchError.message}` }
   }
-  
+
   const dispatchedQty = dispatchItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
-  
+
   if (quantity < dispatchedQty) {
-    return { 
-      success: false, 
-      error: `Cannot reduce quantity to ${quantity}. Already dispatched: ${dispatchedQty} units. New quantity must be at least ${dispatchedQty}.` 
+    return {
+      success: false,
+      error: `Cannot reduce quantity to ${quantity}. Already dispatched: ${dispatchedQty} units. New quantity must be at least ${dispatchedQty}.`
     }
   }
 
@@ -453,22 +453,22 @@ export async function removeItemFromOrder(orderItemId: string) {
     .select("id")
     .eq("order_item_id", orderItemId)
     .limit(1)
-  
+
   if (checkError) {
     return { success: false, error: `Failed to check dispatch status: ${checkError.message}` }
   }
-  
+
   if (dispatchItems && dispatchItems.length > 0) {
     // Get dispatch quantity details
     const { data: detailedDispatch } = await supabase
       .from("dispatch_items")
       .select("quantity, dispatches!inner(dispatch_date, dispatch_type)")
       .eq("order_item_id", orderItemId)
-    
+
     const totalDispatched = detailedDispatch?.reduce((sum, item) => sum + item.quantity, 0) || 0
-    
-    return { 
-      success: false, 
+
+    return {
+      success: false,
       error: `Cannot delete this item - ${totalDispatched} units have already been dispatched. To remove this item, first create a return dispatch for the dispatched units, then try deleting again.`,
       canCreateReturn: true,
       dispatchedQuantity: totalDispatched
@@ -559,28 +559,28 @@ export async function createDispatch(
     if (!orderItem) {
       return { success: false, error: `Order item ${dispatchItem.order_item_id} not found` }
     }
-    
+
     // Get previously dispatched quantity for this item
     const { data: previousDispatch, error: prevError } = await supabase
       .from("dispatch_items")
       .select("quantity")
       .eq("order_item_id", dispatchItem.order_item_id)
-    
+
     if (prevError) {
       return { success: false, error: `Failed to check previous dispatches: ${prevError.message}` }
     }
-    
+
     const previouslyDispatched = previousDispatch?.reduce((sum, item) => sum + item.quantity, 0) || 0
     const totalWillBeDispatched = previouslyDispatched + dispatchItem.quantity
-    
+
     // Validate total dispatched doesn't exceed order quantity
     if (totalWillBeDispatched > orderItem.quantity) {
-      return { 
-        success: false, 
-        error: `Cannot dispatch ${dispatchItem.quantity} units for this item. Already dispatched: ${previouslyDispatched}, Order quantity: ${orderItem.quantity}. Remaining available: ${orderItem.quantity - previouslyDispatched}` 
+      return {
+        success: false,
+        error: `Cannot dispatch ${dispatchItem.quantity} units for this item. Already dispatched: ${previouslyDispatched}, Order quantity: ${orderItem.quantity}. Remaining available: ${orderItem.quantity - previouslyDispatched}`
       }
     }
-    
+
     if (dispatchItem.quantity <= 0) {
       return { success: false, error: "Dispatch quantity must be greater than 0" }
     }
@@ -644,7 +644,7 @@ export async function createDispatch(
     // Check if all items are fully dispatched
     const totalOrderQuantity = orderItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
     const totalDispatchedQuantity = dispatchItems.reduce((sum, item) => sum + item.quantity, 0)
-    
+
     // Get all previous dispatches for this order
     const { data: previousDispatches } = await supabase
       .from("dispatches")
@@ -682,12 +682,19 @@ export async function createDispatch(
     .eq("id", orderId)
 
   if (updateError) {
-    console.error("Failed to update order status:", updateError)
+    // Attempt to rollback the created dispatch and dispatch_items to avoid partial state
+    try {
+      await supabase.from("dispatch_items").delete().eq("dispatch_id", dispatch.id)
+      await supabase.from("dispatches").delete().eq("id", dispatch.id)
+    } catch (rbErr) {
+      console.error("Failed to rollback dispatch after order status update failure:", rbErr)
+    }
+    return { success: false, error: `Failed to update order status: ${updateError.message}` }
   }
 
   revalidatePath(`/dashboard/orders/${orderId}`)
   revalidatePath("/dashboard/orders")
-  
+
   return { success: true, data: dispatch }
 }
 
@@ -727,13 +734,13 @@ export async function createReturnDispatch(
       .from("dispatch_items")
       .select("quantity")
       .eq("order_item_id", returnItem.order_item_id)
-    
+
     const totalDispatched = dispatchedItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
-    
+
     if (totalDispatched < returnItem.quantity) {
-      return { 
-        success: false, 
-        error: `Cannot return ${returnItem.quantity} units. Only ${totalDispatched} units were dispatched.` 
+      return {
+        success: false,
+        error: `Cannot return ${returnItem.quantity} units. Only ${totalDispatched} units were dispatched.`
       }
     }
   }
@@ -785,14 +792,14 @@ export async function createReturnDispatch(
 
   revalidatePath(`/dashboard/orders/${orderId}`)
   revalidatePath("/dashboard/orders")
-  
+
   return { success: true, data: returnDispatch }
 }
 
 // Get dispatches for an order
 export async function getOrderDispatches(orderId: string) {
   const supabase = await createClient()
-  
+
   const { data: dispatches, error } = await supabase
     .from("dispatches")
     .select(`
@@ -914,17 +921,17 @@ export async function updateOrderPayment(
       .select("order_status")
       .eq("id", orderId)
       .single()
-    
+
     if (orderError || !order) {
       return { success: false, error: "Order not found" }
     }
-    
+
     // Check that order is in a dispatched state before payment
     const dispatchedStates = ['Partial Dispatch', 'Dispatched', 'Delivered']
     if (!dispatchedStates.includes(order.order_status)) {
-      return { 
-        success: false, 
-        error: `Cannot mark order as paid. Order must be dispatched first. Current status: "${order.order_status}"` 
+      return {
+        success: false,
+        error: `Cannot mark order as paid. Order must be dispatched first. Current status: "${order.order_status}"`
       }
     }
   }
@@ -977,7 +984,7 @@ export async function updateOrderPayment(
 // Get payment followups for an order
 export async function getOrderPaymentFollowups(orderId: string) {
   const supabase = await createClient()
-  
+
   const { data: followups, error } = await supabase
     .from("payment_followups")
     .select("*")
@@ -1003,7 +1010,7 @@ export async function updatePaymentFollowup(
   const updateData: any = {
     payment_received: paymentReceived,
   }
-  
+
   if (paymentDate !== undefined) {
     updateData.payment_date = paymentDate || null
   }
@@ -1056,14 +1063,14 @@ export async function updateOrder(
       .select("order_status")
       .eq("id", orderId)
       .single()
-    
+
     if (orderError || !order) {
       return { success: false, error: "Order not found" }
     }
-    
+
     const currentStatus = order.order_status
     const newStatus = formData.order_status
-    
+
     // Define valid state transitions
     const validTransitions: Record<string, string[]> = {
       'Pending': ['Approved', 'Cancelled'],
@@ -1074,11 +1081,11 @@ export async function updateOrder(
       'Delivered': ['Cancelled'],
       'Cancelled': []
     }
-    
+
     if (!validTransitions[currentStatus]?.includes(newStatus)) {
-      return { 
-        success: false, 
-        error: `Invalid status transition: Cannot change from "${currentStatus}" to "${newStatus}". Valid next statuses: ${validTransitions[currentStatus]?.join(', ') || 'None'}` 
+      return {
+        success: false,
+        error: `Invalid status transition: Cannot change from "${currentStatus}" to "${newStatus}". Valid next statuses: ${validTransitions[currentStatus]?.join(', ') || 'None'}`
       }
     }
   }
@@ -1110,7 +1117,7 @@ export async function updateOrder(
 
   revalidatePath(`/dashboard/orders/${orderId}`)
   revalidatePath("/dashboard/orders")
-  
+
   return { success: true, data }
 }
 
@@ -1143,9 +1150,9 @@ export async function deleteOrder(orderId: string) {
       .eq("order_id", orderId)
 
     if (dispatchError) {
-      return { 
-        success: false, 
-        error: `Cannot delete order: Failed to delete associated dispatches. ${dispatchError.message}` 
+      return {
+        success: false,
+        error: `Cannot delete order: Failed to delete associated dispatches. ${dispatchError.message}`
       }
     }
   }
@@ -1159,16 +1166,16 @@ export async function deleteOrder(orderId: string) {
   if (error) {
     // Provide a more user-friendly error message
     if (error.message.includes("foreign key")) {
-      return { 
-        success: false, 
-        error: `Cannot delete order: ${error.message}. Please run the database migration to fix foreign key constraints.` 
+      return {
+        success: false,
+        error: `Cannot delete order: ${error.message}. Please run the database migration to fix foreign key constraints.`
       }
     }
     return { success: false, error: error.message }
   }
 
   revalidatePath("/dashboard/orders")
-  
+
   return { success: true }
 }
 
@@ -1217,7 +1224,7 @@ export async function uploadProductionPDF(
   }
 
   revalidatePath(`/dashboard/orders/${orderId}`)
-  
+
   return { success: true, data }
 }
 
@@ -1298,7 +1305,7 @@ export async function createProductionList(
 
   if (pdfBlob && fileName) {
     const filePath = `production-pdfs/${orderId}/${Date.now()}-${fileName}`
-    
+
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from("production-pdfs")
       .upload(filePath, pdfBlob, {
@@ -1360,14 +1367,14 @@ export async function createProductionList(
   }
 
   revalidatePath(`/dashboard/orders/${orderId}`)
-  
+
   return { success: true, data: productionList }
 }
 
 // Get production lists for an order
 export async function getOrderProductionLists(orderId: string) {
   const supabase = await createClient()
-  
+
   const { data: productionLists, error } = await supabase
     .from("production_lists")
     .select(`
@@ -1434,28 +1441,28 @@ export async function deleteProductionList(listId: string) {
 
 // Generate production number (SK01A, SK01B, etc.)
 function generateProductionNumber(
-  orderNumber: string, 
-  existingRecords: any[], 
+  orderNumber: string,
+  existingRecords: any[],
   productionType: "full" | "partial"
 ): string {
   // For full production: use order number directly (SK01)
   if (productionType === "full") {
     return orderNumber
   }
-  
+
   // For partial production: add suffix (SK01A, SK01B, etc.)
   const base = orderNumber.match(/^([A-Z]+\d+)/)?.[1] || orderNumber
-  
+
   // Find highest suffix (A, B, C, etc.)
   const existingSuffixes = existingRecords
     .map((r: any) => r.production_number?.replace(base, '') || '')
     .filter((s: string) => /^[A-Z]$/.test(s))
     .map((s: string) => s.charCodeAt(0))
-  
+
   const nextSuffix = existingSuffixes.length > 0
     ? String.fromCharCode(Math.max(...existingSuffixes) + 1)
     : 'A'
-  
+
   return `${base}${nextSuffix}`
 }
 
@@ -1521,7 +1528,7 @@ export async function createProductionRecord(
     // Convert base64 to Buffer for Supabase storage
     const buffer = Buffer.from(pdfBase64, 'base64')
     const filePath = `production-pdfs/${orderId}/${Date.now()}-${fileName}`
-    
+
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from("production-pdfs")
       .upload(filePath, buffer, {
@@ -1583,14 +1590,14 @@ export async function createProductionRecord(
   // If this was the first partial production, order status was already updated above
   // Reload order details to reflect status change
   revalidatePath(`/dashboard/orders/${orderId}`)
-  
+
   return { success: true, data: productionRecord }
 }
 
 // Get production records for an order
 export async function getOrderProductionRecords(orderId: string) {
   const supabase = await createClient()
-  
+
   const { data: productionRecords, error } = await supabase
     .from("production_records")
     .select(`
@@ -1634,10 +1641,288 @@ export async function updateProductionRecordStatus(
     return { success: false, error: error.message }
   }
 
+  if (status === 'completed' && record?.order_id) {
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("invoice_number, internal_order_number")
+      .eq("id", record.order_id)
+      .single()
+
+    if (!orderError && order && !order.invoice_number) {
+      const baseNumber = order.internal_order_number || record.order_id.substring(0, 8)
+      const generatedInvoiceNumber = `INV-${baseNumber}`
+
+      await supabase
+        .from("orders")
+        .update({ invoice_number: generatedInvoiceNumber })
+        .eq("id", record.order_id)
+    }
+  }
+
   if (record) {
     revalidatePath(`/dashboard/orders/${record.order_id}`)
   }
 
+  return { success: true }
+}
+
+// ============================================
+// Invoice Attachments Functions
+// ============================================
+
+export async function getInvoiceAttachments(orderId: string) {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from("invoice_attachments")
+    .select(`
+      *,
+      profiles (
+        id,
+        full_name,
+        email
+      )
+    `)
+    .eq("order_id", orderId)
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    return { success: false, error: error.message, data: null }
+  }
+
+  return { success: true, data: data || [], error: null }
+}
+
+export async function uploadInvoiceAttachment(
+  orderId: string,
+  fileBase64: string,
+  fileName: string,
+  fileType: string,
+  fileSize?: number
+) {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return { success: false, error: "User not authenticated" }
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", user.id)
+    .single()
+
+  if (!profile) {
+    return { success: false, error: "User profile not found" }
+  }
+
+  const buffer = Buffer.from(fileBase64, 'base64')
+  const storagePath = `invoice-attachments/${orderId}/${Date.now()}-${fileName}`
+
+  const { error: uploadError } = await supabase.storage
+    .from("invoice-attachments")
+    .upload(storagePath, buffer, {
+      contentType: fileType || "application/octet-stream",
+      upsert: false,
+    })
+
+  if (uploadError) {
+    return { success: false, error: `Failed to upload file: ${uploadError.message}` }
+  }
+
+  const { data: urlData } = supabase.storage
+    .from("invoice-attachments")
+    .getPublicUrl(storagePath)
+
+  const { data, error } = await supabase
+    .from("invoice_attachments")
+    .insert({
+      order_id: orderId,
+      file_name: fileName,
+      file_url: urlData.publicUrl,
+      file_type: fileType || null,
+      file_size: fileSize || buffer.length,
+      storage_path: storagePath,
+      uploaded_by: profile.id,
+    })
+    .select()
+    .single()
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  revalidatePath(`/dashboard/orders/${orderId}`)
+
+  return { success: true, data }
+}
+
+export async function deleteInvoiceAttachment(attachmentId: string) {
+  const supabase = await createClient()
+
+  const { data: attachment, error: fetchError } = await supabase
+    .from("invoice_attachments")
+    .select("order_id, storage_path")
+    .eq("id", attachmentId)
+    .single()
+
+  if (fetchError || !attachment) {
+    return { success: false, error: fetchError?.message || "Attachment not found" }
+  }
+
+  if (attachment.storage_path) {
+    await supabase.storage
+      .from("invoice-attachments")
+      .remove([attachment.storage_path])
+  }
+
+  const { error } = await supabase
+    .from("invoice_attachments")
+    .delete()
+    .eq("id", attachmentId)
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  revalidatePath(`/dashboard/orders/${attachment.order_id}`)
+
+  return { success: true }
+}
+
+// ============================================
+// Order Payment Records Functions
+// ============================================
+
+export async function getOrderPayments(orderId: string) {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from("order_payments")
+    .select(`
+      *,
+      profiles (
+        id,
+        full_name,
+        email
+      )
+    `)
+    .eq("order_id", orderId)
+    .order("payment_date", { ascending: false })
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    return { success: false, error: error.message, data: null }
+  }
+
+  return { success: true, data: data || [], error: null }
+}
+
+export async function addOrderPayment(
+  orderId: string,
+  amount: number,
+  paymentDate?: string,
+  paymentMethod?: string,
+  reference?: string,
+  notes?: string
+) {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return { success: false, error: "User not authenticated" }
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", user.id)
+    .single()
+
+  if (!profile) {
+    return { success: false, error: "User profile not found" }
+  }
+
+  if (!amount || isNaN(amount) || amount <= 0) {
+    return { success: false, error: "Amount must be greater than 0" }
+  }
+
+  // Payment should only be recorded after dispatch - check order status OR presence of dispatch records
+  const { data: order, error: orderError } = await supabase
+    .from("orders")
+    .select("order_status")
+    .eq("id", orderId)
+    .single()
+
+  if (orderError || !order) {
+    return { success: false, error: "Order not found" }
+  }
+
+  const dispatchedStates = ['Partial Dispatch', 'Dispatched', 'Delivered']
+  const hasDispatchedStatus = dispatchedStates.includes(order.order_status)
+
+  // Also allow if order has dispatch records (handles cases where status wasn't updated)
+  const { count: dispatchCount } = await supabase
+    .from("dispatches")
+    .select("*", { count: "exact", head: true })
+    .eq("order_id", orderId)
+
+  const hasDispatchRecords = (dispatchCount ?? 0) > 0
+
+  if (!hasDispatchedStatus && !hasDispatchRecords) {
+    return {
+      success: false,
+      error: `Cannot add payment record. Order must be dispatched first. Current status: "${order.order_status}"`
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("order_payments")
+    .insert({
+      order_id: orderId,
+      amount,
+      payment_date: paymentDate || new Date().toISOString().split('T')[0],
+      payment_method: paymentMethod || null,
+      reference: reference || null,
+      notes: notes || null,
+      created_by: profile.id,
+    })
+    .select()
+    .single()
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  revalidatePath(`/dashboard/orders/${orderId}`)
+  return { success: true, data }
+}
+
+export async function deleteOrderPayment(paymentId: string) {
+  const supabase = await createClient()
+
+  // Get order_id before deleting
+  const { data: payment, error: fetchError } = await supabase
+    .from("order_payments")
+    .select("order_id")
+    .eq("id", paymentId)
+    .single()
+
+  if (fetchError || !payment) {
+    return { success: false, error: fetchError?.message || "Payment record not found" }
+  }
+
+  const { error } = await supabase
+    .from("order_payments")
+    .delete()
+    .eq("id", paymentId)
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  revalidatePath(`/dashboard/orders/${payment.order_id}`)
   return { success: true }
 }
 

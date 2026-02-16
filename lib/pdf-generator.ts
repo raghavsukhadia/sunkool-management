@@ -67,7 +67,7 @@ export function generateProductionChecklistPDF(
   productionRecordNumber?: string // Production record number (SK01A, SK01B, etc.)
 ): { blob: Blob; filename: string } {
   const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' })
-  
+
   // --- Constants & Colors ---
   const COLORS = {
     ORANGE: [245, 158, 36] as [number, number, number],
@@ -83,16 +83,15 @@ export function generateProductionChecklistPDF(
   const PAGE_HEIGHT = doc.internal.pageSize.getHeight()
   const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2
 
-  // Start a little lower so logo has breathing room
-  let currentY = 22
+  // Start higher to save space
+  let currentY = 15
 
   // Column positions (defined globally for use in addPageIfNeeded)
-  // Adjusted to fit within page boundaries (210mm width, 15mm margins = 180mm content)
-  const xIndex = MARGIN + 2          // # column: 17mm (narrow)
-  const xDesc = MARGIN + 10          // Description: 25mm to 100mm (75mm width)
-  const xOrdered = 100               // Ordered QTY: centered at 100mm (90-110mm range)
-  const xPacking = 130               // Packing QTY: centered at 130mm (120-140mm range)
-  const xCheck = 160                 // CHECK: centered at 160mm (152.5-167.5mm range)
+  const xIndex = MARGIN + 4
+  const xDesc = MARGIN + 12
+  const xOrdered = 115
+  const xPacking = 145
+  const xCheck = 172
 
   // --- Helpers ---
   const addPageIfNeeded = (rowHeight: number) => {
@@ -104,31 +103,44 @@ export function generateProductionChecklistPDF(
       drawTitleBar()
       currentY += 12
       // Redraw table header on new page
-      const headerHeight = 8
+      const headerHeight = 10
       doc.setFillColor(COLORS.LIGHT_BG[0], COLORS.LIGHT_BG[1], COLORS.LIGHT_BG[2])
       doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
       doc.rect(MARGIN, currentY, CONTENT_WIDTH, headerHeight, 'FD')
-      
-      // Column dividers
-      const colDivider1 = xDesc - 3
-      const colDivider2 = xOrdered - 12
-      const colDivider3 = xPacking - 12
-      const colDivider4 = xCheck - 10
-      doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
-      doc.setLineWidth(0.2)
-      doc.line(colDivider1, currentY, colDivider1, currentY + headerHeight)
-      doc.line(colDivider2, currentY, colDivider2, currentY + headerHeight)
-      doc.line(colDivider3, currentY, colDivider3, currentY + headerHeight)
-      doc.line(colDivider4, currentY, colDivider4, currentY + headerHeight)
-      
+
+      // Use the updated dynamic column widths for redraw
+      const COLS = {
+        INDEX: 10,
+        MAIN: 50,
+        SUB: 50,
+        ORDERED: 23,
+        PACKING: 23,
+        CHECK: 24
+      }
+      let vX = MARGIN
+      const dividers = [COLS.INDEX, COLS.MAIN, COLS.SUB, COLS.ORDERED, COLS.PACKING]
+      dividers.forEach(w => {
+        vX += w
+        doc.line(vX, currentY, vX, currentY + headerHeight)
+      })
+
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(8)
       doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
-      doc.text('#', xIndex, currentY + 5.5)
-      doc.text('PRODUCT / DESCRIPTION', xDesc, currentY + 5.5)
-      doc.text('ORDERED QTY', xOrdered, currentY + 5.5, { align: 'center' })
-      doc.text('PACKING QTY', xPacking, currentY + 5.5, { align: 'center' })
-      doc.text('CHECK', xCheck, currentY + 5.5, { align: 'center' })
+
+      let xH = MARGIN
+      doc.text('#', xH + COLS.INDEX / 2, currentY + 6.5, { align: 'center' })
+      xH += COLS.INDEX
+      doc.text('MAIN ITEM', xH + 2, currentY + 6.5)
+      xH += COLS.MAIN
+      doc.text('SUB ITEM', xH + 2, currentY + 6.5)
+      xH += COLS.SUB
+      doc.text('ORDERED', xH + COLS.ORDERED / 2, currentY + 6.5, { align: 'center' })
+      xH += COLS.ORDERED
+      doc.text('PACKING', xH + COLS.PACKING / 2, currentY + 6.5, { align: 'center' })
+      xH += COLS.PACKING
+      doc.text('CHECK', xH + COLS.CHECK / 2, currentY + 6.5, { align: 'center' })
+
       currentY += headerHeight + 2
     }
   }
@@ -142,73 +154,55 @@ export function generateProductionChecklistPDF(
   const drawCheckbox = (x: number, y: number, size = 5) => {
     doc.setDrawColor(100, 100, 100)
     doc.setLineWidth(0.4)
-    // Draw a perfect square checkbox, centered at the given position
     doc.rect(x - size / 2, y - size / 2, size, size, 'S')
   }
 
-  /**
-   * Professional-looking fake barcode (consistent, not random):
-   * - Light grey frame
-   * - Evenly spaced vertical black bars
-   * - Order reference text below (e.g. *SK01*)
-   * @param label - Optional label for barcode (defaults to order number)
-   */
   const drawBarcode = (x: number, y: number, w: number, h: number, label?: string) => {
-    // Outer frame
     doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
     doc.setLineWidth(0.4)
     doc.setFillColor(255, 255, 255)
     doc.rect(x - 2, y - 2, w + 4, h + 4, 'FD')
 
-    // Bars
     const barcodeLabel = (label || order.internal_order_number || 'ORD-REF').toUpperCase()
     const patternSource = barcodeLabel.replace(/[^A-Z0-9]/g, '') || 'SKOOL'
 
     doc.setFillColor(0, 0, 0)
-    let cursorX = x + 1 // small left padding inside frame
+    let cursorX = x + 1
 
     for (let i = 0; cursorX < x + w - 1; i++) {
       const chCode = patternSource.charCodeAt(i % patternSource.length)
-      // Narrow or wide bar based on char code
       const isWide = chCode % 3 === 0
       const barWidth = isWide ? 0.8 : 0.4
       const gapWidth = 0.4
 
-      // Draw bar
       doc.rect(cursorX, y, barWidth, h, 'F')
       cursorX += barWidth + gapWidth
     }
 
-    // Human-readable code below
     doc.setFontSize(7)
     doc.setTextColor(0, 0, 0)
     doc.text(`*${barcodeLabel}*`, x + w / 2, y + h + 5, { align: 'center' })
   }
 
-  // --- HEADER (LOGO + COMPANY INFO) ---
+  // --- HEADER ---
   const drawHeader = () => {
-    // Left: Sunkool logo image if provided, otherwise text logo
     if (options.logoDataUrl) {
       const format = options.logoFormat || 'PNG'
-      // Professional logo sizing - larger and better positioned
-      const logoWidth = 40
-      const logoHeight = 14
-      const logoY = currentY - 8 // Better vertical alignment
+      const logoWidth = 35
+      const logoHeight = 12
+      const logoY = currentY - 7
       doc.addImage(options.logoDataUrl, format, MARGIN, logoY, logoWidth, logoHeight)
     } else {
-      // Fallback text logo - improved positioning
       doc.setFont('helvetica', 'bolditalic')
-      doc.setFontSize(28)
+      doc.setFontSize(24)
       doc.setTextColor(COLORS.ORANGE[0], COLORS.ORANGE[1], COLORS.ORANGE[2])
-      doc.text('Sun', MARGIN, currentY + 3)
+      doc.text('Sun', MARGIN, currentY + 2)
       const sunWidth = doc.getTextWidth('Sun')
       doc.setTextColor(COLORS.BLUE[0], COLORS.BLUE[1], COLORS.BLUE[2])
-      doc.text('kool', MARGIN + sunWidth - 1, currentY + 3)
+      doc.text('kool', MARGIN + sunWidth - 1, currentY + 2)
     }
 
-    // Right: company details
-    const headerBaseY = currentY - 3 // align text block slightly higher
-
+    const headerBaseY = currentY - 5
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(10)
     doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
@@ -217,173 +211,143 @@ export function generateProductionChecklistPDF(
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)
     doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
-    doc.text('1st Floor, Mayfair Apartment, Near All India Reporter,', PAGE_WIDTH - MARGIN, headerBaseY + 4, { align: 'right' })
-    doc.text('Congress Nagar, Nagpur, Maharashtra 440012', PAGE_WIDTH - MARGIN, headerBaseY + 8, { align: 'right' })
-    doc.text('GSTIN: 27AWGPS9842Q1ZD', PAGE_WIDTH - MARGIN, headerBaseY + 12, { align: 'right' })
+    doc.text('1st Floor, Mayfair Apartment, Near All India Reporter,', PAGE_WIDTH - MARGIN, headerBaseY + 3.5, { align: 'right' })
+    doc.text('Congress Nagar, Nagpur, Maharashtra 440012', PAGE_WIDTH - MARGIN, headerBaseY + 7, { align: 'right' })
+    doc.text('GSTIN: 27AWGPS9842Q1ZD', PAGE_WIDTH - MARGIN, headerBaseY + 10.5, { align: 'right' })
 
-    currentY += 20
-  
-    // Brand-colored divider
+    currentY += 12
     doc.setDrawColor(COLORS.ORANGE[0], COLORS.ORANGE[1], COLORS.ORANGE[2])
-    doc.setLineWidth(1.2)
+    doc.setLineWidth(0.8)
     doc.line(MARGIN, currentY, PAGE_WIDTH - MARGIN, currentY)
-    currentY += 7
+    currentY += 4
   }
 
-  // --- TITLE BAR (DOCUMENT NAME + BARCODE) ---
+  // --- TITLE BAR ---
   const drawTitleBar = () => {
-    const boxHeight = 20
-
-    // Whole block background
+    const boxHeight = 15
     doc.setFillColor(252, 252, 252)
     doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
     doc.rect(MARGIN, currentY, CONTENT_WIDTH, boxHeight, 'FD')
 
-    // Accent strip on left
     doc.setFillColor(COLORS.BLUE[0], COLORS.BLUE[1], COLORS.BLUE[2])
-    doc.rect(MARGIN, currentY, 4, boxHeight, 'F')
+    doc.rect(MARGIN, currentY, 3, boxHeight, 'F')
 
-    // Title text
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(14)
+    doc.setFontSize(12)
     doc.setTextColor(COLORS.BLUE[0], COLORS.BLUE[1], COLORS.BLUE[2])
-    const titleText = productionRecordNumber 
+    const titleText = productionRecordNumber
       ? `PRODUCTION CHECKLIST - ${productionRecordNumber}`
       : 'PRODUCTION CHECKLIST'
-    doc.text(titleText, MARGIN + 8, currentY + 9)
+    doc.text(titleText, MARGIN + 6, currentY + 6.5)
 
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
+    doc.setFontSize(7)
     doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
-    doc.text('Internal warehouse / dispatch document', MARGIN + 8, currentY + 14)
+    doc.text('Internal warehouse / dispatch document', MARGIN + 6, currentY + 10.5)
 
-    // Barcode area on the right
-    const barcodeWidth = 40
-    const barcodeHeight = 9
-    const barcodeX = PAGE_WIDTH - MARGIN - barcodeWidth - 4 // small right padding
-    const barcodeY = currentY + 3
+    const barcodeWidth = 35
+    const barcodeHeight = 7
+    const barcodeX = PAGE_WIDTH - MARGIN - barcodeWidth - 3
+    const barcodeY = currentY + 2.5
     const barcodeLabel = productionRecordNumber || order.internal_order_number || 'ORD-REF'
 
     drawBarcode(barcodeX, barcodeY, barcodeWidth, barcodeHeight, barcodeLabel)
-
-    currentY += boxHeight + 6
+    currentY += boxHeight
   }
 
-  // --- ORDER + CUSTOMER BLOCKS ---
-  const drawOrderAndCustomerBlocks = () => {
-    const boxWidth = (CONTENT_WIDTH - 5) / 2
-    const boxHeight = 27
+  // --- METADATA ROW ---
+  const drawMetadataRow = () => {
+    const boxHeight = 22
+    const colWidth = CONTENT_WIDTH / 2
 
-    // ORDER DETAILS
+    doc.setFillColor(255, 255, 255)
     doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
-    doc.rect(MARGIN, currentY, boxWidth, boxHeight, 'S')
-    doc.setFillColor(COLORS.BLUE[0], COLORS.BLUE[1], COLORS.BLUE[2])
-    doc.rect(MARGIN, currentY, boxWidth, 5, 'F')
+    doc.rect(MARGIN, currentY, CONTENT_WIDTH, boxHeight, 'S')
+    doc.line(MARGIN + colWidth, currentY, MARGIN + colWidth, currentY + boxHeight)
 
+    const textY = currentY + 5
+    const labelX1 = MARGIN + 4
+    const labelX2 = MARGIN + colWidth + 4
+
+    // Section Labels
+    doc.setFontSize(7)
+    doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(8)
-    doc.setTextColor(255, 255, 255)
-    doc.text('ORDER DETAILS', MARGIN + 3, currentY + 3.5)
 
-    const infoY = currentY + 9
-    const dateStr = new Date(order.created_at).toLocaleDateString()
+    doc.text('ORDER INFORMATION', labelX1, textY)
+    doc.text('CUSTOMER / DESTINATION', labelX2, textY)
 
-    doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
-    doc.setFontSize(8)
-    doc.setFont('helvetica', 'bold')
-    doc.text('Order No:', MARGIN + 3, infoY)
-    doc.setFont('helvetica', 'normal')
-    doc.text(order.internal_order_number || 'N/A', MARGIN + 25, infoY)
-
-    doc.setFont('helvetica', 'bold')
-    doc.text('Sales Order:', MARGIN + 3, infoY + 5)
-    doc.setFont('helvetica', 'normal')
-    doc.text(order.sales_order_number || 'N/A', MARGIN + 25, infoY + 5)
-
-    doc.setFont('helvetica', 'bold')
-    doc.text('Date:', MARGIN + 3, infoY + 10)
-    doc.setFont('helvetica', 'normal')
-    doc.text(dateStr, MARGIN + 25, infoY + 10)
-
-    doc.setFont('helvetica', 'bold')
-    doc.text('Status:', MARGIN + 3, infoY + 15)
-    doc.setTextColor(COLORS.ORANGE[0], COLORS.ORANGE[1], COLORS.ORANGE[2])
-    doc.text(order.order_status.toUpperCase(), MARGIN + 25, infoY + 15)
-
-    // CUSTOMER DETAILS (no phone/email on production copy)
-    const box2X = MARGIN + boxWidth + 5
-    const customer = order.customers
-
-    doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
-    doc.rect(box2X, currentY, boxWidth, boxHeight, 'S')
-    doc.setFillColor(COLORS.BLUE[0], COLORS.BLUE[1], COLORS.BLUE[2])
-    doc.rect(box2X, currentY, boxWidth, 5, 'F')
-
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(8)
-  doc.setTextColor(255, 255, 255)
-    doc.text('CUSTOMER / DESTINATION', box2X + 3, currentY + 3.5)
-
-    const customerY = currentY + 9
-
-    doc.setFont('helvetica', 'bold')
+    // Data Fields (Bold and Larger)
     doc.setFontSize(9)
     doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
-    doc.text((customer.name || 'Customer').substring(0, 40), box2X + 3, customerY)
+    doc.setFont('helvetica', 'bold')
 
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
+    // Left Column
+    doc.text(`Order No: ${order.internal_order_number || 'N/A'}`, labelX1, textY + 5)
+    doc.text(`Sales No: ${order.sales_order_number || 'N/A'}`, labelX1, textY + 9.5)
+    doc.text(`Date: ${new Date(order.created_at).toLocaleDateString()}`, labelX1, textY + 14)
 
-    const addrLines = doc.splitTextToSize(customer.address || 'Address not provided', boxWidth - 6)
-    doc.text(addrLines, box2X + 3, customerY + 4)
+    // Right Column
+    doc.text((order.customers.name || 'N/A').substring(0, 50), labelX2, textY + 5)
+    doc.setFont('helvetica', 'normal') // Address can be normal or bold depending on space, user asked for bold parts, but let's see
+    doc.setFont('helvetica', 'bold')
 
-    if (customer.contact_person) {
-      doc.text(`Attn: ${customer.contact_person}`, box2X + 3, customerY + 11)
+    const addrLines = doc.splitTextToSize(order.customers.address || 'N/A', colWidth - 10)
+    doc.text(addrLines[0], labelX2, textY + 9.5)
+
+    if (order.customers.contact_person) {
+      doc.text(`Attn: ${order.customers.contact_person}`, labelX2, textY + 14)
     }
 
-    currentY += boxHeight + 8
+    currentY += boxHeight + 8 // Added 8mm gap after info table
   }
 
-  // --- ITEMS TABLE WITH SUB-ITEMS ---
+  // --- ITEMS TABLE ---
   const drawItemsTable = () => {
     const headerHeight = 8
-    
-    // Table header background
+    const COLS = {
+      INDEX: 10,
+      MAIN: 50,
+      SUB: 50,
+      ORDERED: 23,
+      PACKING: 23,
+      CHECK: 24
+    }
+
     doc.setFillColor(COLORS.LIGHT_BG[0], COLORS.LIGHT_BG[1], COLORS.LIGHT_BG[2])
     doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
     doc.rect(MARGIN, currentY, CONTENT_WIDTH, headerHeight, 'FD')
 
-    // Column divider positions (aligned with data columns)
-    const colDivider1 = xDesc - 3  // Before Description
-    const colDivider2 = xOrdered - 12  // Before Ordered QTY
-    const colDivider3 = xPacking - 12  // Before Packing QTY
-    const colDivider4 = xCheck - 10  // Before CHECK
-
-    // Draw vertical dividers in header (subtle gray lines)
-    doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
+    let vX = MARGIN
     doc.setLineWidth(0.2)
-    doc.line(colDivider1, currentY, colDivider1, currentY + headerHeight)
-    doc.line(colDivider2, currentY, colDivider2, currentY + headerHeight)
-    doc.line(colDivider3, currentY, colDivider3, currentY + headerHeight)
-    doc.line(colDivider4, currentY, colDivider4, currentY + headerHeight)
+    const dividersForHeader = [COLS.INDEX, COLS.MAIN, COLS.SUB, COLS.ORDERED, COLS.PACKING]
+    dividersForHeader.forEach(w => {
+      vX += w
+      doc.line(vX, currentY, vX, currentY + headerHeight)
+    })
 
-    // Header text - properly aligned
-  doc.setFont('helvetica', 'bold')
+    doc.setFont('helvetica', 'bold')
     doc.setFontSize(8)
     doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
 
-    doc.text('#', xIndex, currentY + 5.5)
-    doc.text('PRODUCT / DESCRIPTION', xDesc, currentY + 5.5)
-    doc.text('ORDERED QTY', xOrdered, currentY + 5.5, { align: 'center' })
-    doc.text('PACKING QTY', xPacking, currentY + 5.5, { align: 'center' })
-    doc.text('CHECK', xCheck, currentY + 5.5, { align: 'center' })
+    let xPos = MARGIN
+    doc.text('#', xPos + COLS.INDEX / 2, currentY + 5.5, { align: 'center' })
+    xPos += COLS.INDEX
+    doc.text('MAIN ITEM', xPos + 2, currentY + 5.5)
+    xPos += COLS.MAIN
+    doc.text('SUB ITEM', xPos + 2, currentY + 5.5)
+    xPos += COLS.SUB
+    doc.text('ORDERED', xPos + COLS.ORDERED / 2, currentY + 5.5, { align: 'center' })
+    xPos += COLS.ORDERED
+    doc.text('PACKING', xPos + COLS.PACKING / 2, currentY + 5.5, { align: 'center' })
+    xPos += COLS.PACKING
+    doc.text('CHECK', xPos + COLS.CHECK / 2, currentY + 5.5, { align: 'center' })
 
-    currentY += headerHeight + 2
+    currentY += headerHeight
 
     if (!order.items || order.items.length === 0) {
       addPageIfNeeded(10)
-  doc.setFont('helvetica', 'normal')
+      doc.setFont('helvetica', 'normal')
       doc.setFontSize(8)
       doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
       doc.text('No items found for this order.', MARGIN + 2, currentY + 4)
@@ -392,110 +356,38 @@ export function generateProductionChecklistPDF(
     }
 
     const processedIds = new Set<string>()
+    const displayRows: Array<{ mainName: string; subName: string; qty: number; index: number }> = []
 
-    order.items.forEach((item, index) => {
+    // 1. Identify all rows for Dual Column structure (Deduplicated)
+    order.items.forEach((item) => {
       if (processedIds.has(item.id)) return
 
-      const rowBaseHeight = 10
-      addPageIfNeeded(rowBaseHeight + 6)
-
-      const startY = currentY
-
-      // Find actual inventory item by matching inventory_item_id or product_id
-      let matchedInventoryItem: InventoryItem | undefined
-      let matchedSubItem: { id: string; item_name: string } | undefined
-
-      // Check if it's a parent item
-      matchedInventoryItem = inventoryItems.find(inv => 
+      let matchedInventoryItem = inventoryItems.find(inv =>
         inv.id === item.inventory_item_id || inv.id === item.product_id
       )
 
-      // If not found as parent, check if it's a sub-item
       if (!matchedInventoryItem) {
-        for (const parentItem of inventoryItems) {
-          matchedSubItem = parentItem.sub_items?.find(sub => 
-            sub.id === item.inventory_item_id || sub.id === item.product_id
-          )
-          if (matchedSubItem) {
-            matchedInventoryItem = parentItem
+        for (const parentInv of inventoryItems) {
+          const found = parentInv.sub_items?.some(sub => sub.id === item.inventory_item_id || sub.id === item.product_id)
+          if (found) {
+            matchedInventoryItem = parentInv
             break
           }
         }
       }
 
-      // Get actual item name - prefer from matched inventory item, then from order item, then fallback
-      let itemName: string
-      let itemSrNo: number | null = null
+      const parentItemName = matchedInventoryItem?.item_name || item.inventory_item?.item_name || 'Product'
 
-      if (matchedInventoryItem) {
-        if (matchedSubItem) {
-          // This is a sub-item, but we'll handle it separately
-          itemName = matchedInventoryItem.item_name
-        } else {
-          // This is a parent item
-          itemName = matchedInventoryItem.item_name
-          itemSrNo = matchedInventoryItem.sr_no
-        }
-      } else if (item.inventory_item?.item_name) {
-        itemName = item.inventory_item.item_name
-        itemSrNo = item.inventory_item.sr_no
-      } else {
-        itemName = `Item #${index + 1}`
-      }
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(9)
-      doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
-      // Use serial number if available, otherwise use index - left aligned
-      const displayNumber = itemSrNo !== null ? itemSrNo.toString() : (index + 1).toString()
-      doc.text(displayNumber, xIndex, currentY + 4)
-      // Item name - left aligned, with max width to prevent overflow
-      const maxDescWidth = xOrdered - xDesc - 8 // Leave 8mm gap before Ordered QTY
-      const nameLines = doc.splitTextToSize(itemName, maxDescWidth)
-      doc.text(nameLines[0], xDesc, currentY + 4) // Show first line only
-
-      // Ordered Quantity (use selected quantity for partial, or full quantity)
-      const displayQuantity = selectedQuantities && selectedQuantities[item.id] !== undefined
-        ? selectedQuantities[item.id]
-        : item.quantity
-      
-  doc.setFont('helvetica', 'bold')
-      doc.setFontSize(10)
-      doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
-      doc.text(String(displayQuantity), xOrdered, currentY + 4, { align: 'center' })
-
-      // Packing Quantity (input line) - centered, consistent size
-      const packingLineWidth = 16 // Fixed width for consistency
-      doc.setDrawColor(150, 150, 150)
-      doc.setLineWidth(0.4)
-      doc.line(xPacking - packingLineWidth / 2, currentY + 4, xPacking + packingLineWidth / 2, currentY + 4)
-
-      // Checkbox - perfectly centered and square
-      drawCheckbox(xCheck, currentY + 4, 5)
-
-      currentY += rowBaseHeight
-
-      // SUB-ITEMS - Get from matched inventory item or order item
-      // Prefer sub-items from order item's inventory_item (has quantity_needed), then from matched inventory item
+      // Identify sub-items
       const subItemsFromOrderItem = item.inventory_item?.sub_items || []
       const subItemsFromInventory = matchedInventoryItem?.sub_items || []
-      
-      // Combine both sources, preferring order item's sub-items
       const allSubItemsFromDef: Array<{ id: string; item_name: string; quantity_needed?: number }> = []
-      
-      // Add from order item first (has quantity_needed)
-      subItemsFromOrderItem.forEach(sub => {
-        allSubItemsFromDef.push(sub)
-      })
-      
-      // Add from inventory if not already present
+
+      subItemsFromOrderItem.forEach(sub => allSubItemsFromDef.push(sub))
       subItemsFromInventory.forEach(sub => {
-        if (!allSubItemsFromDef.some(s => s.id === sub.id)) {
-          allSubItemsFromDef.push(sub)
-        }
+        if (!allSubItemsFromDef.some(s => s.id === sub.id)) allSubItemsFromDef.push(sub)
       })
-      
-      // Find sub-items that are also order items
+
       const subItemsFromOrder = order.items.filter(
         (oi) =>
           oi.inventory_item_id &&
@@ -503,115 +395,157 @@ export function generateProductionChecklistPDF(
           !processedIds.has(oi.id)
       )
 
-      const allSubItems: Array<{ name: string; qty: number }> = []
-
-      // (1) From inventory definition - use actual names
-      // Calculate parent quantity (use selected quantity for partial production)
       const parentQty = selectedQuantities && selectedQuantities[item.id] !== undefined
         ? selectedQuantities[item.id]
         : item.quantity
-      
-      allSubItemsFromDef.forEach((sub) => {
-        const matchedOrderItem = subItemsFromOrder.find((oi) => oi.inventory_item_id === sub.id)
-        const quantityNeeded = sub.quantity_needed || 1
-        const baseQty = matchedOrderItem
-          ? (selectedQuantities && selectedQuantities[matchedOrderItem.id] !== undefined
-              ? selectedQuantities[matchedOrderItem.id]
-              : matchedOrderItem.quantity)
-          : quantityNeeded * parentQty
-        // Use actual sub-item name from inventory
-        allSubItems.push({ name: sub.item_name, qty: baseQty })
-      })
 
-      // (2) Additional sub-order lines not in inventory definition - try to get actual names
-      subItemsFromOrder.forEach((oi) => {
-        // Try to find the actual name from inventory items
-        let subItemName = 'Sub item'
-        
-        // Check if this order item matches a sub-item in any parent
-        for (const parentInv of inventoryItems) {
-          const foundSub = parentInv.sub_items?.find(sub => 
-            sub.id === oi.inventory_item_id || sub.id === oi.product_id
-          )
-          if (foundSub) {
-            subItemName = foundSub.item_name
-            break
-          }
-        }
-        
-        // Fallback to order item's inventory_item name if available
-        if (subItemName === 'Sub item' && oi.inventory_item?.item_name) {
-          subItemName = oi.inventory_item.item_name
-        }
-        
-        if (!allSubItems.some((s) => s.name === subItemName)) {
-          allSubItems.push({ name: subItemName, qty: oi.quantity })
-        }
-        processedIds.add(oi.id)
-      })
-
-      if (allSubItems.length > 0) {
-        allSubItems.forEach((sub) => {
-          addPageIfNeeded(7)
-          doc.setFillColor(252, 252, 252)
-          doc.rect(MARGIN + 1, currentY - 2, CONTENT_WIDTH - 2, 7, 'F')
-
-          // Professional bullet point for sub-items - aligned
-          doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-          doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
-          doc.text('•', xDesc, currentY + 1)
-
-          // Sub-item name - left aligned, properly indented, with max width
-  doc.setFont('helvetica', 'normal')
-          doc.setFontSize(8)
-          doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
-          const subItemX = xDesc + 4
-          const maxSubDescWidth = xOrdered - subItemX - 8 // Leave 8mm gap before Ordered QTY
-          const subNameLines = doc.splitTextToSize(sub.name, maxSubDescWidth)
-          doc.text(subNameLines[0], subItemX, currentY + 1) // Show first line only
-
-          // Ordered Quantity for sub-item
-          doc.setFontSize(8)
-          doc.text(String(sub.qty), xOrdered, currentY + 1, { align: 'center' })
-
-          // Packing Quantity (input line) for sub-item - centered, consistent size
-          const packingLineWidth = 16 // Fixed width for consistency
-          doc.setDrawColor(150, 150, 150)
-          doc.setLineWidth(0.4)
-          doc.line(xPacking - packingLineWidth / 2, currentY + 1, xPacking + packingLineWidth / 2, currentY + 1)
-
-          // Checkbox - perfectly centered and square
-          drawCheckbox(xCheck, currentY + 1, 5)
-
-          currentY += 7
-        })
-
-        // No blue accent bar
+      // DEDUPLICATION: Only add parent row if no sub-items exist
+      if (allSubItemsFromDef.length === 0 && subItemsFromOrder.length === 0) {
+        displayRows.push({ mainName: parentItemName, subName: '', qty: parentQty, index: 0 })
       } else {
-        // No blue accent bar
+        // ADD SUB-ITEM ROWS
+        // If we have sub-items in the order, ONLY show those.
+        // If we don't have sub-items in the order but the parent is defined with sub-items, show all from definition.
+        if (subItemsFromOrder.length > 0) {
+          subItemsFromOrder.forEach((oi) => {
+            if (processedIds.has(oi.id)) return
+
+            const qty = selectedQuantities && selectedQuantities[oi.id] !== undefined
+              ? selectedQuantities[oi.id]
+              : oi.quantity
+
+            // IMPROVED NAME RESOLUTION
+            let subItemName = oi.inventory_item?.item_name || 'Item'
+            if (subItemName === 'Item') {
+              let matched: any = inventoryItems.find(inv => inv.id === oi.inventory_item_id || inv.id === oi.product_id)
+              if (!matched) {
+                for (const parentInv of inventoryItems) {
+                  const found = parentInv.sub_items?.find((sub: any) => sub.id === oi.inventory_item_id || sub.id === oi.product_id)
+                  if (found) {
+                    matched = found
+                    break
+                  }
+                }
+              }
+              if (matched?.item_name) subItemName = matched.item_name
+            }
+
+            // NOTE: We no longer strip the parent name prefix as it was causing incomplete names like "12", "45"
+
+            displayRows.push({ mainName: parentItemName, subName: subItemName, qty: qty, index: 0 })
+            processedIds.add(oi.id)
+          })
+        } else {
+          // Expansion mode: Use sub-items from definition (only when nothing explicit in order)
+          allSubItemsFromDef.forEach((sub) => {
+            const baseQty = (sub.quantity_needed || 1) * parentQty
+            displayRows.push({ mainName: parentItemName, subName: sub.item_name, qty: baseQty, index: 0 })
+          })
+        }
       }
 
-      drawLine(currentY, COLORS.BORDER, 0.2)
-      currentY += 2
       processedIds.add(item.id)
+    })
+
+    // 2. Sort naturally and assign sequential index
+    // Also FILTER out rows with qty <= 0 (important for partial production)
+    const filteredRows = displayRows.filter(row => row.qty > 0)
+
+    filteredRows.sort((a, b) => {
+      const mainComp = a.mainName.localeCompare(b.mainName, undefined, { numeric: true, sensitivity: 'base' })
+      if (mainComp !== 0) return mainComp
+      // If same main, parent row (subName empty) comes first
+      if (a.subName === '' && b.subName !== '') return -1
+      if (a.subName !== '' && b.subName === '') return 1
+      return a.subName.localeCompare(b.subName, undefined, { numeric: true, sensitivity: 'base' })
+    })
+    filteredRows.forEach((row, i) => row.index = i + 1)
+
+    // 3. Render rows in full grid
+    filteredRows.forEach((row, i) => {
+      const rowHeight = 8
+      addPageIfNeeded(rowHeight)
+
+      if (i % 2 !== 0) {
+        doc.setFillColor(252, 252, 252)
+        doc.rect(MARGIN, currentY, CONTENT_WIDTH, rowHeight, 'F')
+      }
+
+      doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
+      doc.setLineWidth(0.2)
+      doc.rect(MARGIN, currentY, CONTENT_WIDTH, rowHeight, 'S')
+
+      let itVX = MARGIN
+      const rowDividers = [COLS.INDEX, COLS.MAIN, COLS.SUB, COLS.ORDERED, COLS.PACKING]
+      rowDividers.forEach(w => {
+        itVX += w
+        doc.line(itVX, currentY, itVX, currentY + rowHeight)
+      })
+
+      let x = MARGIN
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8)
+      doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
+      doc.text(String(row.index), x + COLS.INDEX / 2, currentY + 5.5, { align: 'center' })
+
+      x += COLS.INDEX
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(10)
+      const mainLines = doc.splitTextToSize(row.mainName, COLS.MAIN - 4)
+      doc.text(mainLines[0], x + 2, currentY + 5.5)
+
+      x += COLS.MAIN
+      doc.setFont('helvetica', row.subName ? 'normal' : 'bold')
+      doc.setFontSize(10)
+      if (row.subName) {
+        const subLines = doc.splitTextToSize(row.subName, COLS.SUB - 4)
+        doc.text(subLines[0], x + 2, currentY + 5.5)
+      } else {
+        doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
+        doc.setFontSize(8)
+        doc.text('-', x + COLS.SUB / 2, currentY + 5.5, { align: 'center' })
+        doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
+      }
+
+      x += COLS.SUB
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      doc.text(String(row.qty), x + COLS.ORDERED / 2, currentY + 5.5, { align: 'center' })
+
+      x += COLS.ORDERED
+      doc.setDrawColor(180, 180, 180)
+      doc.line(x + 4, currentY + 6, x + COLS.PACKING - 4, currentY + 6)
+
+      x += COLS.PACKING
+      drawCheckbox(x + COLS.CHECK / 2, currentY + 4, 5.2)
+
+      currentY += rowHeight
     })
   }
 
   // --- PACKAGING PROTOCOLS ---
   const drawPackagingSection = () => {
-    const sectionHeight = 26
-    addPageIfNeeded(sectionHeight + 10)
+    // Spacer between product table and packaging
+    currentY += 8
 
-    doc.setFillColor(COLORS.LIGHT_BG[0], COLORS.LIGHT_BG[1], COLORS.LIGHT_BG[2])
+    const headerHeight = 8
+    const rowHeight = 8
+    const totalRows = 3 // 6 checks / 2 columns
+    const totalHeight = headerHeight + (totalRows * rowHeight)
+
+    addPageIfNeeded(totalHeight + 5)
+
+    // Header bar
+    doc.setFillColor(COLORS.BLUE[0], COLORS.BLUE[1], COLORS.BLUE[2])
     doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
-    doc.rect(MARGIN, currentY, CONTENT_WIDTH, sectionHeight, 'FD')
+    doc.rect(MARGIN, currentY, CONTENT_WIDTH, headerHeight, 'FD')
 
-    // Section title - properly aligned
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(9)
-    doc.setTextColor(COLORS.BLUE[0], COLORS.BLUE[1], COLORS.BLUE[2])
-    doc.text('PACKAGING & DISPATCH CHECKS', MARGIN + 5, currentY + 6)
+    doc.setTextColor(255, 255, 255)
+    doc.text('PACKAGING & DISPATCH CHECKS', MARGIN + 4, currentY + 5.5)
+
+    currentY += headerHeight
 
     const checks = [
       'All items checked and counted',
@@ -622,47 +556,44 @@ export function generateProductionChecklistPDF(
       'Delivery address verified',
     ]
 
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7)
-    doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
+    const colWidth = CONTENT_WIDTH / 2
+    const checkboxOffset = colWidth - 8
 
-    // Proper column positioning - ensure everything stays within bounds
-    const checkboxSize = 4
-    const checkboxXLeft = MARGIN + 5
-    const checkboxXRight = MARGIN + CONTENT_WIDTH / 2 + 3
-    const textOffset = checkboxSize + 3 // Space after checkbox
-    const startY = currentY + 11
-    const lineHeight = 5.5
-    
-    // Calculate max text width for each column to prevent overflow
-    const maxTextWidthLeft = (MARGIN + CONTENT_WIDTH / 2) - checkboxXLeft - textOffset - 5
-    const maxTextWidthRight = (PAGE_WIDTH - MARGIN) - checkboxXRight - textOffset - 5
-
-    // Left column
-    checks.forEach((label, i) => {
-      if (i % 2 === 0) {
-        const yPos = startY + (Math.floor(i / 2)) * lineHeight
-        // Checkbox - properly aligned
-        drawCheckbox(checkboxXLeft, yPos, checkboxSize)
-        // Text - properly aligned, truncated if needed
-        const textLines = doc.splitTextToSize(label, maxTextWidthLeft)
-        doc.text(textLines[0], checkboxXLeft + textOffset, yPos)
+    for (let i = 0; i < totalRows; i++) {
+      // Background / Zebra striping
+      if (i % 2 !== 0) {
+        doc.setFillColor(252, 252, 252)
+        doc.rect(MARGIN, currentY, CONTENT_WIDTH, rowHeight, 'F')
       }
-    })
 
-    // Right column
-    checks.forEach((label, i) => {
-      if (i % 2 === 1) {
-        const yPos = startY + (Math.floor(i / 2)) * lineHeight
-        // Checkbox - properly aligned
-        drawCheckbox(checkboxXRight, yPos, checkboxSize)
-        // Text - properly aligned, truncated if needed
-        const textLines = doc.splitTextToSize(label, maxTextWidthRight)
-        doc.text(textLines[0], checkboxXRight + textOffset, yPos)
-      }
-    })
+      // External borders & internal dividers
+      doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
+      doc.setLineWidth(0.2)
+      doc.rect(MARGIN, currentY, CONTENT_WIDTH, rowHeight, 'S')
+      doc.line(MARGIN + colWidth, currentY, MARGIN + colWidth, currentY + rowHeight)
 
-    currentY += sectionHeight + 10
+      // Vertical line for checkbox column on both halves
+      doc.line(MARGIN + checkboxOffset, currentY, MARGIN + checkboxOffset, currentY + rowHeight)
+      doc.line(MARGIN + colWidth + checkboxOffset, currentY, MARGIN + colWidth + checkboxOffset, currentY + rowHeight)
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8)
+      doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
+
+      // Left Column check
+      const leftCheck = checks[i * 2]
+      doc.text(leftCheck, MARGIN + 4, currentY + 5.2)
+      drawCheckbox(MARGIN + checkboxOffset + 4, currentY + 4, 4.5)
+
+      // Right Column check
+      const rightCheck = checks[i * 2 + 1]
+      doc.text(rightCheck, MARGIN + colWidth + 4, currentY + 5.2)
+      drawCheckbox(MARGIN + colWidth + checkboxOffset + 4, currentY + 4, 4.5)
+
+      currentY += rowHeight
+    }
+
+    currentY += 5
   }
 
   // --- SIGNATURES ---
@@ -687,7 +618,6 @@ export function generateProductionChecklistPDF(
       doc.text('Date: __________', x, currentY + 13)
       doc.setFont('helvetica', 'bold')
     })
-
     currentY += requiredHeight
   }
 
@@ -696,9 +626,8 @@ export function generateProductionChecklistPDF(
     const totalPages = doc.getNumberOfPages()
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i)
-      const pageLabel = `System generated production checklist | Order: ${
-        order.internal_order_number || 'N/A'
-      } | Page ${i} of ${totalPages}`
+      const pageLabel = `System generated production checklist | Order: ${order.internal_order_number || 'N/A'
+        } | Page ${i} of ${totalPages}`
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(7)
       doc.setTextColor(140, 140, 140)
@@ -716,7 +645,7 @@ export function generateProductionChecklistPDF(
   // --- Render Document ---
   drawHeader()
   drawTitleBar()
-  drawOrderAndCustomerBlocks()
+  drawMetadataRow()
   drawItemsTable()
   drawPackagingSection()
   drawSignatures()
@@ -724,22 +653,28 @@ export function generateProductionChecklistPDF(
 
   const filenamePrefix = options.filenamePrefix || 'Production_Checklist_'
   const filename = `${filenamePrefix}${order.internal_order_number || 'Order'}.pdf`
-  
-  // Return PDF as Blob for upload, but also save locally for user convenience
+
   const pdfBlob = doc.output('blob')
   doc.save(filename)
-  
+
   return { blob: pdfBlob, filename }
 }
 
 // Export the old function name for backward compatibility
 export function generateProductionPDF(
-  order: Order, 
+  order: Order,
   inventoryItems?: InventoryItem[],
   selectedQuantities?: Record<string, number>,
-  productionRecordNumber?: string
+  productionRecordNumber?: string,
+  logoDataUrl?: string
 ): { blob: Blob; filename: string } {
-  return generateProductionChecklistPDF(order, inventoryItems || [], {}, selectedQuantities, productionRecordNumber)
+  return generateProductionChecklistPDF(
+    order,
+    inventoryItems || [],
+    { logoDataUrl, logoFormat: 'PNG' },
+    selectedQuantities,
+    productionRecordNumber
+  )
 }
 
 // --- Tracking Slip PDF Generator ---
@@ -768,295 +703,227 @@ export function generateTrackingSlipPDF(
 ): { blob: Blob; filename: string } {
   const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' })
 
-  // --- Constants & Colors ---
   const COLORS = {
-    ORANGE: [245, 158, 11] as [number, number, number], // #f59e0b
-    BLUE: [59, 130, 246] as [number, number, number], // #3b82f6
-    DARK_BLUE: [16, 78, 139] as [number, number, number], // #104e8b
+    BLUE_HEADER: [16, 78, 139] as [number, number, number], // Dark blue like the reference
     BLACK: [0, 0, 0] as [number, number, number],
     WHITE: [255, 255, 255] as [number, number, number],
+    GRAY_BORDER: [180, 180, 180] as [number, number, number],
+    TEXT_MAIN: [40, 40, 40] as [number, number, number],
   }
 
-  const BORDER_WIDTH = 0.7 // 2px equivalent
-  const MARGIN = 5
+  const MARGIN = 8
   const PAGE_WIDTH = doc.internal.pageSize.getWidth()
   const PAGE_HEIGHT = doc.internal.pageSize.getHeight()
   const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2
+  const BORDER_WIDTH = 0.4
 
   let currentY = MARGIN
 
-  // Helper function to draw input line (underline)
-  const drawInputLine = (x: number, y: number, width: number) => {
-    doc.setDrawColor(...COLORS.BLACK)
+  // --- Helpers ---
+  const drawLine = (x: number, y: number, w: number, color = COLORS.BLACK) => {
+    doc.setDrawColor(color[0], color[1], color[2])
     doc.setLineWidth(0.3)
-    doc.line(x, y, x + width, y)
+    doc.line(x, y, x + w, y)
   }
 
-  // Helper function to draw barcode
   const drawBarcode = (x: number, y: number, width: number, height: number, code: string) => {
-    // Generate barcode pattern based on tracking code
     const pattern = code.replace(/[^A-Z0-9]/g, '') || 'SK123456'
     let cursorX = x
     const barSpacing = 0.3
-    
+
     doc.setFillColor(...COLORS.BLACK)
     for (let i = 0; i < 60 && cursorX < x + width; i++) {
       const charCode = pattern.charCodeAt(i % pattern.length)
       const isWide = charCode % 3 === 0
       const barWidth = isWide ? 0.8 : 0.4
-      
+
       doc.rect(cursorX, y, barWidth, height, 'F')
       cursorX += barWidth + barSpacing
     }
-    
-    // Human-readable code below barcode
-    doc.setFontSize(10)
+
+    doc.setFontSize(9)
     doc.setFont('helvetica', 'bold')
     doc.setTextColor(...COLORS.BLACK)
     doc.text(code, x + width / 2, y + height + 5, { align: 'center' })
   }
 
-  // --- Outer Border ---
-  doc.setDrawColor(...COLORS.BLACK)
-  doc.setLineWidth(BORDER_WIDTH)
-  doc.rect(MARGIN, MARGIN, CONTENT_WIDTH, PAGE_HEIGHT - MARGIN * 2, 'S')
+  // Draw external thin border around entire content
+  doc.setDrawColor(COLORS.GRAY_BORDER[0], COLORS.GRAY_BORDER[1], COLORS.GRAY_BORDER[2])
+  doc.setLineWidth(0.2)
+  doc.rect(MARGIN - 2, MARGIN - 2, CONTENT_WIDTH + 4, PAGE_HEIGHT - MARGIN * 2 + 4, 'S')
 
-  currentY = MARGIN + 8
+  // --- 1. HEADER SECTION ---
+  const headerHeight = 15
+  if (options.logoDataUrl) {
+    doc.addImage(options.logoDataUrl, options.logoFormat || 'PNG', MARGIN, currentY, 35, 12)
+  } else {
+    // Elegant Text Logo fallback
+    doc.setFont('helvetica', 'bolditalic')
+    doc.setFontSize(24)
+    doc.setTextColor(245, 158, 11) // Orange
+    doc.text('Sun', MARGIN, currentY + 10)
+    const sunW = doc.getTextWidth('Sun')
+    doc.setTextColor(16, 78, 139) // Blue
+    doc.text('kool', MARGIN + sunW - 1, currentY + 10)
+    doc.setFontSize(8)
+    doc.text('®', MARGIN + sunW + doc.getTextWidth('kool'), currentY + 3)
+  }
 
-  // --- Header: Logo and Title ---
-  // Logo on left
-  doc.setTextColor(...COLORS.ORANGE)
-  doc.setFontSize(36)
   doc.setFont('helvetica', 'bold')
-  doc.text('Sun', MARGIN + 5, currentY)
-  
-  doc.setTextColor(...COLORS.BLUE)
-  doc.setFontSize(36)
-  doc.text('kool', MARGIN + 25, currentY)
-  
-  // Registered trademark
-  doc.setFontSize(8)
+  doc.setFontSize(16)
   doc.setTextColor(...COLORS.BLACK)
-  doc.text('®', MARGIN + 42, currentY - 8)
+  doc.text('PARCEL TRACKING SLIP', PAGE_WIDTH - MARGIN, currentY + 8, { align: 'right' })
 
-  // "Parcel Tracking Slip" on right
-  doc.setFontSize(18)
-  doc.setFont('helvetica', 'bold')
-  doc.setTextColor(...COLORS.BLACK)
-  doc.text('PARCEL TRACKING SLIP', PAGE_WIDTH - MARGIN - 5, currentY, { align: 'right' })
+  currentY += headerHeight + 2
+  drawLine(MARGIN, currentY, CONTENT_WIDTH, COLORS.BLACK)
+  currentY += 2
 
-  currentY += 12
-
-  // --- Section 1: TO (CUSTOMER DETAILS) ---
-  // Header
-  doc.setFillColor(...COLORS.DARK_BLUE)
-  doc.setDrawColor(...COLORS.BLACK)
-  doc.setLineWidth(BORDER_WIDTH)
-  doc.rect(MARGIN, currentY, CONTENT_WIDTH, 8, 'FD')
-  
+  // --- 2. TO SECTION (Clean Block Format) ---
+  // Header Bar
+  doc.setFillColor(...COLORS.BLUE_HEADER)
+  doc.rect(MARGIN, currentY, CONTENT_WIDTH, 8, 'F')
+  doc.setFontSize(9)
   doc.setTextColor(...COLORS.WHITE)
-  doc.setFontSize(10)
-  doc.setFont('helvetica', 'bold')
   doc.text('TO (CUSTOMER DETAILS):', MARGIN + 3, currentY + 5.5)
-
   currentY += 8
 
-  // Content box
-  const toBoxHeight = 45
+  // Details Box
+  const toBoxHeight = 42
   doc.setDrawColor(...COLORS.BLACK)
   doc.setLineWidth(BORDER_WIDTH)
   doc.rect(MARGIN, currentY, CONTENT_WIDTH, toBoxHeight, 'S')
 
-  const contentPadding = 8
-  let contentY = currentY + contentPadding
+  let contentY = currentY + 10
+  const pad = 8
 
-  // Name field
   doc.setTextColor(...COLORS.BLACK)
-  doc.setFontSize(12)
+
+  // Name in Bold
   doc.setFont('helvetica', 'bold')
-  doc.text('Name:', MARGIN + contentPadding, contentY)
-  const nameLineX = MARGIN + contentPadding + 18
-  const nameLineWidth = CONTENT_WIDTH - nameLineX - contentPadding
-  drawInputLine(nameLineX, contentY + 1, nameLineWidth)
-  // Fill customer name
+  doc.setFontSize(14)
+  const customerName = (order.customers?.name || '').toUpperCase()
+  doc.text(customerName, MARGIN + pad, contentY)
+
+  // Address and Phone in Normal
+  contentY += 8
   doc.setFont('helvetica', 'normal')
-  const customerName = order.customers?.name || ''
-  if (customerName) {
-    doc.text(customerName, nameLineX + 2, contentY - 1, { maxWidth: nameLineWidth - 4 })
-  }
+  doc.setFontSize(11)
+  const address = (order.customers?.address || '').toUpperCase()
+  const addrLines = doc.splitTextToSize(address, CONTENT_WIDTH - pad * 2)
+  doc.text(addrLines.slice(0, 3), MARGIN + pad, contentY)
 
-  contentY += 8
-
-  // Address field
-    doc.setFont('helvetica', 'bold')
-  doc.text('Address:', MARGIN + contentPadding, contentY)
-  const addressX = MARGIN + contentPadding + 25
-  const addressWidth = CONTENT_WIDTH - addressX - contentPadding
-  
-  if (order.customers?.address) {
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    const addressLines = order.customers.address.split(',').map(line => line.trim().toUpperCase())
-    addressLines.forEach((line, idx) => {
-      if (contentY < currentY + toBoxHeight - 10) {
-        doc.text(line, addressX, contentY, { maxWidth: addressWidth })
-        contentY += 5
-      }
-    })
-  }
-  
-  // Address input lines
-  drawInputLine(addressX, contentY + 1, addressWidth)
-  contentY += 6
-  drawInputLine(addressX, contentY, addressWidth)
-
-  contentY += 8
-
-  // Mobile No. and Pincode
-  const fieldWidth = (CONTENT_WIDTH - contentPadding * 2 - 10) / 2
-  
-  // Mobile No.
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(12)
-  doc.text('Mobile No.:', MARGIN + contentPadding, contentY)
-  const mobileLineX = MARGIN + contentPadding + 28
-  drawInputLine(mobileLineX, contentY + 1, fieldWidth - 28)
+  contentY += (addrLines.slice(0, 3).length * 6)
   if (order.customers?.phone) {
-    doc.setFont('helvetica', 'normal')
-    doc.text(order.customers.phone, mobileLineX + 2, contentY - 1)
+    doc.text(`MOB: ${order.customers.phone}`, MARGIN + pad, contentY)
   }
 
-  // Pincode
-  const pincodeX = MARGIN + contentPadding + fieldWidth + 10
-  doc.setFont('helvetica', 'bold')
-  doc.text('Pincode:', pincodeX, contentY)
-  const pincodeLineX = pincodeX + 22
-  drawInputLine(pincodeLineX, contentY + 1, fieldWidth - 22)
-  // Extract pincode from address if available
-  if (order.customers?.address) {
-    const pincodeMatch = order.customers.address.match(/\b\d{6}\b/)
-    if (pincodeMatch) {
-      doc.setFont('helvetica', 'normal')
-      doc.text(pincodeMatch[0], pincodeLineX + 2, contentY - 1)
-    }
-  }
+  currentY += toBoxHeight + 4
 
-  currentY += toBoxHeight
-
-  // --- Section 2: FROM ---
-  // Header
-  doc.setFillColor(...COLORS.DARK_BLUE)
-  doc.setDrawColor(...COLORS.BLACK)
-  doc.setLineWidth(BORDER_WIDTH)
-  doc.rect(MARGIN, currentY, CONTENT_WIDTH, 8, 'FD')
-  
+  // --- 3. FROM SECTION ---
+  doc.setFillColor(...COLORS.BLUE_HEADER)
+  doc.rect(MARGIN, currentY, CONTENT_WIDTH, 8, 'F')
+  doc.setFontSize(9)
   doc.setTextColor(...COLORS.WHITE)
-  doc.setFontSize(10)
-  doc.setFont('helvetica', 'bold')
   doc.text('FROM:', MARGIN + 3, currentY + 5.5)
-
   currentY += 8
 
-  // Content box
-  const fromBoxHeight = 30
+  const fromBoxHeight = 28
   doc.setDrawColor(...COLORS.BLACK)
   doc.setLineWidth(BORDER_WIDTH)
   doc.rect(MARGIN, currentY, CONTENT_WIDTH, fromBoxHeight, 'S')
 
-  contentY = currentY + contentPadding
-
+  contentY = currentY + 8
   doc.setTextColor(...COLORS.BLACK)
-  doc.setFontSize(12)
   doc.setFont('helvetica', 'bold')
-  doc.text('SUNKOOL SOLUTION', MARGIN + contentPadding, contentY)
-  
-  contentY += 7
-  doc.setFontSize(10)
+  doc.setFontSize(12)
+  doc.text('SUNKOOL SOLUTION', MARGIN + pad, contentY)
+  doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
-  doc.text('510, WESTERN PALACE, CONGRESS NAGAR, OPP.', MARGIN + contentPadding, contentY)
+  contentY += 6
+  doc.text('510, WESTERN PALACE, CONGRESS NAGAR, OPP.', MARGIN + pad, contentY)
   contentY += 5
-  doc.text('PARK, NAGPUR - 440012', MARGIN + contentPadding, contentY)
+  doc.text('PARK, NAGPUR - 440012', MARGIN + pad, contentY)
   contentY += 5
-  doc.text('MOB. NO. 9156321123', MARGIN + contentPadding, contentY)
+  doc.text('MOB. NO. 9156321123', MARGIN + pad, contentY)
 
-  currentY += fromBoxHeight
+  currentY += fromBoxHeight + 4
 
-  // --- Section 3: Tracking & Parcel Details (Split) ---
-  const bottomSectionHeight = 60
-  const leftWidth = CONTENT_WIDTH / 2
+  // --- 4. BOTTOM SECTION (SPLIT) ---
+  const splitY = currentY
+  const boxW = CONTENT_WIDTH / 2
+  const boxH = 45
 
-  // Left side: Tracking Number with Barcode
-  doc.setFillColor(...COLORS.DARK_BLUE)
-  doc.setDrawColor(...COLORS.BLACK)
-  doc.setLineWidth(BORDER_WIDTH)
-  doc.rect(MARGIN, currentY, leftWidth, 8, 'FD')
-  
+  // Left: Tracking
+  doc.setFillColor(...COLORS.BLUE_HEADER)
+  doc.rect(MARGIN, splitY, boxW, 8, 'F')
+  doc.setFontSize(9)
   doc.setTextColor(...COLORS.WHITE)
-  doc.setFontSize(10)
-  doc.setFont('helvetica', 'bold')
-  doc.text('TRACKING NUMBER:', MARGIN + 3, currentY + 5.5)
+  doc.text('TRACKING NUMBER:', MARGIN + 3, splitY + 5.5)
 
-  // Vertical divider
+  doc.setDrawColor(...COLORS.BLACK)
+  doc.rect(MARGIN, splitY + 8, boxW, boxH, 'S')
+  const tracking = dispatch.trackingId || order.internal_order_number || 'SK-0000000'
+  drawBarcode(MARGIN + boxW / 2 - 25, splitY + 22, 50, 15, tracking)
+
+  // Right: Parcel Details
+  doc.setFillColor(...COLORS.BLUE_HEADER)
+  doc.rect(MARGIN + boxW, splitY, boxW, 8, 'F')
+  doc.text('PARCEL DETAILS:', MARGIN + boxW + 3, splitY + 5.5)
+
   doc.setDrawColor(...COLORS.BLACK)
   doc.setLineWidth(BORDER_WIDTH)
-  doc.line(MARGIN + leftWidth, currentY, MARGIN + leftWidth, currentY + bottomSectionHeight)
-    
-  // Barcode area
-  const barcodeY = currentY + 8
-  const barcodeBoxHeight = bottomSectionHeight - 8
-  doc.setDrawColor(...COLORS.BLACK)
-  doc.setLineWidth(BORDER_WIDTH)
-  doc.rect(MARGIN, barcodeY, leftWidth, barcodeBoxHeight, 'S')
+  doc.rect(MARGIN + boxW, splitY + 8, boxW, boxH, 'S')
 
-  // Draw barcode
-  const trackingCode = dispatch.trackingId || order.internal_order_number || 'SK-000000-IN'
-  const barcodeX = MARGIN + leftWidth / 2 - 30
-  const barcodeHeight = 20
-  drawBarcode(barcodeX, barcodeY + 15, 60, barcodeHeight, trackingCode)
-
-  // Right side: Parcel Details
-  const rightX = MARGIN + leftWidth
-  doc.setFillColor(...COLORS.DARK_BLUE)
-  doc.setDrawColor(...COLORS.BLACK)
-  doc.setLineWidth(BORDER_WIDTH)
-  doc.rect(rightX, currentY, leftWidth, 8, 'FD')
-  
-  doc.setTextColor(...COLORS.WHITE)
-  doc.setFontSize(10)
-  doc.setFont('helvetica', 'bold')
-  doc.text('PARCEL DETAILS:', rightX + 3, currentY + 5.5)
-
-  // Content box
-  doc.setDrawColor(...COLORS.BLACK)
-  doc.setLineWidth(BORDER_WIDTH)
-  doc.rect(rightX, barcodeY, leftWidth, barcodeBoxHeight, 'S')
-
-  contentY = barcodeY + contentPadding
-  const detailFieldWidth = leftWidth - contentPadding * 2
-
-  // Weight field
+  let rightContentY = splitY + 18
   doc.setTextColor(...COLORS.BLACK)
-  doc.setFontSize(12)
   doc.setFont('helvetica', 'bold')
-  doc.text('Weight:', rightX + contentPadding, contentY)
-  const weightLineX = rightX + contentPadding + 20
-  drawInputLine(weightLineX, contentY + 1, detailFieldWidth - 20)
+  doc.setFontSize(10)
+  doc.text('Weight:', MARGIN + boxW + pad, rightContentY)
+  drawLine(MARGIN + boxW + pad + 15, rightContentY + 1.5, boxW - pad * 2 - 15)
 
-  contentY += 15
+  rightContentY += 12
+  doc.text('Dimensions:', MARGIN + boxW + pad, rightContentY)
+  drawLine(MARGIN + boxW + pad, rightContentY + 8, boxW - pad * 2)
 
-  // Dimensions field
+  currentY += boxH + 12
+
+  // --- 5. HANDLING INSTRUCTIONS ---
+  doc.setFillColor(...COLORS.BLUE_HEADER)
+  doc.rect(MARGIN, currentY, CONTENT_WIDTH, 8, 'F')
+  doc.setFontSize(9)
+  doc.setTextColor(...COLORS.WHITE)
+  doc.text('HANDLING INSTRUCTIONS:', MARGIN + 3, currentY + 5.5)
+  currentY += 8
+
+  const instrBoxH = 35
+  doc.setDrawColor(...COLORS.BLACK)
+  doc.setLineWidth(BORDER_WIDTH)
+  doc.rect(MARGIN, currentY, CONTENT_WIDTH, instrBoxH, 'S')
+
+  doc.setTextColor(...COLORS.BLACK)
   doc.setFont('helvetica', 'bold')
-  doc.text('Dimensions:', rightX + contentPadding, contentY)
-  const dimLineX = rightX + contentPadding
-  drawInputLine(dimLineX, contentY + 8, detailFieldWidth)
-  
-  // Generate filename
-  const orderNumber = order.internal_order_number || 'ORDER'
-  const trackingId = dispatch.trackingId || 'NO-TRACKING'
-  const filename = `Tracking_Slip_${orderNumber}_${trackingId}.pdf`
-  
-  // Convert to blob
+  doc.setFontSize(9)
+  let instrY = currentY + 8
+
+  const instructions = [
+    "• Handle with care: Contains sensitive components.",
+    "• Keep dry and away from direct heat or sharp objects.",
+    "• Do not stack heavy items on top of this parcel.",
+    "• In case of damage to outer packaging, please check contents before accepting."
+  ]
+
+  instructions.forEach(line => {
+    doc.text(line, MARGIN + pad, instrY)
+    instrY += 6
+  })
+
+  // Final Cleanup
+  const orderNum = order.internal_order_number || 'ORD'
+  const tId = dispatch.trackingId || 'ID'
+  const filename = `Parcel_Slip_${orderNum}_${tId}.pdf`
   const pdfBlob = doc.output('blob')
 
   return { blob: pdfBlob, filename }
 }
+
+

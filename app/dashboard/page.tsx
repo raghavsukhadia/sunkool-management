@@ -43,7 +43,7 @@ function KPICard({
 }) {
   const isPositive = change && change >= 0
   const cardContent = (
-    <Card 
+    <Card
       className={`border-l-4 ${color} hover:shadow-lg transition-all duration-200 cursor-pointer group`}
       suppressHydrationWarning={suppressHydrationWarning}
     >
@@ -58,17 +58,15 @@ function KPICard({
         {change !== undefined && (
           <div className="flex items-center gap-1">
             <TrendingUp
-              className={`h-4 w-4 ${
-                isPositive ? "text-green-600" : "text-red-600"
-              }`}
+              className={`h-4 w-4 ${isPositive ? "text-green-600" : "text-red-600"
+                }`}
               style={{
                 transform: isPositive ? "none" : "rotate(180deg)",
               }}
             />
             <span
-              className={`text-xs font-semibold ${
-                isPositive ? "text-green-600" : "text-red-600"
-              }`}
+              className={`text-xs font-semibold ${isPositive ? "text-green-600" : "text-red-600"
+                }`}
             >
               {isPositive ? "+" : ""}
               {change}% from yesterday
@@ -178,7 +176,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-4">
           <SunkoolLogo variant="light" size="lg" />
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">Sunkool OMS</h1>
+            <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
             <p className="text-slate-600 mt-1">Professional Order Management System</p>
           </div>
         </div>

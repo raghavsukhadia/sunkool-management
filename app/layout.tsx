@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   title: "Sunkool OMS - Order Management System",
   description: "Professional Order Management System for Sunkool",
   icons: {
-    icon: "/favicon.svg",
+    icon: "/favicon.png",
   },
 };
 

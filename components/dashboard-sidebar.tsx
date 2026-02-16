@@ -4,12 +4,12 @@ import { usePathname } from "next/navigation"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
-import { 
-  Package, 
-  ShoppingCart, 
-  Factory, 
-  DollarSign, 
-  Settings, 
+import {
+  Package,
+  ShoppingCart,
+  Factory,
+  DollarSign,
+  Settings,
   Gift,
   LogOut,
   Home,
@@ -68,11 +68,7 @@ export default function DashboardSidebar({
           {/* Logo/Header */}
           <div className="flex items-center justify-between h-20 px-4 border-b border-slate-700 bg-gradient-to-r from-slate-800 to-slate-900">
             <Link href="/dashboard" className="flex items-center space-x-3 hover:opacity-90 transition-opacity flex-1">
-              <SunkoolLogo variant="dark" size="md" />
-              <div className="hidden sm:flex flex-col">
-                <h2 className="text-white font-bold text-sm leading-none">Sunkool</h2>
-                <p className="text-slate-400 text-xs font-medium">OMS</p>
-              </div>
+              <SunkoolLogo variant="dark" size="lg" />
             </Link>
             <button
               onClick={() => setSidebarOpen(false)}
@@ -86,9 +82,9 @@ export default function DashboardSidebar({
           <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
             {navItems.map((item) => {
               const Icon = item.icon
-              const isActive = pathname === item.href || 
+              const isActive = pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href))
-              
+
               return (
                 <Link
                   key={item.href}

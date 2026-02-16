@@ -46,7 +46,7 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const [showSearchPanel, setShowSearchPanel] = useState(true)
+  const [showSearchPanel, setShowSearchPanel] = useState(false)
   const [sortBy, setSortBy] = useState<"created_at" | "total_price" | "sales_order_number">("created_at")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
   const [statusFilter, setStatusFilter] = useState<string>("all")

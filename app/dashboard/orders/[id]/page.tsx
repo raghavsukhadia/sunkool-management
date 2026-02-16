@@ -8,6 +8,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   getOrderDetails,
   getInventoryItemsForOrder,
   addItemToOrder,
@@ -30,6 +37,12 @@ import {
   getOrderProductionRecords,
   updateProductionRecordStatus,
   deleteProductionRecord,
+  getInvoiceAttachments,
+  uploadInvoiceAttachment,
+  deleteInvoiceAttachment,
+  getOrderPayments,
+  addOrderPayment,
+  deleteOrderPayment,
 } from "@/app/actions/orders"
 import { getCourierCompanies } from "@/app/actions/management"
 import {
@@ -59,6 +72,10 @@ import {
   AlertCircle,
   ArrowRight,
   Factory,
+  Zap,
+  RefreshCw,
+  CreditCard,
+  Receipt,
 } from "lucide-react"
 import { generateProductionPDF, generateTrackingSlipPDF } from "@/lib/pdf-generator"
 
@@ -157,6 +174,16 @@ export default function OrderDetailsPage() {
   const [generatingPDF, setGeneratingPDF] = useState(false)
   const [creatingRecord, setCreatingRecord] = useState(false)
   const [generatingTrackingSlip, setGeneratingTrackingSlip] = useState<string | null>(null)
+  const [expandedShipments, setExpandedShipments] = useState<Record<string, boolean>>({})
+  const [invoiceAttachments, setInvoiceAttachments] = useState<any[]>([])
+  const [uploadingInvoiceAttachment, setUploadingInvoiceAttachment] = useState(false)
+  const [orderPayments, setOrderPayments] = useState<any[]>([])
+  const [loadingPayments, setLoadingPayments] = useState(false)
+  const [addingPayment, setAddingPayment] = useState(false)
+  const [paymentAmount, setPaymentAmount] = useState<string>("")
+  const [paymentMethod, setPaymentMethod] = useState<string>("")
+  const [paymentReference, setPaymentReference] = useState<string>("")
+  const [paymentNotes, setPaymentNotes] = useState<string>("")
 
   useEffect(() => {
     if (orderId) {
@@ -166,11 +193,33 @@ export default function OrderDetailsPage() {
       loadCourierCompanies()
       loadProductionLists()
       loadProductionRecords()
+      loadInvoiceAttachments()
+      loadOrderPayments()
       if (order?.cash_discount) {
         loadPaymentFollowups()
       }
     }
   }, [orderId])
+
+  // Predicate used across the payment UI to determine whether payments can be recorded.
+  // An order is eligible for payment recording if its status indicates dispatch OR if
+  // there are existing dispatch records (handles legacy/stale status cases).
+  const dispatchedStates = ['Partial Dispatch', 'Dispatched', 'Delivered']
+  const canRecordPayment = dispatchedStates.includes(order?.order_status || '') || (dispatches && dispatches.length > 0)
+
+  const loadOrderPayments = async () => {
+    setLoadingPayments(true)
+    try {
+      const result = await getOrderPayments(orderId)
+      if (result.success && result.data) {
+        setOrderPayments(result.data)
+      }
+    } catch (err: any) {
+      console.error("Failed to load order payments:", err)
+    } finally {
+      setLoadingPayments(false)
+    }
+  }
 
   const loadProductionLists = async () => {
     try {
@@ -213,8 +262,8 @@ export default function OrderDetailsPage() {
         setRemainingPaymentAmount(String((order as any).remaining_payment_amount))
       }
       if (order.zoho_billing_details) {
-        setZohoBillingDetails(typeof order.zoho_billing_details === 'string' 
-          ? order.zoho_billing_details 
+        setZohoBillingDetails(typeof order.zoho_billing_details === 'string'
+          ? order.zoho_billing_details
           : JSON.stringify(order.zoho_billing_details, null, 2))
       } else {
         setZohoBillingDetails("")
@@ -287,6 +336,17 @@ export default function OrderDetailsPage() {
     }
   }
 
+  const loadInvoiceAttachments = async () => {
+    try {
+      const result = await getInvoiceAttachments(orderId)
+      if (result.success && result.data) {
+        setInvoiceAttachments(result.data)
+      }
+    } catch (err: any) {
+      console.error("Failed to load invoice attachments:", err)
+    }
+  }
+
   const handleAddItem = async () => {
     if (!selectedItem || quantity <= 0) {
       setError("Please select an item and enter a valid quantity")
@@ -314,36 +374,64 @@ export default function OrderDetailsPage() {
     }
   }
 
+  const fetchLogoDataUrl = async (): Promise<string | undefined> => {
+    try {
+      const response = await fetch('/images/logo.png')
+      const blob = await response.blob()
+      return new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result as string)
+        reader.onerror = () => resolve(undefined)
+        reader.readAsDataURL(blob)
+      })
+    } catch (err) {
+      console.error("Failed to fetch logo:", err)
+      return undefined
+    }
+  }
+
   const handleGeneratePDF = async () => {
     if (!order) {
       setError("Order data not available")
       return
     }
-    
+
     // Validate partial production quantities
     if (productionType === "partial") {
-      const hasInvalidQuantities = order.items.some(item => {
-        const selectedQty = productionQuantities[item.id] || 0
-        return selectedQty <= 0 || selectedQty > item.quantity
+      const selectedEntries = Object.entries(productionQuantities)
+      const hasAnyQty = selectedEntries.some(([_, qty]) => qty > 0)
+      const hasInvalidQty = selectedEntries.some(([id, qty]) => {
+        const item = order.items.find(oi => oi.id === id)
+        return qty < 0 || (item && qty > item.quantity)
       })
-      
-      if (hasInvalidQuantities) {
-        setError("Please enter valid quantities for all items (greater than 0 and not exceeding ordered quantity)")
+
+      if (!hasAnyQty) {
+        setError("Please enter quantity for at least one item.")
+        return
+      }
+
+      if (hasInvalidQty) {
+        setError("Quantities cannot be negative or exceed the ordered quantity.")
         return
       }
     }
-    
+
     setGeneratingPDF(true)
     setError(null)
-    
+
     try {
+      // Fetch logo data URL
+      const logoDataUrl = await fetchLogoDataUrl()
+
       // Generate PDF
       const { blob, filename } = generateProductionPDF(
-        order, 
-        inventoryItems, 
-        productionType === "partial" ? productionQuantities : undefined
+        order,
+        inventoryItems,
+        productionType === "partial" ? productionQuantities : undefined,
+        undefined,
+        logoDataUrl
       )
-      
+
       // Create production list record and upload PDF
       const result = await createProductionList(
         orderId,
@@ -352,11 +440,11 @@ export default function OrderDetailsPage() {
         blob,
         filename
       )
-      
+
       if (result.success) {
         setSuccess(`Production PDF generated and saved as ${getProductionListLabel(result.data.production_number)}!`)
         await loadProductionLists()
-      setTimeout(() => setSuccess(null), 3000)
+        setTimeout(() => setSuccess(null), 3000)
       } else {
         setError(result.error || "Failed to save production list")
       }
@@ -364,7 +452,7 @@ export default function OrderDetailsPage() {
       setError(err.message || "Failed to generate PDF")
     } finally {
       setGeneratingPDF(false)
-  }
+    }
   }
 
   const getProductionListLabel = (number: number): string => {
@@ -378,31 +466,43 @@ export default function OrderDetailsPage() {
       setError("Order data not available")
       return
     }
-    
+
     // Validate partial production quantities
     if (productionType === "partial") {
-      const hasInvalidQuantities = order.items.some(item => {
-        const selectedQty = productionQuantities[item.id] || 0
-        return selectedQty <= 0 || selectedQty > item.quantity
+      const selectedEntries = Object.entries(productionQuantities)
+      const hasAnyQty = selectedEntries.some(([_, qty]) => qty > 0)
+      const hasInvalidQty = selectedEntries.some(([id, qty]) => {
+        const item = order.items.find(oi => oi.id === id)
+        return qty < 0 || (item && qty > item.quantity)
       })
-      
-      if (hasInvalidQuantities) {
-        setError("Please enter valid quantities for all items (greater than 0 and not exceeding ordered quantity)")
+
+      if (!hasAnyQty) {
+        setError("Please enter quantity for at least one item.")
+        return
+      }
+
+      if (hasInvalidQty) {
+        setError("Quantities cannot be negative or exceed the ordered quantity.")
         return
       }
     }
-    
+
     setCreatingRecord(true)
     setError(null)
-    
+
     try {
+      // Fetch logo data URL
+      const logoDataUrl = await fetchLogoDataUrl()
+
       // Generate PDF first (without production record number, will be added after creation)
       const { blob, filename } = generateProductionPDF(
-        order, 
-        inventoryItems, 
-        productionType === "partial" ? productionQuantities : undefined
+        order,
+        inventoryItems,
+        productionType === "partial" ? productionQuantities : undefined,
+        undefined,
+        logoDataUrl
       )
-      
+
       // Convert Blob to base64 for Server Action
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
@@ -415,7 +515,7 @@ export default function OrderDetailsPage() {
         reader.onerror = reject
         reader.readAsDataURL(blob)
       })
-      
+
       // Create production record with PDF
       const result = await createProductionRecord(
         orderId,
@@ -424,7 +524,7 @@ export default function OrderDetailsPage() {
         base64,
         filename
       )
-      
+
       if (result.success) {
         setSuccess(`Production Record ${result.data.production_number} created successfully!`)
         await loadOrderDetails() // Reload to get updated order status
@@ -464,16 +564,26 @@ export default function OrderDetailsPage() {
     if (order && productionType === "partial") {
       const initialQuantities: Record<string, number> = {}
       order.items.forEach(item => {
+        // Calculate produced quantity up to now for this item
+        const producedQty = productionRecords.reduce((sum, record) => {
+          if (record.selected_quantities && record.selected_quantities[item.id]) {
+            return sum + (record.selected_quantities[item.id] as number)
+          }
+          if (record.production_type === "full") return item.quantity
+          return sum
+        }, 0)
+
+        const remainingQty = Math.max(0, item.quantity - producedQty)
+
         if (!productionQuantities[item.id]) {
-          initialQuantities[item.id] = item.quantity // Default to full quantity
+          initialQuantities[item.id] = remainingQty // Default to remaining quantity
         }
       })
       if (Object.keys(initialQuantities).length > 0) {
         setProductionQuantities(prev => ({ ...prev, ...initialQuantities }))
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order, productionType])
+  }, [order, productionType, productionRecords])
 
   const handleUpdateOrderStatus = async (newStatus: string) => {
     setError(null)
@@ -494,7 +604,7 @@ export default function OrderDetailsPage() {
   // Get next workflow step
   const getNextWorkflowStep = () => {
     if (!order) return null
-    
+
     switch (order.order_status) {
       case "Pending":
         return {
@@ -555,13 +665,13 @@ export default function OrderDetailsPage() {
   // Get selected item display name
   const getSelectedItemName = () => {
     if (!selectedItem) return "Select an item from inventory..."
-    
+
     // Check if it's a parent item
     const parentItem = inventoryItems.find(item => item.id === selectedItem)
     if (parentItem) {
       return `#${parentItem.sr_no} - ${parentItem.item_name}`
     }
-    
+
     // Check if it's a sub-item
     for (const item of inventoryItems) {
       const subItem = item.sub_items?.find(sub => sub.id === selectedItem)
@@ -569,26 +679,26 @@ export default function OrderDetailsPage() {
         return `#${item.sr_no} - ${item.item_name} → ${subItem.item_name}`
       }
     }
-    
+
     return "Select an item from inventory..."
   }
 
   // Filter items based on search term
   const filteredItems = inventoryItems.filter(item => {
     if (!searchTerm) return true
-    
+
     const searchLower = searchTerm.toLowerCase()
-    
+
     // Check if parent item matches
-    const parentMatches = 
+    const parentMatches =
       item.item_name.toLowerCase().includes(searchLower) ||
       item.sr_no?.toString().includes(searchTerm)
-    
+
     // Check if any sub-item matches
-    const subItemMatches = item.sub_items?.some(sub => 
+    const subItemMatches = item.sub_items?.some(sub =>
       sub.item_name.toLowerCase().includes(searchLower)
     )
-    
+
     return parentMatches || subItemMatches
   })
 
@@ -597,7 +707,7 @@ export default function OrderDetailsPage() {
     if (searchTerm) {
       const newExpanded = new Set<string>()
       inventoryItems.forEach(item => {
-        const hasMatchingSubItem = item.sub_items?.some(sub => 
+        const hasMatchingSubItem = item.sub_items?.some(sub =>
           sub.item_name.toLowerCase().includes(searchTerm.toLowerCase())
         )
         if (hasMatchingSubItem) {
@@ -645,7 +755,7 @@ export default function OrderDetailsPage() {
 
     const maxQuantity = orderItem.quantity
     const newQuantity = Math.max(0, Math.min(quantity, maxQuantity))
-    
+
     setDispatchQuantities(prev => ({
       ...prev,
       [orderItemId]: newQuantity
@@ -670,14 +780,14 @@ export default function OrderDetailsPage() {
 
     try {
       const result = await createDispatch(
-        order.id, 
-        dispatchType, 
-        dispatchItems, 
+        order.id,
+        dispatchType,
+        dispatchItems,
         dispatchNotes || undefined,
         selectedCourierCompany || undefined,
         trackingId || undefined
       )
-      
+
       if (result.success) {
         setSuccess(`Order ${dispatchType === "full" ? "fully" : "partially"} dispatched successfully!`)
         setShowDispatchModal(false)
@@ -711,7 +821,7 @@ export default function OrderDetailsPage() {
           zohoDetails = { details: zohoBillingDetails }
         }
       }
-      
+
       const result = await updateOrderPayment(
         orderId,
         invoiceNumber || undefined,
@@ -721,7 +831,7 @@ export default function OrderDetailsPage() {
         paymentStatus === 'partial' ? parseFloat(partialPaymentAmount) || undefined : undefined,
         paymentStatus === 'partial' ? parseFloat(remainingPaymentAmount) || undefined : undefined
       )
-      
+
       if (result.success) {
         setSuccess("Payment details updated successfully!")
         await loadOrderDetails()
@@ -731,6 +841,47 @@ export default function OrderDetailsPage() {
       }
     } catch (err: any) {
       setError(err.message || "An error occurred")
+    }
+  }
+
+  const handleAddPaymentRecord = async () => {
+    setError(null)
+
+    const amount = parseFloat(paymentAmount)
+    if (!amount || isNaN(amount) || amount <= 0) {
+      setError("Please enter a valid payment amount")
+      return
+    }
+
+    // Use paymentDate state if user selected a date; otherwise the server action defaults to today
+    const payDate = paymentDate || undefined
+
+    setAddingPayment(true)
+    try {
+      const result = await addOrderPayment(
+        orderId,
+        amount,
+        payDate,
+        paymentMethod || undefined,
+        paymentReference || undefined,
+        paymentNotes || undefined
+      )
+
+      if (result.success) {
+        setSuccess("Payment record added successfully!")
+        setPaymentAmount("")
+        setPaymentMethod("")
+        setPaymentReference("")
+        setPaymentNotes("")
+        await loadOrderPayments()
+        setTimeout(() => setSuccess(null), 2500)
+      } else {
+        setError(result.error || "Failed to add payment record")
+      }
+    } catch (err: any) {
+      setError(err.message || "An error occurred")
+    } finally {
+      setAddingPayment(false)
     }
   }
 
@@ -769,7 +920,7 @@ export default function OrderDetailsPage() {
     // For now, we'll use a placeholder URL
     // In production, you'd upload to Supabase Storage or another service
     const fileUrl = URL.createObjectURL(file)
-    
+
     try {
       const result = await uploadProductionPDF(
         orderId,
@@ -778,7 +929,7 @@ export default function OrderDetailsPage() {
         fileUrl,
         file.size
       )
-      
+
       if (result.success) {
         setSuccess("Production PDF uploaded successfully!")
         await loadDispatches()
@@ -788,6 +939,44 @@ export default function OrderDetailsPage() {
       }
     } catch (err: any) {
       setError(err.message || "An error occurred")
+    }
+  }
+
+  const handleInvoiceAttachmentUpload = async (file: File) => {
+    setUploadingInvoiceAttachment(true)
+    setError(null)
+
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          const base64String = reader.result as string
+          const base64Data = base64String.split(',')[1] || base64String
+          resolve(base64Data)
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+
+      const result = await uploadInvoiceAttachment(
+        orderId,
+        base64,
+        file.name,
+        file.type,
+        file.size
+      )
+
+      if (result.success) {
+        setSuccess("Invoice attachment uploaded successfully!")
+        await loadInvoiceAttachments()
+        setTimeout(() => setSuccess(null), 3000)
+      } else {
+        setError(result.error || "Failed to upload invoice attachment")
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to upload invoice attachment")
+    } finally {
+      setUploadingInvoiceAttachment(false)
     }
   }
 
@@ -814,7 +1003,7 @@ export default function OrderDetailsPage() {
   const handleRemoveItem = async (itemId: string, itemName?: string) => {
     try {
       const result = await removeItemFromOrder(itemId) as any
-      
+
       if (result.success) {
         setSuccess("Item removed from order successfully!")
         await loadOrderDetails()
@@ -825,7 +1014,7 @@ export default function OrderDetailsPage() {
           const confirmReturn = confirm(
             `${result.error}\n\nWould you like to create a return dispatch now?\n\nThis will:\n1. Create a return record for ${result.dispatchedQuantity} dispatched units\n2. Allow you to delete the item afterwards\n\nClick OK to proceed with return dispatch, or Cancel to keep the item.`
           )
-          
+
           if (confirmReturn) {
             // User wants to create return dispatch
             setError("Return dispatch feature coming soon. For now, please contact support to process the return before deleting this item.")
@@ -944,44 +1133,40 @@ export default function OrderDetailsPage() {
 
       {/* Workflow Guidance */}
       {getNextWorkflowStep() && (
-        <Card className={`shadow-sm border-l-4 ${
-          getNextWorkflowStep()?.color === "yellow" ? "border-yellow-500 bg-yellow-50" :
+        <Card className={`shadow-sm border-l-4 ${getNextWorkflowStep()?.color === "yellow" ? "border-yellow-500 bg-yellow-50" :
           getNextWorkflowStep()?.color === "blue" ? "border-blue-500 bg-blue-50" :
-          getNextWorkflowStep()?.color === "purple" ? "border-purple-500 bg-purple-50" :
-          getNextWorkflowStep()?.color === "orange" ? "border-orange-500 bg-orange-50" :
-          getNextWorkflowStep()?.color === "green" ? "border-green-500 bg-green-50" :
-          "border-emerald-500 bg-emerald-50"
-        }`}>
+            getNextWorkflowStep()?.color === "purple" ? "border-purple-500 bg-purple-50" :
+              getNextWorkflowStep()?.color === "orange" ? "border-orange-500 bg-orange-50" :
+                getNextWorkflowStep()?.color === "green" ? "border-green-500 bg-green-50" :
+                  "border-emerald-500 bg-emerald-50"
+          }`}>
           <CardContent className="pt-6">
             <div className="flex items-start gap-3">
-              <AlertCircle className={`w-5 h-5 mt-0.5 ${
-                getNextWorkflowStep()?.color === "yellow" ? "text-yellow-600" :
+              <AlertCircle className={`w-5 h-5 mt-0.5 ${getNextWorkflowStep()?.color === "yellow" ? "text-yellow-600" :
                 getNextWorkflowStep()?.color === "blue" ? "text-blue-600" :
-                getNextWorkflowStep()?.color === "purple" ? "text-purple-600" :
-                getNextWorkflowStep()?.color === "orange" ? "text-orange-600" :
-                getNextWorkflowStep()?.color === "green" ? "text-green-600" :
-                "text-emerald-600"
-              }`} />
+                  getNextWorkflowStep()?.color === "purple" ? "text-purple-600" :
+                    getNextWorkflowStep()?.color === "orange" ? "text-orange-600" :
+                      getNextWorkflowStep()?.color === "green" ? "text-green-600" :
+                        "text-emerald-600"
+                }`} />
               <div className="flex-1">
-                <p className={`text-sm font-medium ${
-                  getNextWorkflowStep()?.color === "yellow" ? "text-yellow-800" :
+                <p className={`text-sm font-medium ${getNextWorkflowStep()?.color === "yellow" ? "text-yellow-800" :
                   getNextWorkflowStep()?.color === "blue" ? "text-blue-800" :
-                  getNextWorkflowStep()?.color === "purple" ? "text-purple-800" :
-                  getNextWorkflowStep()?.color === "orange" ? "text-orange-800" :
-                  getNextWorkflowStep()?.color === "green" ? "text-green-800" :
-                  "text-emerald-800"
-                }`}>
+                    getNextWorkflowStep()?.color === "purple" ? "text-purple-800" :
+                      getNextWorkflowStep()?.color === "orange" ? "text-orange-800" :
+                        getNextWorkflowStep()?.color === "green" ? "text-green-800" :
+                          "text-emerald-800"
+                  }`}>
                   {getNextWorkflowStep()?.message}
                 </p>
                 {getNextWorkflowStep()?.action && (
                   <Button
                     size="sm"
                     onClick={() => handleUpdateOrderStatus(getNextWorkflowStep()!.action!)}
-                    className={`mt-3 ${
-                      getNextWorkflowStep()?.color === "blue" ? "bg-blue-600 hover:bg-blue-700" :
+                    className={`mt-3 ${getNextWorkflowStep()?.color === "blue" ? "bg-blue-600 hover:bg-blue-700" :
                       getNextWorkflowStep()?.color === "green" ? "bg-green-600 hover:bg-green-700" :
-                      "bg-gray-600 hover:bg-gray-700"
-                    } text-white`}
+                        "bg-gray-600 hover:bg-gray-700"
+                      } text-white`}
                   >
                     Move to {getNextWorkflowStep()?.action}
                     <ArrowRight className="w-4 h-4 ml-2" />
@@ -995,58 +1180,58 @@ export default function OrderDetailsPage() {
 
       {/* Customer Information - Always visible */}
       <Card className="shadow-sm">
-            <CardHeader className="bg-gray-50 border-b">
-              <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
-                <div className="p-1.5 bg-blue-100 rounded-md">
-                  <User className="w-4 h-4 text-blue-600" />
-                </div>
-                Customer Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="space-y-3">
+        <CardHeader className="bg-gray-50 border-b">
+          <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
+            <div className="p-1.5 bg-blue-100 rounded-md">
+              <User className="w-4 h-4 text-blue-600" />
+            </div>
+            Customer Information
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-6">
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs font-semibold text-gray-500 uppercase">Customer Name</Label>
+              <p className="text-sm font-medium text-gray-900 mt-1">{order.customers?.name || "-"}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs font-semibold text-gray-500 uppercase">Email</Label>
+                <p className="text-sm text-gray-600 mt-1">{order.customers?.email || "-"}</p>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold text-gray-500 uppercase">Phone</Label>
+                <p className="text-sm text-gray-600 mt-1">{order.customers?.phone || "-"}</p>
+              </div>
+            </div>
+            {order.customers?.address && (
+              <div>
+                <Label className="text-xs font-semibold text-gray-500 uppercase">Address</Label>
+                <p className="text-sm text-gray-600 mt-1">{order.customers.address}</p>
+              </div>
+            )}
+            <div className="pt-3 border-t">
+              <div className="flex items-center gap-4">
                 <div>
-                  <Label className="text-xs font-semibold text-gray-500 uppercase">Customer Name</Label>
-                  <p className="text-sm font-medium text-gray-900 mt-1">{order.customers?.name || "-"}</p>
+                  <Label className="text-xs font-semibold text-gray-500 uppercase">Order Status</Label>
+                  <p className="text-sm font-medium text-gray-900 mt-1">{order.order_status}</p>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-xs font-semibold text-gray-500 uppercase">Email</Label>
-                    <p className="text-sm text-gray-600 mt-1">{order.customers?.email || "-"}</p>
-                  </div>
-                  <div>
-                    <Label className="text-xs font-semibold text-gray-500 uppercase">Phone</Label>
-                    <p className="text-sm text-gray-600 mt-1">{order.customers?.phone || "-"}</p>
-                  </div>
+                <div>
+                  <Label className="text-xs font-semibold text-gray-500 uppercase">Payment Status</Label>
+                  <p className="text-sm font-medium text-gray-900 mt-1">{order.payment_status}</p>
                 </div>
-                {order.customers?.address && (
-                  <div>
-                    <Label className="text-xs font-semibold text-gray-500 uppercase">Address</Label>
-                    <p className="text-sm text-gray-600 mt-1">{order.customers.address}</p>
+                {order.cash_discount && (
+                  <div className="ml-auto">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                      Cash Discount Applied
+                    </span>
                   </div>
                 )}
-                <div className="pt-3 border-t">
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <Label className="text-xs font-semibold text-gray-500 uppercase">Order Status</Label>
-                      <p className="text-sm font-medium text-gray-900 mt-1">{order.order_status}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs font-semibold text-gray-500 uppercase">Payment Status</Label>
-                      <p className="text-sm font-medium text-gray-900 mt-1">{order.payment_status}</p>
-                    </div>
-                    {order.cash_discount && (
-                      <div className="ml-auto">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                          Cash Discount Applied
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Tabs Section */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -1077,536 +1262,256 @@ export default function OrderDetailsPage() {
 
         {/* Items Tab */}
         <TabsContent value="items" className="space-y-6 mt-6">
-          <div className="grid gap-6 md:grid-cols-3">
-            <div className="md:col-span-2 space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-6">
               {/* Add Items Section */}
               <Card className="border-2 border-blue-100 shadow-md">
-            <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
-              <CardTitle className="text-xl font-semibold text-gray-900 flex items-center">
-                <Plus className="w-5 h-5 mr-2" />
-                Add Items to Order
-              </CardTitle>
-              <CardDescription className="mt-1">
-                Select items from inventory and specify quantities
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="md:col-span-2 relative">
-                    <Label htmlFor="item-select" className="text-sm font-semibold text-gray-700 mb-2 block">
-                      Select Item <span className="text-red-500">*</span>
-                    </Label>
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                        className="flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-left ring-offset-background placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <span className={selectedItem ? "text-gray-900" : "text-gray-500"}>
-                          {getSelectedItemName()}
-                        </span>
-                        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
-                      </button>
-                      
-                      {isDropdownOpen && (
-                        <>
-                          <div 
-                            className="fixed inset-0 z-10" 
-                            onClick={() => setIsDropdownOpen(false)}
-                          />
-                          <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-80 overflow-hidden flex flex-col">
-                            {/* Search Input */}
-                            <div className="p-2 border-b border-gray-200 bg-gray-50 sticky top-0">
-                              <div className="relative">
-                                <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                                <Input
-                                  type="text"
-                                  placeholder="Type to search items..."
-                                  value={searchTerm}
-                                  onChange={(e) => setSearchTerm(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Escape") {
-                                      setIsDropdownOpen(false)
-                                    }
-                                    e.stopPropagation()
-                                  }}
-                                  className="pl-8 pr-8 h-9 text-sm border-gray-300 focus:border-blue-500 focus:ring-blue-500"
-                                  autoFocus
-                                />
-                                {searchTerm && (
-                                  <button
-                                    onClick={() => setSearchTerm("")}
-                                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-200"
-                                    title="Clear search"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                            
-                            {/* Items List */}
-                            <div className="overflow-y-auto flex-1">
-                              {filteredItems.length === 0 ? (
-                                <div className="px-3 py-4 text-sm text-gray-500 text-center">
-                                  No items found matching "{searchTerm}"
+                <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
+                  <CardTitle className="text-xl font-semibold text-gray-900 flex items-center">
+                    <Plus className="w-5 h-5 mr-2" />
+                    Add Items to Order
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    Select items from inventory and specify quantities
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <div className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="md:col-span-2 relative">
+                        <Label htmlFor="item-select" className="text-sm font-semibold text-gray-700 mb-2 block">
+                          Select Item <span className="text-red-500">*</span>
+                        </Label>
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                            className="flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-left ring-offset-background placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <span className={selectedItem ? "text-gray-900" : "text-gray-500"}>
+                              {getSelectedItemName()}
+                            </span>
+                            <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
+                          </button>
+
+                          {isDropdownOpen && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-10"
+                                onClick={() => setIsDropdownOpen(false)}
+                              />
+                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-80 overflow-hidden flex flex-col">
+                                {/* Search Input */}
+                                <div className="p-2 border-b border-gray-200 bg-gray-50 sticky top-0">
+                                  <div className="relative">
+                                    <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                                    <Input
+                                      type="text"
+                                      placeholder="Type to search items..."
+                                      value={searchTerm}
+                                      onChange={(e) => setSearchTerm(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Escape") {
+                                          setIsDropdownOpen(false)
+                                        }
+                                        e.stopPropagation()
+                                      }}
+                                      className="pl-8 pr-8 h-9 text-sm border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                                      autoFocus
+                                    />
+                                    {searchTerm && (
+                                      <button
+                                        onClick={() => setSearchTerm("")}
+                                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-200"
+                                        title="Clear search"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
-                              ) : (
-                                <div className="py-1">
-                                  {filteredItems.map((item) => {
-                                    // Filter sub-items based on search term
-                                    const filteredSubItems = item.sub_items?.filter(sub => {
-                                      if (!searchTerm) return true
-                                      return sub.item_name.toLowerCase().includes(searchTerm.toLowerCase())
-                                    })
 
-                                    // Show parent item if it matches or has matching sub-items
-                                    const showParent = !searchTerm || 
-                                      item.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                      item.sr_no?.toString().includes(searchTerm) ||
-                                      (filteredSubItems && filteredSubItems.length > 0)
+                                {/* Items List */}
+                                <div className="overflow-y-auto flex-1">
+                                  {filteredItems.length === 0 ? (
+                                    <div className="px-3 py-4 text-sm text-gray-500 text-center">
+                                      No items found matching "{searchTerm}"
+                                    </div>
+                                  ) : (
+                                    <div className="py-1">
+                                      {filteredItems.map((item) => {
+                                        // Filter sub-items based on search term
+                                        const filteredSubItems = item.sub_items?.filter(sub => {
+                                          if (!searchTerm) return true
+                                          return sub.item_name.toLowerCase().includes(searchTerm.toLowerCase())
+                                        })
 
-                                    if (!showParent) return null
+                                        // Show parent item if it matches or has matching sub-items
+                                        const showParent = !searchTerm ||
+                                          item.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                          item.sr_no?.toString().includes(searchTerm) ||
+                                          (filteredSubItems && filteredSubItems.length > 0)
 
-                                    return (
-                                      <div key={item.id}>
-                                        {/* Parent Item */}
-                                        <div
-                                          className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 transition-colors ${
-                                            selectedItem === item.id ? "bg-blue-100" : ""
-                                          }`}
-                                          onClick={() => handleItemSelect(item.id)}
-                                        >
-                                          <div className="flex items-center justify-between">
-                                            <span className="font-medium text-gray-900">
-                                              #{item.sr_no} - {item.item_name}
-                                            </span>
-                                            {item.sub_items && item.sub_items.length > 0 && (
-                                              <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation()
-                                                  toggleItemExpansion(item.id)
-                                                }}
-                                                className="p-1 hover:bg-blue-200 rounded transition-colors"
-                                              >
-                                                {expandedItems.has(item.id) ? (
-                                                  <ChevronDown className="w-4 h-4 text-gray-600" />
-                                                ) : (
-                                                  <ChevronRight className="w-4 h-4 text-gray-600" />
+                                        if (!showParent) return null
+
+                                        return (
+                                          <div key={item.id}>
+                                            {/* Parent Item */}
+                                            <div
+                                              className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 transition-colors ${selectedItem === item.id ? "bg-blue-100" : ""
+                                                }`}
+                                              onClick={() => handleItemSelect(item.id)}
+                                            >
+                                              <div className="flex items-center justify-between">
+                                                <span className="font-medium text-gray-900">
+                                                  #{item.sr_no} - {item.item_name}
+                                                </span>
+                                                {item.sub_items && item.sub_items.length > 0 && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation()
+                                                      toggleItemExpansion(item.id)
+                                                    }}
+                                                    className="p-1 hover:bg-blue-200 rounded transition-colors"
+                                                  >
+                                                    {expandedItems.has(item.id) ? (
+                                                      <ChevronDown className="w-4 h-4 text-gray-600" />
+                                                    ) : (
+                                                      <ChevronRight className="w-4 h-4 text-gray-600" />
+                                                    )}
+                                                  </button>
                                                 )}
-                                              </button>
+                                              </div>
+                                            </div>
+
+                                            {/* Sub-items */}
+                                            {item.sub_items && item.sub_items.length > 0 && expandedItems.has(item.id) && (
+                                              <div className="bg-gray-50 border-l-2 border-blue-300">
+                                                {filteredSubItems && filteredSubItems.length > 0 ? (
+                                                  filteredSubItems.map((subItem) => (
+                                                    <div
+                                                      key={subItem.id}
+                                                      className={`px-6 py-2 text-sm cursor-pointer hover:bg-blue-50 transition-colors ${selectedItem === subItem.id ? "bg-blue-100" : ""
+                                                        }`}
+                                                      onClick={() => handleItemSelect(subItem.id)}
+                                                    >
+                                                      <div className="flex items-center gap-2">
+                                                        <span className="text-gray-400">└─</span>
+                                                        <span className="text-gray-700">
+                                                          {subItem.item_name}
+                                                        </span>
+                                                        <span className="text-xs text-gray-500 ml-auto">
+                                                          Sub Item
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                  ))
+                                                ) : (
+                                                  searchTerm && (
+                                                    <div className="px-6 py-2 text-xs text-gray-400">
+                                                      No sub-items match your search
+                                                    </div>
+                                                  )
+                                                )}
+                                              </div>
                                             )}
                                           </div>
-                                        </div>
-                                        
-                                        {/* Sub-items */}
-                                        {item.sub_items && item.sub_items.length > 0 && expandedItems.has(item.id) && (
-                                          <div className="bg-gray-50 border-l-2 border-blue-300">
-                                            {filteredSubItems && filteredSubItems.length > 0 ? (
-                                              filteredSubItems.map((subItem) => (
-                                                <div
-                                                  key={subItem.id}
-                                                  className={`px-6 py-2 text-sm cursor-pointer hover:bg-blue-50 transition-colors ${
-                                                    selectedItem === subItem.id ? "bg-blue-100" : ""
-                                                  }`}
-                                                  onClick={() => handleItemSelect(subItem.id)}
-                                                >
-                                                  <div className="flex items-center gap-2">
-                                                    <span className="text-gray-400">└─</span>
-                                                    <span className="text-gray-700">
-                                                      {subItem.item_name}
-                                                    </span>
-                                                    <span className="text-xs text-gray-500 ml-auto">
-                                                      Sub Item
-                                                    </span>
-                                                  </div>
-                                                </div>
-                                              ))
-                                            ) : (
-                                              searchTerm && (
-                                                <div className="px-6 py-2 text-xs text-gray-400">
-                                                  No sub-items match your search
-                                                </div>
-                                              )
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                    )
-                                  })}
+                                        )
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <Label htmlFor="quantity" className="text-sm font-semibold text-gray-700 mb-2 block">
+                          Quantity <span className="text-red-500">*</span>
+                        </Label>
+                        <Input
+                          id="quantity"
+                          type="number"
+                          min="1"
+                          value={quantity}
+                          onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+                          className="h-10"
+                          placeholder="Enter quantity"
+                        />
+                      </div>
+                    </div>
+                    <Button
+                      onClick={handleAddItem}
+                      disabled={addingItem || !selectedItem || quantity <= 0}
+                      className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      {addingItem ? (
+                        <>
+                          <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                          Adding...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Add Item to Order
                         </>
                       )}
-                    </div>
+                    </Button>
                   </div>
-                  <div>
-                    <Label htmlFor="quantity" className="text-sm font-semibold text-gray-700 mb-2 block">
-                      Quantity <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id="quantity"
-                      type="number"
-                      min="1"
-                      value={quantity}
-                      onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-                      className="h-10"
-                      placeholder="Enter quantity"
-                    />
-                  </div>
-                </div>
-                <Button
-                  onClick={handleAddItem}
-                  disabled={addingItem || !selectedItem || quantity <= 0}
-                  className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  {addingItem ? (
-                    <>
-                      <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
-                      Adding...
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="w-4 h-4 mr-2" />
-                      Add Item to Order
-                    </>
-                  )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Order Items List */}
-          <Card className="shadow-sm">
-            <CardHeader className="bg-gray-50 border-b">
-              <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
-                <div className="p-1.5 bg-blue-100 rounded-md">
-                  <Package className="w-4 h-4 text-blue-600" />
-                </div>
-                Order Items
-                <span className="text-sm font-normal text-gray-500 ml-1">
-                  ({order.items?.length || 0})
-                </span>
-              </CardTitle>
-              <CardDescription className="mt-1.5">Items added to this order</CardDescription>
-            </CardHeader>
-            <CardContent className="p-0">
-              {!order.items || order.items.length === 0 ? (
-                <div className="text-center py-12">
-                  <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500 font-medium">No items added yet</p>
-                  <p className="text-sm text-gray-400 mt-1">Add items using the form above</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr className="border-b bg-gray-50/50">
-                        <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Sr No</th>
-                        <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Item Name</th>
-                        <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Quantity</th>
-                        <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {order.items.map((item, index) => {
-                        // Find inventory item by matching inventory_item_id or product_id with inventory item id
-                        let inventoryItem: InventoryItem | undefined
-                        let subItem: SubItem | undefined
-                        
-                        // Check if it's a parent item
-                        inventoryItem = inventoryItems.find(inv => 
-                          inv.id === item.inventory_item_id || inv.id === item.product_id
-                        )
-                        
-                        // If not found as parent, check if it's a sub-item
-                        if (!inventoryItem) {
-                          for (const parentItem of inventoryItems) {
-                            subItem = parentItem.sub_items?.find(sub => 
-                              sub.id === item.inventory_item_id || sub.id === item.product_id
-                            )
-                            if (subItem) {
-                              inventoryItem = parentItem
-                              break
-                            }
-                          }
-                        }
-                        
-                        const displayName = subItem 
-                          ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
-                          : inventoryItem?.item_name || `Item ${index + 1}`
-                        
-                        // For sub-items, show parent's serial number; for parent items, show their serial number
-                        const displaySrNo = subItem 
-                          ? inventoryItem?.sr_no || null
-                          : inventoryItem?.sr_no || index + 1
-                        
-                        return (
-                          <tr key={item.id} className="border-b hover:bg-blue-50/30 transition-colors">
-                            <td className="p-4">
-                              <span className="text-sm font-medium text-gray-900">
-                                {displaySrNo || "-"}
-                              </span>
-                            </td>
-                            <td className="p-4">
-                              <div className="flex flex-col">
-                                <span className="text-sm font-medium text-gray-900">
-                                  {displayName}
-                                </span>
-                                {subItem && (
-                                  <span className="text-xs text-gray-500 mt-0.5">Sub Item</span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="p-4">
-                              <div className="flex items-center gap-2">
-                                <Input
-                                  type="number"
-                                  min="1"
-                                  value={item.quantity}
-                                  onChange={(e) => {
-                                    const newQty = parseInt(e.target.value) || 1
-                                    handleUpdateQuantity(item.id, newQty)
-                                  }}
-                                  className="w-20 h-8 text-sm"
-                                />
-                              </div>
-                            </td>
-                            <td className="p-4">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleRemoveItem(item.id)}
-                                className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 transition-colors"
-                                title="Remove item"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
             </div>
 
-            {/* Right Column - Order Summary */}
+            {/* Right Column - Order Items */}
             <div className="space-y-6">
-          <Card className="shadow-sm sticky top-6">
-            <CardHeader className="bg-gray-50 border-b">
-              <CardTitle className="text-lg font-semibold text-gray-900">Order Summary</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Total Items</span>
-                  <span className="text-sm font-semibold text-gray-900">{order.items?.length || 0}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Total Quantity</span>
-                  <span className="text-sm font-semibold text-gray-900">
-                    {order.items?.reduce((sum, item) => sum + item.quantity, 0) || 0}
-                  </span>
-                </div>
-                <div className="pt-4 border-t">
-                  <div className="flex justify-between items-center">
-                    <span className="text-base font-semibold text-gray-900">Order Total</span>
-                    <span className="text-lg font-bold text-blue-600">
-                      ₹{order.total_price?.toFixed(2) || "0.00"}
+              <Card className="shadow-sm">
+                <CardHeader className="bg-gray-50 border-b">
+                  <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
+                    <div className="p-1.5 bg-blue-100 rounded-md">
+                      <Package className="w-4 h-4 text-blue-600" />
+                    </div>
+                    Order Items
+                    <span className="text-sm font-normal text-gray-500 ml-1">
+                      ({order.items?.length || 0})
                     </span>
-                  </div>
-                </div>
-                {order.cash_discount && (
-                  <div className="pt-2">
-                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                      <p className="text-xs text-yellow-800">
-                        <strong>Cash Discount Applied:</strong> This order will appear in Payment Followup section.
-                      </p>
+                  </CardTitle>
+                  <CardDescription className="mt-1.5">Items added to this order</CardDescription>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {!order.items || order.items.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                      <p className="text-gray-500 font-medium">No items added yet</p>
+                      <p className="text-sm text-gray-400 mt-1">Add items using the form above</p>
                     </div>
-                  </div>
-                )}
-                <div className="pt-4 space-y-2">
-                  {order.items && order.items.length > 0 && (
-                    <>
-                      <Button
-                        onClick={() => handleOpenDispatchModal("partial")}
-                        variant="outline"
-                        className="w-full border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-                        disabled={order.order_status === "Dispatched" || order.order_status === "Delivered" || order.order_status === "Cancelled"}
-                      >
-                        <Truck className="w-4 h-4 mr-2" />
-                        Partial Dispatch
-                      </Button>
-                      <Button
-                        onClick={() => handleOpenDispatchModal("full")}
-                        className="w-full bg-green-600 hover:bg-green-700 text-white"
-                        disabled={order.order_status === "Dispatched" || order.order_status === "Delivered" || order.order_status === "Cancelled"}
-                      >
-                        <Check className="w-4 h-4 mr-2" />
-                        Full Dispatch
-                      </Button>
-                    </>
-                  )}
-                  <Button
-                    onClick={() => router.push("/dashboard/orders")}
-                    variant="outline"
-                    className="w-full border-gray-300"
-                  >
-                    View All Orders
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-            </div>
-          </div>
-        </TabsContent>
-
-        {/* Production Tab */}
-        <TabsContent value="production" className="space-y-6 mt-6">
-          {/* A. Top Card */}
-          <Card className="shadow-sm">
-            <CardHeader className="bg-gray-50 border-b">
-              <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
-                <Factory className="w-5 h-5 text-blue-600" />
-                Production Details
-              </CardTitle>
-              <CardDescription className="mt-1">
-                Generate and manage production PDFs for this order
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
-          {/* B. Create Production Record Card */}
-          <Card className="shadow-sm">
-            <CardHeader className="bg-gray-50 border-b">
-              <CardTitle className="text-lg font-semibold text-gray-900">Create Production Record</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="space-y-4">
-                {/* Check if production records already exist */}
-                {productionRecords.length === 0 ? (
-                  <>
-                    {/* Order Type Buttons - Only show if no production records exist */}
-                    <div>
-                      <Label className="text-sm font-semibold text-gray-700 mb-3 block">Order Type</Label>
-                      <div className="flex gap-4">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setProductionType("full")
-                            setProductionQuantities({})
-                          }}
-                          className={`px-4 py-2 rounded-lg border-2 transition-all ${
-                            productionType === "full"
-                              ? "border-purple-600 bg-purple-50 text-purple-700 font-semibold"
-                              : "border-gray-300 bg-white text-gray-700 hover:border-purple-300"
-                          }`}
-                        >
-                          Full Order
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setProductionType("partial")}
-                          className={`px-4 py-2 rounded-lg border-2 transition-all ${
-                            productionType === "partial"
-                              ? "border-purple-600 bg-purple-50 text-purple-700 font-semibold"
-                              : "border-gray-300 bg-white text-gray-700 hover:border-purple-300"
-                          }`}
-                        >
-                          Partial Order
-                        </button>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-2">
-                        Select an order type to create a production record. This selection cannot be changed once a record is created.
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    {/* Show locked order type if production records exist */}
-                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Label className="text-sm font-semibold text-gray-700">Order Type:</Label>
-                        <span className={`text-sm px-3 py-1 rounded font-semibold ${
-                          productionRecords[0]?.production_type === "full"
-                            ? "bg-blue-100 text-blue-700"
-                            : "bg-orange-100 text-orange-700"
-                        }`}>
-                          {productionRecords[0]?.production_type === "full" ? "Full Order" : "Partial Order"}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-600">
-                        {productionRecords[0]?.production_type === "full" 
-                          ? "Full order production has been created. You cannot create additional production records."
-                          : "Partial order production is active. You can create additional partial production records."}
-                      </p>
-                    </div>
-                  </>
-                )}
-
-                {/* Full Order - Just Button - Only show if no production records exist */}
-                {productionType === "full" && productionRecords.length === 0 && (
-                  <div className="pt-2">
-                      <Button
-                      onClick={handleCreateProductionRecord}
-                        className="bg-purple-600 hover:bg-purple-700 text-white"
-                      disabled={!order.items || order.items.length === 0 || order.order_status === "Cancelled" || creatingRecord}
-                      >
-                      <Factory className="w-4 h-4 mr-2" />
-                      {creatingRecord ? "Creating..." : "Create Production Record"}
-                      </Button>
-                    </div>
-                )}
-                
-                {/* Hide Full Order button if Full production already exists */}
-                {productionRecords.length > 0 && productionRecords[0]?.production_type === "full" && (
-                  <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-center">
-                    <p className="text-sm text-gray-600">
-                      Full order production record <span className="font-semibold">{productionRecords[0]?.production_number}</span> has been created.
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Go to the Shipment section to create a dispatch for this production record.
-                    </p>
-                    </div>
-                )}
-
-                {/* Partial Order - Table with Quantity Inputs - Only show if Partial is selected and no Full production exists */}
-                {productionType === "partial" && 
-                 (productionRecords.length === 0 || (productionRecords.length > 0 && productionRecords[0]?.production_type === "partial")) && 
-                 order && order.items && order.items.length > 0 && (
-                  <div className="space-y-4">
-                    <div className="border rounded-lg overflow-hidden">
-                      <table className="w-full">
-                        <thead className="bg-gray-50 border-b">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Item Name</th>
-                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Ordered Qty</th>
-                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Remaining Qty</th>
-                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Qty to Produce</th>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="border-b bg-gray-50/50">
+                            <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Sr No</th>
+                            <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Item Name</th>
+                            <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Quantity</th>
+                            <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Actions</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y">
+                        <tbody>
                           {order.items.map((item, index) => {
-                            // Find inventory item for display name
+                            // Find inventory item by matching inventory_item_id or product_id with inventory item id
                             let inventoryItem: InventoryItem | undefined
                             let subItem: SubItem | undefined
-                            
-                            inventoryItem = inventoryItems.find(inv => 
+
+                            // Check if it's a parent item
+                            inventoryItem = inventoryItems.find(inv =>
                               inv.id === item.inventory_item_id || inv.id === item.product_id
                             )
-                            
+
+                            // If not found as parent, check if it's a sub-item
                             if (!inventoryItem) {
                               for (const parentItem of inventoryItems) {
-                                subItem = parentItem.sub_items?.find(sub => 
+                                subItem = parentItem.sub_items?.find(sub =>
                                   sub.id === item.inventory_item_id || sub.id === item.product_id
                                 )
                                 if (subItem) {
@@ -1615,113 +1520,150 @@ export default function OrderDetailsPage() {
                                 }
                               }
                             }
-                            
-                            const displayName = subItem 
+
+                            const displayName = subItem
                               ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
                               : inventoryItem?.item_name || `Item ${index + 1}`
-                            
-                            // Calculate remaining quantity from existing production records
-                            const producedQty = productionRecords.reduce((sum, record) => {
-                              if (record.selected_quantities && record.selected_quantities[item.id]) {
-                                return sum + (record.selected_quantities[item.id] as number)
-                              }
-                              // For full production, use the full item quantity
-                              if (record.production_type === "full") {
-                                return item.quantity
-                              }
-                              return sum
-                            }, 0)
-                            
-                            const remainingQty = item.quantity - producedQty
-                            
-                            const selectedQty = productionQuantities[item.id] || 0
-                            
+
+                            // For sub-items, show parent's serial number; for parent items, show their serial number
+                            const displaySrNo = subItem
+                              ? inventoryItem?.sr_no || null
+                              : inventoryItem?.sr_no || index + 1
+
                             return (
-                              <tr key={item.id} className="hover:bg-gray-50">
-                                <td className="px-4 py-3 text-sm text-gray-900">{displayName}</td>
-                                <td className="px-4 py-3 text-sm text-center text-gray-600">{item.quantity}</td>
-                                <td className="px-4 py-3 text-center">
-                                  <span className={`text-sm font-semibold ${
-                                    remainingQty > 0 ? "text-orange-600" : "text-green-600"
-                                  }`}>
-                                    {remainingQty > 0 ? remainingQty : "✓ Complete"}
+                              <tr key={item.id} className="border-b hover:bg-blue-50/30 transition-colors">
+                                <td className="p-4">
+                                  <span className="text-sm font-medium text-gray-900">
+                                    {displaySrNo || "-"}
                                   </span>
                                 </td>
-                                <td className="px-4 py-3 text-center">
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    max={remainingQty > 0 ? remainingQty : 0}
-                                    value={selectedQty}
-                                    onChange={(e) => {
-                                      const val = parseInt(e.target.value) || 0
-                                      const maxAllowed = remainingQty > 0 ? remainingQty : 0
-                                      setProductionQuantities(prev => ({
-                                        ...prev,
-                                        [item.id]: Math.max(0, Math.min(val, maxAllowed))
-                                      }))
-                                    }}
-                                    className="w-24 h-8 text-sm mx-auto"
-                                    disabled={remainingQty <= 0}
-                                  />
+                                <td className="p-4">
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium text-gray-900">
+                                      {displayName}
+                                    </span>
+                                    {subItem && (
+                                      <span className="text-xs text-gray-500 mt-0.5">Sub Item</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  <div className="flex items-center gap-2">
+                                    <Input
+                                      type="number"
+                                      min="1"
+                                      value={item.quantity}
+                                      onChange={(e) => {
+                                        const newQty = parseInt(e.target.value) || 1
+                                        handleUpdateQuantity(item.id, newQty)
+                                      }}
+                                      className="w-20 h-8 text-sm"
+                                    />
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRemoveItem(item.id)}
+                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 transition-colors"
+                                    title="Remove item"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
                                 </td>
                               </tr>
                             )
                           })}
                         </tbody>
                       </table>
-                  </div>
-                    <Button
-                      onClick={handleCreateProductionRecord}
-                      className="bg-purple-600 hover:bg-purple-700 text-white"
-                      disabled={
-                        !order.items || 
-                        order.items.length === 0 || 
-                        order.order_status === "Cancelled" || 
-                        creatingRecord ||
-                        Object.values(productionQuantities).every(qty => qty === 0) ||
-                        Object.keys(productionQuantities).length === 0
-                      }
-                    >
-                      <Factory className="w-4 h-4 mr-2" />
-                      {creatingRecord ? "Creating..." : "Create Production Record"}
-                    </Button>
-                </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
 
-          {/* Remaining Quantities for Partial Orders */}
-          {order?.order_status === "Partial Order" && order.items && order.items.length > 0 && (
-            <Card className="shadow-sm border-orange-200 bg-orange-50/30">
-              <CardHeader className="bg-orange-50 border-b">
-                <CardTitle className="text-lg font-semibold text-orange-900">Remaining for Production</CardTitle>
-                            </CardHeader>
-              <CardContent className="pt-6">
-                <div className="border rounded-lg overflow-hidden bg-white">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 border-b">
+        {/* Production Tab */}
+        <TabsContent value="production" className="space-y-6 mt-6">
+          {/* Production Management Card */}
+          <Card className="shadow-sm">
+            <CardHeader className="bg-gray-50 border-b flex flex-col md:flex-row md:items-center justify-between gap-4 py-4">
+              <div>
+                <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
+                  <Factory className="w-5 h-5 text-blue-600" />
+                  Production Management
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Manage items ready for production and generate checklists
+                </CardDescription>
+              </div>
+
+              {/* Order Type Toggle - Hidden if Full Order already exists */}
+              {!(productionRecords.length > 0 && productionRecords[0]?.production_type === "full") && (
+                <div className="flex bg-white p-1 rounded-lg border border-gray-200 self-start md:self-center shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProductionType("full")
+                      setProductionQuantities({})
+                    }}
+                    disabled={productionRecords.length > 0}
+                    className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${productionType === "full"
+                      ? "bg-blue-600 text-white shadow-md"
+                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-transparent"
+                      }`}
+                  >
+                    Full Order
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProductionType("partial")}
+                    className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${productionType === "partial"
+                      ? "bg-blue-600 text-white shadow-md"
+                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                      }`}
+                  >
+                    Partial Order
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Item Details</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Ordered</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Produced</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Remaining</th>
+                      <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">To Produce</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {!order?.items || order.items.length === 0 ? (
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Item Name</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Ordered Qty</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Produced Qty</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Remaining</th>
+                        <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                          <Package className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+                          No items added to this order yet.
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {order.items.map((item, index) => {
+                    ) : (
+                      order.items.map((item, index) => {
                         // Find inventory item for display name
                         let inventoryItem: InventoryItem | undefined
                         let subItem: SubItem | undefined
-                        
-                        inventoryItem = inventoryItems.find(inv => 
+
+                        inventoryItem = inventoryItems.find(inv =>
                           inv.id === item.inventory_item_id || inv.id === item.product_id
                         )
-                        
+
                         if (!inventoryItem) {
                           for (const parentItem of inventoryItems) {
-                            subItem = parentItem.sub_items?.find(sub => 
+                            subItem = parentItem.sub_items?.find(sub =>
                               sub.id === item.inventory_item_id || sub.id === item.product_id
                             )
                             if (subItem) {
@@ -1730,139 +1672,226 @@ export default function OrderDetailsPage() {
                             }
                           }
                         }
-                        
-                        const displayName = subItem 
+
+                        const displayName = subItem
                           ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
                           : inventoryItem?.item_name || `Item ${index + 1}`
-                        
+
+                        const srNo = inventoryItem?.sr_no
+
                         // Calculate produced quantity from all production records
                         const producedQty = productionRecords.reduce((sum, record) => {
                           if (record.selected_quantities && record.selected_quantities[item.id]) {
                             return sum + (record.selected_quantities[item.id] as number)
                           }
+                          // For full production, use the full item quantity
+                          if (record.production_type === "full") {
+                            return item.quantity
+                          }
                           return sum
                         }, 0)
-                        
-                        const remainingQty = item.quantity - producedQty
-                        
+
+                        const remainingQty = Math.max(0, item.quantity - producedQty)
+                        const isComplete = remainingQty <= 0
+
+                        // For Full Order mode, use remaining quantity as default, otherwise use manual state
+                        const displayToProduce = productionType === "full" ? remainingQty : (productionQuantities[item.id] || 0)
+
                         return (
-                          <tr key={item.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm text-gray-900">{displayName}</td>
-                            <td className="px-4 py-3 text-sm text-center text-gray-600">{item.quantity}</td>
-                            <td className="px-4 py-3 text-sm text-center text-gray-600">{producedQty}</td>
-                            <td className="px-4 py-3 text-center">
-                              <span className={`text-sm font-semibold ${
-                                remainingQty > 0 ? "text-orange-600" : "text-green-600"
-                              }`}>
-                                {remainingQty > 0 ? remainingQty : "✓ Complete"}
-                              </span>
+                          <tr key={item.id} className="hover:bg-blue-50/20 transition-colors">
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                {srNo && (
+                                  <span className="text-xs font-bold text-gray-400 bg-gray-100 w-6 h-6 rounded flex items-center justify-center flex-shrink-0">
+                                    {srNo}
+                                  </span>
+                                )}
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-medium text-gray-900">{displayName}</span>
+                                  {subItem && <span className="text-[10px] text-blue-600 font-semibold uppercase tracking-tight">Sub-Item</span>}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 text-sm text-center font-medium text-gray-600">{item.quantity}</td>
+                            <td className="px-4 py-4 text-sm text-center font-medium text-gray-600">{producedQty}</td>
+                            <td className="px-4 py-4 text-center">
+                              {isComplete ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-full border border-green-100">
+                                  <Check className="w-3 h-3" /> Complete
+                                </span>
+                              ) : (
+                                <span className="text-sm font-bold text-orange-600">{remainingQty}</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <Input
+                                type="number"
+                                min="0"
+                                max={remainingQty}
+                                value={displayToProduce}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value) || 0
+                                  setProductionQuantities(prev => ({
+                                    ...prev,
+                                    [item.id]: Math.max(0, Math.min(val, remainingQty))
+                                  }))
+                                  // Switch to partial mode if user edits manually
+                                  if (productionType === "full") setProductionType("partial")
+                                }}
+                                className={`w-24 h-9 text-center font-semibold mx-auto transition-all ${productionType === "full"
+                                  ? "bg-blue-50/50 border-blue-200 text-blue-700"
+                                  : "bg-white border-gray-200"
+                                  }`}
+                                disabled={isComplete || (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")}
+                              />
                             </td>
                           </tr>
                         )
-                      })}
-                    </tbody>
-                  </table>
-                                      </div>
-              </CardContent>
-            </Card>
-          )}
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-          {/* C. Existing Production Records Table */}
+              {/* Production Action Bar */}
+              <div className="p-4 bg-gray-50 border-t flex flex-col md:flex-row justify-between items-center gap-4">
+                <div className="flex items-center gap-2 text-xs text-gray-500 italic">
+                  {productionRecords.length > 0 && (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-md border shadow-sm">
+                      <AlertCircle className="w-3.5 h-3.5 text-blue-500" />
+                      <span>
+                        Order Type fixed to <strong>{productionRecords[0].production_type === "full" ? "Full" : "Partial"}</strong> due to existing records.
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-3">
+                  <Button
+                    onClick={handleCreateProductionRecord}
+                    disabled={
+                      !order?.items ||
+                      order.items.length === 0 ||
+                      order.order_status === "Cancelled" ||
+                      creatingRecord ||
+                      (productionType === "partial" && Object.values(productionQuantities).every(qty => qty === 0)) ||
+                      (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")
+                    }
+                    className="bg-blue-600 hover:bg-blue-700 text-white min-w-[180px] shadow-sm"
+                  >
+                    {creatingRecord ? (
+                      <>
+                        <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                        Generating PDF...
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="w-4 h-4 mr-2" />
+                        Create Production Record
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Existing Production Records History */}
           {productionRecords.length > 0 && (
-            <Card className="shadow-sm">
-              <CardHeader className="bg-gray-50 border-b">
-                <CardTitle className="text-lg font-semibold text-gray-900">Production Records</CardTitle>
+            <Card className="shadow-sm border-gray-200 overflow-hidden">
+              <CardHeader className="bg-white border-b py-4">
+                <CardTitle className="text-md font-semibold text-gray-800 flex items-center gap-2">
+                  <File className="w-4 h-4 text-gray-400" />
+                  Production History
+                </CardTitle>
               </CardHeader>
-              <CardContent className="pt-6">
-                <div className="border rounded-lg overflow-hidden">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
                   <table className="w-full">
-                    <thead className="bg-gray-50 border-b">
+                    <thead className="bg-gray-50/50 border-b">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Code</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Type</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Status</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Remaining Qty</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Created On</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">PDF</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">Actions</th>
+                        <th className="px-6 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-widest">ID</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">Type</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">Status</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">Created</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">Document</th>
+                        <th className="px-6 py-3 text-right text-[10px] font-bold text-gray-400 uppercase tracking-widest w-40">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y">
-                      {productionRecords.map((record, recordIndex) => {
-                        // Calculate remaining quantity after this production record
-                        // Sum all production records up to and including this one
-                        const recordsUpToThis = productionRecords.slice(0, recordIndex + 1)
-                        
-                        // Calculate total remaining quantity across all items
-                        const totalRemainingQty = order?.items ? order.items.reduce((total, item) => {
-                          // Calculate how much has been produced for this item up to and including this record
-                          const producedForItem = recordsUpToThis.reduce((sum, r) => {
-                            if (r.selected_quantities && r.selected_quantities[item.id]) {
-                              // Partial production with specific quantities
-                              return sum + (r.selected_quantities[item.id] as number)
-                            }
-                            // For full production, use the full item quantity
-                            if (r.production_type === "full") {
-                              return item.quantity
-                            }
-                            return sum
-                          }, 0)
-                          
-                          // Remaining for this item
-                          const remainingForItem = Math.max(0, item.quantity - producedForItem)
-                          return total + remainingForItem
-                        }, 0) : 0
-                        
-                        return (
-                        <tr key={record.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{record.production_number}</td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`text-xs px-2 py-1 rounded ${
-                              record.production_type === "full" 
-                                ? "bg-blue-100 text-blue-700" 
-                                : "bg-orange-100 text-orange-700"
-                            }`}>
-                              {record.production_type === "full" ? "Full" : "Partial"}
+                    <tbody className="divide-y divide-gray-50">
+                      {productionRecords.slice().reverse().map((record) => (
+                        <tr key={record.id} className="hover:bg-gray-50/50 transition-colors group">
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-bold text-gray-900">{record.production_number}</span>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {record.selected_quantities && Object.entries(record.selected_quantities).map(([itemId, qty]) => {
+                                  const item = order?.items.find(i => i.id === itemId)
+                                  if (!item || (qty as number) <= 0) return null
+
+                                  // Find display name
+                                  let invItem = inventoryItems.find(inv => inv.id === item.inventory_item_id || inv.id === item.product_id)
+                                  let subI: SubItem | undefined
+                                  if (!invItem) {
+                                    for (const p of inventoryItems) {
+                                      subI = p.sub_items?.find(s => s.id === item.inventory_item_id || s.id === item.product_id)
+                                      if (subI) { invItem = p; break; }
+                                    }
+                                  }
+                                  const name = subI ? subI.item_name : (invItem?.item_name || "Item")
+
+                                  return (
+                                    <span key={itemId} className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">
+                                      {name}: <span className="font-bold">{qty as number}</span>
+                                    </span>
+                                  )
+                                })}
+                                {record.production_type === "full" && (
+                                  <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100 italic">
+                                    All items produced
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${record.production_type === "full"
+                              ? "bg-indigo-50 text-indigo-700"
+                              : "bg-orange-50 text-orange-700"
+                              }`}>
+                              {record.production_type}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`text-xs px-2 py-1 rounded ${
-                              record.status === "completed" 
-                                ? "bg-green-100 text-green-700"
-                                : record.status === "in_production"
-                                ? "bg-yellow-100 text-yellow-700"
-                                : "bg-gray-100 text-gray-700"
-                            }`}>
-                              {record.status === "completed" ? "Completed" : record.status === "in_production" ? "In Production" : "Pending"}
+                          <td className="px-4 py-4 text-center">
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${record.status === "completed"
+                              ? "bg-green-100 text-green-700"
+                              : record.status === "in_production"
+                                ? "bg-amber-100 text-amber-700 animate-pulse"
+                                : "bg-gray-100 text-gray-600"
+                              }`}>
+                              {record.status.replace('_', ' ')}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`text-sm font-semibold ${
-                              totalRemainingQty > 0 ? "text-orange-600" : "text-green-600"
-                            }`}>
-                              {totalRemainingQty > 0 ? `${totalRemainingQty}` : "✓ Complete"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-sm text-center text-gray-600">
+                          <td className="px-4 py-4 text-center text-xs text-gray-500">
                             {new Date(record.created_at).toLocaleDateString()}
                           </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-4 py-4 text-center">
                             {record.pdf_file_url ? (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={() => window.open(record.pdf_file_url, '_blank')}
-                                        className="h-8"
-                                      >
-                                <File className="w-4 h-4 mr-1" />
-                                View
-                                      </Button>
+                                className="h-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-3 transition-all"
+                              >
+                                <FileDown className="w-3.5 h-3.5 mr-1.5" />
+                                View PDF
+                              </Button>
                             ) : (
-                              <span className="text-xs text-gray-400">—</span>
+                              <span className="text-xs text-gray-300">No PDF</span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-center">
-                            <div className="flex items-center justify-center gap-2">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center justify-end gap-2">
                               {record.status === "pending" && (
                                 <Button
                                   variant="outline"
@@ -1871,13 +1900,13 @@ export default function OrderDetailsPage() {
                                     const result = await updateProductionRecordStatus(record.id, "in_production")
                                     if (result.success) {
                                       await loadProductionRecords()
-                                      setSuccess("Production started!")
+                                      setSuccess("Started!")
                                       setTimeout(() => setSuccess(null), 2000)
                                     } else {
-                                      setError(result.error || "Failed to update status")
+                                      setError(result.error || "Failed")
                                     }
                                   }}
-                                  className="h-8 text-xs"
+                                  className="h-7 text-[10px] font-bold border-blue-200 text-blue-600 hover:bg-blue-50 uppercase"
                                 >
                                   Start
                                 </Button>
@@ -1890,50 +1919,50 @@ export default function OrderDetailsPage() {
                                     const result = await updateProductionRecordStatus(record.id, "completed")
                                     if (result.success) {
                                       await loadProductionRecords()
-                                      setSuccess("Production completed!")
+                                      setSuccess("Completed!")
                                       setTimeout(() => setSuccess(null), 2000)
                                     } else {
-                                      setError(result.error || "Failed to update status")
+                                      setError(result.error || "Failed")
                                     }
                                   }}
-                                  className="h-8 text-xs bg-green-50 text-green-700 hover:bg-green-100"
+                                  className="h-7 text-[10px] font-bold border-green-200 text-green-700 bg-green-50 hover:bg-green-100 uppercase"
                                 >
-                                  Complete
+                                  Done
                                 </Button>
                               )}
                               {(record.status === "pending" || record.status === "in_production") && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={async () => {
-                                    if (confirm("Delete this production record?")) {
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={async () => {
+                                    if (confirm("Delete this record?")) {
                                       const result = await deleteProductionRecord(record.id)
-                                            if (result.success) {
+                                      if (result.success) {
                                         await loadProductionRecords()
-                                        setSuccess("Production record deleted!")
-                                              setTimeout(() => setSuccess(null), 2000)
+                                        setSuccess("Deleted!")
+                                        setTimeout(() => setSuccess(null), 2000)
                                       } else {
-                                        setError(result.error || "Failed to delete")
-                                            }
-                                          }
-                                        }}
-                                  className="h-8 text-xs text-red-600 hover:text-red-700"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </Button>
+                                        setError(result.error || "Failed")
+                                      }
+                                    }
+                                  }}
+                                  className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
                               )}
-                  </div>
+                            </div>
                           </td>
                         </tr>
-                        )
-                      })}
+                      ))}
                     </tbody>
                   </table>
-              </div>
-            </CardContent>
-          </Card>
+                </div>
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
+
 
         {/* Shipment Tab */}
         <TabsContent value="shipment" className="space-y-6 mt-6">
@@ -1963,18 +1992,16 @@ export default function OrderDetailsPage() {
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <span className="text-base font-semibold text-gray-900">{record.production_number}</span>
-                              <span className={`text-xs px-2 py-1 rounded ${
-                                record.production_type === "full" 
-                                  ? "bg-blue-100 text-blue-700" 
-                                  : "bg-orange-100 text-orange-700"
-                              }`}>
+                              <span className={`text-xs px-2 py-1 rounded ${record.production_type === "full"
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-orange-100 text-orange-700"
+                                }`}>
                                 {record.production_type === "full" ? "Full" : "Partial"}
                               </span>
-                              <span className={`text-xs px-2 py-1 rounded ${
-                                record.status === "completed" 
-                                  ? "bg-green-100 text-green-700"
-                                  : "bg-yellow-100 text-yellow-700"
-                              }`}>
+                              <span className={`text-xs px-2 py-1 rounded ${record.status === "completed"
+                                ? "bg-green-100 text-green-700"
+                                : "bg-yellow-100 text-yellow-700"
+                                }`}>
                                 {record.status === "completed" ? "Completed" : "In Production"}
                               </span>
                             </div>
@@ -2033,37 +2060,36 @@ export default function OrderDetailsPage() {
                       { value: 'delivered', label: 'Delivered', icon: CheckCircle2, color: 'green' }
                     ]
                     const currentStepIndex = statusSteps.findIndex(s => s.value === shipmentStatus)
-                    
+
                     // Use production record from dispatch (already included in query)
                     const productionRecord = dispatch.production_records
-                    
+
                     return (
                       <Card key={dispatch.id} className="border border-gray-200 shadow-sm">
                         <CardHeader className="bg-white border-b pb-4">
-                        <div className="flex items-center justify-between">
-                          <div>
+                          <div className="flex items-center justify-between">
+                            <div>
                               <CardTitle className="text-base font-semibold text-gray-900 mb-1">
-                              {dispatch.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
-                            </CardTitle>
+                                {dispatch.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
+                              </CardTitle>
                               <div className="flex items-center gap-2 mt-1">
                                 <span className="text-xs text-gray-500">
-                                  {new Date(dispatch.dispatch_date).toLocaleDateString('en-US', { 
-                                    month: 'short', 
+                                  {new Date(dispatch.dispatch_date).toLocaleDateString('en-US', {
+                                    month: 'short',
                                     day: 'numeric',
                                     year: 'numeric'
                                   })}
                                 </span>
-                          </div>
+                              </div>
                             </div>
-                            <span className={`px-2.5 py-1 rounded text-xs font-medium ${
-                            dispatch.dispatch_type === "full" 
-                                ? "bg-green-100 text-green-700" 
-                                : "bg-blue-100 text-blue-700"
-                          }`}>
-                            {dispatch.dispatch_type === "full" ? "Full" : "Partial"}
-                          </span>
-                        </div>
-                      </CardHeader>
+                            <span className={`px-2.5 py-1 rounded text-xs font-medium ${dispatch.dispatch_type === "full"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-blue-100 text-blue-700"
+                              }`}>
+                              {dispatch.dispatch_type === "full" ? "Full" : "Partial"}
+                            </span>
+                          </div>
+                        </CardHeader>
                         <CardContent className="pt-5">
                           <div className="space-y-5">
                             {/* Production Record Info */}
@@ -2073,18 +2099,16 @@ export default function OrderDetailsPage() {
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-3">
                                     <span className="text-base font-semibold text-gray-900">{productionRecord.production_number}</span>
-                                    <span className={`text-xs px-2 py-1 rounded ${
-                                      productionRecord.production_type === "full" 
-                                        ? "bg-blue-100 text-blue-700" 
-                                        : "bg-orange-100 text-orange-700"
-                                    }`}>
+                                    <span className={`text-xs px-2 py-1 rounded ${productionRecord.production_type === "full"
+                                      ? "bg-blue-100 text-blue-700"
+                                      : "bg-orange-100 text-orange-700"
+                                      }`}>
                                       {productionRecord.production_type === "full" ? "Full" : "Partial"}
                                     </span>
-                                    <span className={`text-xs px-2 py-1 rounded ${
-                                      productionRecord.status === "completed" 
-                                        ? "bg-green-100 text-green-700"
-                                        : "bg-yellow-100 text-yellow-700"
-                                    }`}>
+                                    <span className={`text-xs px-2 py-1 rounded ${productionRecord.status === "completed"
+                                      ? "bg-green-100 text-green-700"
+                                      : "bg-yellow-100 text-yellow-700"
+                                      }`}>
                                       {productionRecord.status === "completed" ? "Completed" : "In Production"}
                                     </span>
                                   </div>
@@ -2108,11 +2132,33 @@ export default function OrderDetailsPage() {
                                 </div>
                               </div>
                             )}
-                            {/* Shipment Status - Simplified */}
                             <div>
-                              <Label className="text-sm font-semibold text-gray-700 mb-2 block">
-                                Shipment Status
-                              </Label>
+                              <div className="flex items-center justify-between mb-2">
+                                <Label className="text-sm font-semibold text-gray-700">
+                                  Shipment Status
+                                </Label>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setExpandedShipments(prev => ({
+                                    ...prev,
+                                    [dispatch.id]: !prev[dispatch.id]
+                                  }))}
+                                  className="h-8 py-0 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 gap-1.5"
+                                >
+                                  {expandedShipments[dispatch.id] ? (
+                                    <>
+                                      <span className="text-xs font-bold uppercase tracking-wider">Hide Details</span>
+                                      <ChevronDown className="w-4 h-4" />
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="text-xs font-bold uppercase tracking-wider">View Details</span>
+                                      <ChevronRight className="w-4 h-4" />
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
                               <select
                                 value={shipmentStatus}
                                 onChange={async (e) => {
@@ -2126,11 +2172,10 @@ export default function OrderDetailsPage() {
                                     setError(result.error || "Failed to update status")
                                   }
                                 }}
-                                className={`w-full h-10 px-4 border-2 rounded-lg font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all ${
-                                  shipmentStatus === 'ready' ? 'border-yellow-300 bg-yellow-50 text-yellow-800' :
+                                className={`w-full h-10 px-4 border-2 rounded-lg font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all ${shipmentStatus === 'ready' ? 'border-yellow-300 bg-yellow-50 text-yellow-800' :
                                   shipmentStatus === 'picked_up' ? 'border-blue-300 bg-blue-50 text-blue-800' :
-                                  'border-green-300 bg-green-50 text-green-800'
-                                }`}
+                                    'border-green-300 bg-green-50 text-green-800'
+                                  }`}
                               >
                                 {statusSteps.map((option) => (
                                   <option key={option.value} value={option.value}>
@@ -2140,230 +2185,227 @@ export default function OrderDetailsPage() {
                               </select>
                             </div>
 
-                          {/* Information Grid */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                            {dispatch.courier_companies && (
-                              <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Truck className="w-4 h-4 text-blue-600" />
-                                  <Label className="text-xs font-semibold text-gray-600">Courier Company</Label>
+                            {/* Collapsible Details Section */}
+                            {expandedShipments[dispatch.id] && (
+                              <div className="space-y-5 animate-in fade-in slide-in-from-top-2 duration-300">
+                                {/* Information Grid */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {dispatch.courier_companies && (
+                                    <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <Truck className="w-4 h-4 text-blue-600" />
+                                        <Label className="text-xs font-semibold text-gray-600">Courier Company</Label>
+                                      </div>
+                                      <p className="text-base font-bold text-gray-900">{dispatch.courier_companies.name}</p>
+                                    </div>
+                                  )}
+                                  {dispatch.tracking_id && (
+                                    <div className="p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border border-gray-200">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <FileText className="w-4 h-4 text-gray-600" />
+                                        <Label className="text-xs font-semibold text-gray-600">Tracking ID</Label>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <p className="text-base font-mono font-bold text-gray-900">{dispatch.tracking_id}</p>
+                                        {dispatch.courier_companies?.tracking_url && (
+                                          <a
+                                            href={dispatch.courier_companies.tracking_url.replace('{tracking_number}', dispatch.tracking_id)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium flex items-center gap-1"
+                                          >
+                                            <Truck className="w-3 h-3" />
+                                            Track
+                                          </a>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
-                                <p className="text-base font-bold text-gray-900">{dispatch.courier_companies.name}</p>
-                            </div>
-                          )}
-                          {dispatch.tracking_id && (
-                              <div className="p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border border-gray-200">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <FileText className="w-4 h-4 text-gray-600" />
-                                  <Label className="text-xs font-semibold text-gray-600">Tracking ID</Label>
-                                </div>
-                              <div className="flex items-center gap-2">
-                                  <p className="text-base font-mono font-bold text-gray-900">{dispatch.tracking_id}</p>
-                                {dispatch.courier_companies?.tracking_url && (
-                                  <a
-                                    href={dispatch.courier_companies.tracking_url.replace('{tracking_number}', dispatch.tracking_id)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                      className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium flex items-center gap-1"
-                                  >
-                                      <Truck className="w-3 h-3" />
-                                      Track
-                                  </a>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                          </div>
 
-                          {/* Tracking Slip */}
-                          <div className="p-5 bg-white border-2 border-gray-300 rounded-lg shadow-sm">
-                            <div className="flex items-center justify-between mb-4">
-                              <Label className="text-sm font-semibold text-gray-700">Tracking Slip</Label>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={async () => {
-                                  if (!order) return
-                                  
-                                  setGeneratingTrackingSlip(dispatch.id)
-                                  try {
-                                    // Get dispatch items with names
-                                    const dispatchItems = dispatch.dispatch_items?.map((di: any) => {
-                                      const orderItem = di.order_items
-                                      let itemName = `Item`
-                                      
-                                      if (orderItem) {
-                                        let inventoryItem: InventoryItem | undefined
-                                        let subItem: SubItem | undefined
-                                        
-                                        inventoryItem = inventoryItems.find(inv => 
-                                          inv.id === orderItem.inventory_item_id || inv.id === orderItem.product_id
-                                        )
-                                        
-                                        if (!inventoryItem) {
-                                          for (const parentItem of inventoryItems) {
-                                            subItem = parentItem.sub_items?.find(sub => 
-                                              sub.id === orderItem.inventory_item_id || sub.id === orderItem.product_id
-                                            )
-                                            if (subItem) {
-                                              inventoryItem = parentItem
-                                              break
+                                {/* Tracking Slip Preview */}
+                                <div className="p-5 bg-white border-2 border-gray-300 rounded-lg shadow-sm">
+                                  <div className="flex items-center justify-between mb-4">
+                                    <Label className="text-sm font-semibold text-gray-700">Tracking Slip</Label>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={async () => {
+                                        if (!order) return
+
+                                        setGeneratingTrackingSlip(dispatch.id)
+                                        try {
+                                          const dispatchItems = dispatch.dispatch_items?.map((di: any) => {
+                                            const orderItem = di.order_items
+                                            let itemName = `Item`
+
+                                            if (orderItem) {
+                                              let inventoryItem: InventoryItem | undefined
+                                              let subItem: SubItem | undefined
+
+                                              inventoryItem = inventoryItems.find(inv =>
+                                                inv.id === orderItem.inventory_item_id || inv.id === orderItem.product_id
+                                              )
+
+                                              if (!inventoryItem) {
+                                                for (const parentItem of inventoryItems) {
+                                                  subItem = parentItem.sub_items?.find(sub =>
+                                                    sub.id === orderItem.inventory_item_id || sub.id === orderItem.product_id
+                                                  )
+                                                  if (subItem) {
+                                                    inventoryItem = parentItem
+                                                    break
+                                                  }
+                                                }
+                                              }
+
+                                              itemName = subItem
+                                                ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
+                                                : inventoryItem?.item_name || `Item`
+                                            }
+
+                                            return {
+                                              name: itemName,
+                                              quantity: di.quantity
+                                            }
+                                          }) || []
+
+                                          const dispatchData = {
+                                            dispatchType: dispatch.dispatch_type || 'full',
+                                            dispatchDate: dispatch.dispatch_date || new Date().toISOString(),
+                                            trackingId: dispatch.tracking_id,
+                                            courierName: dispatch.courier_companies?.name,
+                                            productionNumber: productionRecord?.production_number,
+                                            items: dispatchItems
+                                          }
+
+                                          const logoDataUrl = await fetchLogoDataUrl()
+                                          const { blob, filename } = generateTrackingSlipPDF(order, dispatchData, { logoDataUrl })
+
+                                          const url = URL.createObjectURL(blob)
+                                          const link = document.createElement('a')
+                                          link.href = url
+                                          link.download = filename
+                                          document.body.appendChild(link)
+                                          link.click()
+                                          document.body.removeChild(link)
+                                          URL.revokeObjectURL(url)
+
+                                          setSuccess("Tracking slip generated successfully!")
+                                          setTimeout(() => setSuccess(null), 3000)
+                                        } catch (err: any) {
+                                          setError(err.message || "Failed to generate tracking slip")
+                                        } finally {
+                                          setGeneratingTrackingSlip(null)
+                                        }
+                                      }}
+                                      disabled={generatingTrackingSlip === dispatch.id}
+                                      className="h-8 text-xs"
+                                    >
+                                      {generatingTrackingSlip === dispatch.id ? (
+                                        <>
+                                          <div className="w-3 h-3 mr-1.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                                          Generating...
+                                        </>
+                                      ) : (
+                                        <>
+                                          <FileDown className="w-3 h-3 mr-1.5" />
+                                          Download PDF
+                                        </>
+                                      )}
+                                    </Button>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="border-r border-gray-200 pr-6">
+                                      <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">FROM</Label>
+                                      <div className="text-sm text-gray-900 space-y-1">
+                                        <p className="font-bold text-base">SUNKOOL SOLUTION</p>
+                                        <p>510, WESTERN PALACE,</p>
+                                        <p>CONGRESS NAGAR, OPP.PARK</p>
+                                        <p>NAGPUR - 440012</p>
+                                        <p className="mt-2">MOB. NO. 9156321123</p>
+                                      </div>
+                                    </div>
+                                    <div className="pl-0 md:pl-6">
+                                      <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">TO,</Label>
+                                      <div className="text-sm text-gray-900 space-y-1">
+                                        <p className="font-bold text-base">{order?.customers?.name || 'Customer Name'}</p>
+                                        {order?.customers?.address ? (
+                                          <div>
+                                            {order.customers.address.split(',').map((line: string, idx: number) => (
+                                              <p key={idx}>{line.trim()}</p>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <p className="text-gray-400 italic">Address not available</p>
+                                        )}
+                                        {order?.customers?.phone ? (
+                                          <p className="mt-2">MOB. NO. {order.customers.phone}</p>
+                                        ) : (
+                                          <p className="mt-2 text-gray-400 italic">MOB. NO. Not available</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Items Section */}
+                                {dispatch.dispatch_items && dispatch.dispatch_items.length > 0 && (
+                                  <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                                    <Label className="text-sm font-semibold text-gray-700 mb-3 block">Items Dispatched</Label>
+                                    <div className="space-y-2">
+                                      {dispatch.dispatch_items.map((di: any, idx: number) => {
+                                        const orderItem = di.order_items
+                                        let itemName = `Item ${idx + 1}`
+
+                                        if (orderItem) {
+                                          let inventoryItem: InventoryItem | undefined
+                                          let subItem: SubItem | undefined
+
+                                          inventoryItem = inventoryItems.find(inv =>
+                                            inv.id === orderItem.inventory_item_id || inv.id === orderItem.product_id
+                                          )
+
+                                          if (!inventoryItem) {
+                                            for (const parentItem of inventoryItems) {
+                                              subItem = parentItem.sub_items?.find(sub =>
+                                                sub.id === orderItem.inventory_item_id || sub.id === orderItem.product_id
+                                              )
+                                              if (subItem) {
+                                                inventoryItem = parentItem
+                                                break
+                                              }
                                             }
                                           }
+
+                                          itemName = subItem
+                                            ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
+                                            : inventoryItem?.item_name || `Item ${idx + 1}`
                                         }
-                                        
-                                        itemName = subItem 
-                                          ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
-                                          : inventoryItem?.item_name || `Item`
-                                      }
-                                      
-                                      return {
-                                        name: itemName,
-                                        quantity: di.quantity
-                                      }
-                                    }) || []
 
-                                    const dispatchData = {
-                                      dispatchType: dispatch.dispatch_type || 'full',
-                                      dispatchDate: dispatch.dispatch_date || new Date().toISOString(),
-                                      trackingId: dispatch.tracking_id,
-                                      courierName: dispatch.courier_companies?.name,
-                                      productionNumber: productionRecord?.production_number,
-                                      items: dispatchItems
-                                    }
-
-                                    const { blob, filename } = generateTrackingSlipPDF(order, dispatchData)
-                                    
-                                    // Create download link
-                                    const url = URL.createObjectURL(blob)
-                                    const link = document.createElement('a')
-                                    link.href = url
-                                    link.download = filename
-                                    document.body.appendChild(link)
-                                    link.click()
-                                    document.body.removeChild(link)
-                                    URL.revokeObjectURL(url)
-                                    
-                                    setSuccess("Tracking slip generated successfully!")
-                                    setTimeout(() => setSuccess(null), 3000)
-                                  } catch (err: any) {
-                                    setError(err.message || "Failed to generate tracking slip")
-                                  } finally {
-                                    setGeneratingTrackingSlip(null)
-                                  }
-                                }}
-                                disabled={generatingTrackingSlip === dispatch.id}
-                                className="h-8 text-xs"
-                              >
-                                {generatingTrackingSlip === dispatch.id ? (
-                                  <>
-                                    <div className="w-3 h-3 mr-1.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-                                    Generating...
-                                  </>
-                                ) : (
-                                  <>
-                                    <FileDown className="w-3 h-3 mr-1.5" />
-                                    Download PDF
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              {/* Sender Address */}
-                              <div className="border-r border-gray-200 pr-6">
-                                <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">FROM</Label>
-                                <div className="text-sm text-gray-900 space-y-1">
-                                  <p className="font-bold text-base">SUNKOOL SOLUTION</p>
-                                  <p>510, WESTERN PALACE,</p>
-                                  <p>CONGRESS NAGAR, OPP.PARK</p>
-                                  <p>NAGPUR - 440012</p>
-                                  <p className="mt-2">MOB. NO. 9156321123</p>
-                                </div>
-                              </div>
-                              
-                              {/* Receiver Address */}
-                              <div className="pl-0 md:pl-6">
-                                <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">TO,</Label>
-                                <div className="text-sm text-gray-900 space-y-1">
-                                  <p className="font-bold text-base">{order?.customers?.name || 'Customer Name'}</p>
-                                  {order?.customers?.address ? (
-                            <div>
-                                      {order.customers.address.split(',').map((line: string, idx: number) => (
-                                        <p key={idx}>{line.trim()}</p>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <p className="text-gray-400 italic">Address not available</p>
-                                  )}
-                                  {order?.customers?.phone ? (
-                                    <p className="mt-2">MOB. NO. {order.customers.phone}</p>
-                                  ) : (
-                                    <p className="mt-2 text-gray-400 italic">MOB. NO. Not available</p>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Items Section */}
-                          {dispatch.dispatch_items && dispatch.dispatch_items.length > 0 && (
-                            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                              <Label className="text-sm font-semibold text-gray-700 mb-3 block">Items Dispatched</Label>
-                              <div className="space-y-2">
-                                {dispatch.dispatch_items.map((di: any, idx: number) => {
-                                  // Get order_item from nested structure
-                                  const orderItem = di.order_items
-                                  let itemName = `Item ${idx + 1}`
-                                  
-                                  if (orderItem) {
-                                    let inventoryItem: InventoryItem | undefined
-                                    let subItem: SubItem | undefined
-                                    
-                                    // Find inventory item using inventory_item_id or product_id from order_item
-                                    inventoryItem = inventoryItems.find(inv => 
-                                      inv.id === orderItem.inventory_item_id || inv.id === orderItem.product_id
-                                    )
-                                    
-                                    // If not found, check sub_items
-                                    if (!inventoryItem) {
-                                      for (const parentItem of inventoryItems) {
-                                        subItem = parentItem.sub_items?.find(sub => 
-                                          sub.id === orderItem.inventory_item_id || sub.id === orderItem.product_id
+                                        return (
+                                          <div key={di.id} className="flex items-center justify-between py-2.5 px-3 bg-white rounded border border-gray-200 hover:border-blue-300 transition-colors">
+                                            <span className="text-sm text-gray-700">{itemName}</span>
+                                            <span className="text-sm font-bold text-gray-900">{di.quantity} units</span>
+                                          </div>
                                         )
-                                        if (subItem) {
-                                          inventoryItem = parentItem
-                                          break
-                                        }
-                                      }
-                                    }
-                                    
-                                    // Build item name
-                                    itemName = subItem 
-                                      ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
-                                      : inventoryItem?.item_name || `Item ${idx + 1}`
-                                  }
-                                  
-                                  return (
-                                    <div key={di.id} className="flex items-center justify-between py-2.5 px-3 bg-white rounded border border-gray-200 hover:border-blue-300 transition-colors">
-                                      <span className="text-sm text-gray-700">{itemName}</span>
-                                      <span className="text-sm font-bold text-gray-900">{di.quantity} units</span>
+                                      })}
+                                    </div>
                                   </div>
-                                  )
-                                })}
-                              </div>
-                            </div>
-                          )}
+                                )}
 
-                          {/* Notes */}
-                          {dispatch.notes && (
-                            <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
-                              <Label className="text-xs font-semibold text-gray-700 mb-1 block">Notes</Label>
-                              <p className="text-sm text-gray-700">{dispatch.notes}</p>
-                            </div>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
+                                {/* Notes */}
+                                {dispatch.notes && (
+                                  <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
+                                    <Label className="text-xs font-semibold text-gray-700 mb-1 block">Notes</Label>
+                                    <p className="text-sm text-gray-700">{dispatch.notes}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
                     )
                   })}
                 </div>
@@ -2378,7 +2420,7 @@ export default function OrderDetailsPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg font-semibold text-gray-900">
                     Create Dispatch for {selectedProductionRecord.production_number}
-              </CardTitle>
+                  </CardTitle>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -2391,13 +2433,13 @@ export default function OrderDetailsPage() {
                   </Button>
                 </div>
                 <CardDescription className="mt-1">
-                  {selectedProductionRecord.production_type === "full" 
+                  {selectedProductionRecord.production_type === "full"
                     ? "Create a dispatch for the full order production"
                     : "Create a dispatch for the partial production quantities"}
                 </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="space-y-4">
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="space-y-4">
                   {/* Production Record Info */}
                   <div className="p-4 bg-gray-50 rounded-lg border">
                     <Label className="text-sm font-semibold text-gray-700 mb-2 block">Production Record Details</Label>
@@ -2408,11 +2450,10 @@ export default function OrderDetailsPage() {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Type:</span>
-                        <span className={`px-2 py-0.5 rounded text-xs ${
-                          selectedProductionRecord.production_type === "full"
-                            ? "bg-blue-100 text-blue-700"
-                            : "bg-orange-100 text-orange-700"
-                        }`}>
+                        <span className={`px-2 py-0.5 rounded text-xs ${selectedProductionRecord.production_type === "full"
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-orange-100 text-orange-700"
+                          }`}>
                           {selectedProductionRecord.production_type === "full" ? "Full" : "Partial"}
                         </span>
                       </div>
@@ -2436,14 +2477,14 @@ export default function OrderDetailsPage() {
                               // Find inventory item for display name
                               let inventoryItem: InventoryItem | undefined
                               let subItem: SubItem | undefined
-                              
-                              inventoryItem = inventoryItems.find(inv => 
+
+                              inventoryItem = inventoryItems.find(inv =>
                                 inv.id === item.inventory_item_id || inv.id === item.product_id
                               )
-                              
+
                               if (!inventoryItem) {
                                 for (const parentItem of inventoryItems) {
-                                  subItem = parentItem.sub_items?.find(sub => 
+                                  subItem = parentItem.sub_items?.find(sub =>
                                     sub.id === item.inventory_item_id || sub.id === item.product_id
                                   )
                                   if (subItem) {
@@ -2452,11 +2493,11 @@ export default function OrderDetailsPage() {
                                   }
                                 }
                               }
-                              
-                              const displayName = subItem 
+
+                              const displayName = subItem
                                 ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
                                 : inventoryItem?.item_name || `Item ${index + 1}`
-                              
+
                               // Get quantity from production record
                               let dispatchQty = 0
                               if (selectedProductionRecord.production_type === "full") {
@@ -2464,9 +2505,9 @@ export default function OrderDetailsPage() {
                               } else if (selectedProductionRecord.selected_quantities && selectedProductionRecord.selected_quantities[item.id]) {
                                 dispatchQty = selectedProductionRecord.selected_quantities[item.id] as number
                               }
-                              
+
                               if (dispatchQty === 0) return null
-                              
+
                               return (
                                 <tr key={item.id} className="hover:bg-gray-50">
                                   <td className="px-4 py-2 text-sm text-gray-900">{displayName}</td>
@@ -2577,7 +2618,7 @@ export default function OrderDetailsPage() {
                         try {
                           // Prepare dispatch items based on production record
                           const dispatchItems: Array<{ order_item_id: string; quantity: number }> = []
-                          
+
                           order.items.forEach((item) => {
                             let qty = 0
                             if (selectedProductionRecord.production_type === "full") {
@@ -2585,7 +2626,7 @@ export default function OrderDetailsPage() {
                             } else if (selectedProductionRecord.selected_quantities && selectedProductionRecord.selected_quantities[item.id]) {
                               qty = selectedProductionRecord.selected_quantities[item.id] as number
                             }
-                            
+
                             if (qty > 0) {
                               dispatchItems.push({
                                 order_item_id: item.id,
@@ -2643,7 +2684,63 @@ export default function OrderDetailsPage() {
 
         {/* Payment Tab */}
         <TabsContent value="payment" className="mt-6">
-          <div className="max-w-[1100px] mx-auto px-6 space-y-8">
+          <div className="max-w-[1200px] mx-auto px-6 space-y-6">
+            {/* Payment Overview - Always visible at top */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card className="shadow-sm border border-gray-200">
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Order Total</p>
+                  <p className="text-xl font-bold text-gray-900">₹{(order?.total_price ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                </CardContent>
+              </Card>
+              <Card className="shadow-sm border border-gray-200">
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Total Paid</p>
+                  <p className="text-xl font-bold text-green-600">
+                    ₹{orderPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="shadow-sm border border-gray-200">
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Amount Due</p>
+                  <p className="text-xl font-bold text-orange-600">
+                    ₹{Math.max(0, (order?.total_price ?? 0) - orderPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="shadow-sm border border-gray-200">
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Payment Status</p>
+                  <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${paymentStatus === 'complete'
+                    ? "bg-green-100 text-green-700"
+                    : paymentStatus === 'partial'
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-amber-100 text-amber-700"
+                    }`}>
+                    {paymentStatus === 'complete' ? 'Paid' : paymentStatus === 'partial' ? 'Partial' : 'Pending'}
+                  </span>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Dispatch Required Alert - show only when order has no dispatch records */}
+            {!canRecordPayment && (
+              <Card className="shadow-sm border-2 border-red-200 bg-red-50">
+                <CardContent className="p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <h3 className="text-sm font-semibold text-red-900 mb-1">Payment Recording Not Available</h3>
+                      <p className="text-sm text-red-800">
+                        Orders must be dispatched before adding payment records. Current order status: <strong>{order?.order_status || 'Pending'}</strong>. Complete production and create a dispatch in the <strong>Shipment</strong> tab first.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Cash Discount Alert */}
             {order.cash_discount && (
               <Card className="shadow-sm border border-amber-200 bg-amber-50">
@@ -2655,7 +2752,7 @@ export default function OrderDetailsPage() {
                         Cash Discount Applied
                       </h3>
                       <p className="text-sm text-amber-800">
-                        This order has a cash discount applied. Please ensure payment followup is tracked in the <strong>Payment Followup</strong> tab. Payment reminders will be generated automatically.
+                        Track payment followup in the <strong>Payment Followup</strong> tab. Payment reminders will be generated automatically.
                       </p>
                     </div>
                   </div>
@@ -2663,51 +2760,73 @@ export default function OrderDetailsPage() {
               </Card>
             )}
 
-            {/* Unified Invoice Record */}
+            {/* Invoice + Payment Flow */}
             <Card className="shadow-sm border border-gray-200">
               <CardHeader className="bg-gray-50 border-b border-gray-200 pb-4">
                 <CardTitle className="flex items-center gap-2.5 text-xl font-semibold text-gray-900 mb-2">
                   <FileText className="w-5 h-5 text-blue-600" />
-                  Invoice Record
+                  Payment
                 </CardTitle>
                 <CardDescription className="text-sm text-gray-600">
-                  Complete invoice details with production, dispatch, and payment information
+                  Step-by-step flow: Invoice Number → Attachments → Payment Record
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-6">
                 <div className="space-y-6">
-                  {/* Invoice Number */}
-                <div>
-                  <Label className="text-sm font-semibold text-gray-700 mb-2 block">
-                    Invoice Number
-                  </Label>
+                  {/* Step 1: Invoice Number */}
+                  <div>
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <Label className="text-sm font-semibold text-gray-700">
+                        1) Invoice Number
+                      </Label>
+                      <span className="text-xs text-gray-500">Required before recording payment</span>
+                    </div>
                     <div className="flex gap-3 items-start">
-                  <Input
-                    type="text"
-                    value={invoiceNumber}
-                    onChange={(e) => setInvoiceNumber(e.target.value)}
+                      <Input
+                        type="text"
+                        value={invoiceNumber}
+                        onChange={(e) => setInvoiceNumber(e.target.value)}
                         placeholder="Enter invoice number or generate from dispatch"
                         className="flex-1 h-10"
                       />
-                      {dispatches && dispatches.length > 0 && order?.internal_order_number && !invoiceNumber && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            const baseOrderNumber = order.internal_order_number || 'ORD'
-                            const dispatchCount = dispatches.length
-                            const generatedInvoice = dispatchCount === 1 
-                              ? `INV-${baseOrderNumber}`
-                              : `INV-${baseOrderNumber}-${String(dispatchCount).padStart(3, '0')}`
-                            setInvoiceNumber(generatedInvoice)
-                          }}
-                          className="h-10 whitespace-nowrap"
-                        >
-                          <Plus className="w-4 h-4 mr-1.5" />
-                          Generate
-                        </Button>
-                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          const baseOrderNumber = order?.internal_order_number || 'ORD'
+                          const generatedInvoice = `INV-${baseOrderNumber}`
+                          setInvoiceNumber(generatedInvoice)
+                        }}
+                        className="h-10 whitespace-nowrap"
+                      >
+                        <Plus className="w-4 h-4 mr-1.5" />
+                        Regenerate
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={async () => {
+                          // Save invoice number only (no payment status update)
+                          const result = await updateOrderPayment(orderId, invoiceNumber || undefined)
+                          if (result.success) {
+                            setSuccess("Invoice number saved!")
+                            await loadOrderDetails()
+                            setTimeout(() => setSuccess(null), 2000)
+                          } else {
+                            setError(result.error || "Failed to save invoice number")
+                          }
+                        }}
+                        disabled={!invoiceNumber}
+                        className="h-10 bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        <Check className="w-4 h-4 mr-1.5" />
+                        Save
+                      </Button>
                     </div>
+                    {!invoiceNumber && (
+                      <p className="text-xs text-gray-500 mt-2">
+                        Invoice number will be generated automatically once production is completed.
+                      </p>
+                    )}
                   </div>
 
                   {/* Divider */}
@@ -2728,13 +2847,12 @@ export default function OrderDetailsPage() {
                                 <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
                                   {record.production_type === "full" ? "Full" : "Partial"}
                                 </span>
-                                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                                  record.status === "completed"
-                                    ? "bg-green-100 text-green-700"
-                                    : record.status === "in_production"
+                                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${record.status === "completed"
+                                  ? "bg-green-100 text-green-700"
+                                  : record.status === "in_production"
                                     ? "bg-yellow-100 text-yellow-700"
                                     : "bg-gray-100 text-gray-700"
-                                }`}>
+                                  }`}>
                                   {record.status === "completed" ? "Completed" : record.status === "in_production" ? "In Production" : "Pending"}
                                 </span>
                               </div>
@@ -2771,8 +2889,8 @@ export default function OrderDetailsPage() {
                                   {dispatch.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
                                 </span>
                                 <span className="text-xs text-gray-500">
-                                  {new Date(dispatch.dispatch_date).toLocaleDateString('en-US', { 
-                                    month: 'short', 
+                                  {new Date(dispatch.dispatch_date).toLocaleDateString('en-US', {
+                                    month: 'short',
                                     day: 'numeric',
                                     year: 'numeric'
                                   })}
@@ -2783,13 +2901,12 @@ export default function OrderDetailsPage() {
                                   </span>
                                 )}
                               </div>
-                              <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                                dispatch.shipment_status === 'delivered'
-                                  ? "bg-green-100 text-green-700"
-                                  : dispatch.shipment_status === 'picked_up'
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${dispatch.shipment_status === 'delivered'
+                                ? "bg-green-100 text-green-700"
+                                : dispatch.shipment_status === 'picked_up'
                                   ? "bg-blue-100 text-blue-700"
                                   : "bg-yellow-100 text-yellow-700"
-                              }`}>
+                                }`}>
                                 {dispatch.shipment_status === 'delivered' ? 'Delivered' : dispatch.shipment_status === 'picked_up' ? 'Picked Up' : 'Ready'}
                               </span>
                             </div>
@@ -2810,136 +2927,300 @@ export default function OrderDetailsPage() {
                     <div className="h-px bg-gray-200"></div>
                   ) : null}
 
-                  {/* Payment Status */}
-                  {invoiceNumber && (
-                    <div>
-                      <Label className="text-sm font-semibold text-gray-700 mb-2 block">
-                        Payment Status
+                  {/* Step 2: Invoice Attachments */}
+                  <div>
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <Label className="text-sm font-semibold text-gray-700">
+                        2) Invoice Attachments
                       </Label>
-                      <div className="space-y-4">
-                        <div className="flex flex-wrap items-center gap-4">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="paymentStatus"
-                              checked={paymentStatus === 'complete'}
-                              onChange={() => setPaymentStatus('complete')}
-                              className="w-4 h-4 text-blue-600"
-                            />
-                            <span className="text-sm font-medium text-gray-700">Payment Complete</span>
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="paymentStatus"
-                              checked={paymentStatus === 'partial'}
-                              onChange={() => setPaymentStatus('partial')}
-                              className="w-4 h-4 text-blue-600"
-                            />
-                            <span className="text-sm font-medium text-gray-700">Partial Payment</span>
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="paymentStatus"
-                              checked={paymentStatus === 'pending'}
-                              onChange={() => setPaymentStatus('pending')}
-                              className="w-4 h-4 text-blue-600"
-                            />
-                            <span className="text-sm font-medium text-gray-700">Payment Not Complete</span>
-                          </label>
-                        </div>
-                        
-                        {/* Payment Date - shown for complete or partial */}
-                        {(paymentStatus === 'complete' || paymentStatus === 'partial') && (
-                          <div>
-                            <Label className="text-sm font-semibold text-gray-700 mb-2 block">
-                              Payment Date
-                            </Label>
-                            <Input
-                              type="date"
-                              value={paymentDate}
-                              onChange={(e) => setPaymentDate(e.target.value)}
-                              className="h-10 max-w-xs"
-                            />
-                          </div>
-                        )}
+                      <span className="text-xs text-gray-500">Upload invoice PDF/JPG/PNG</span>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <input
+                          id="invoice-attachment-input"
+                          type="file"
+                          accept="application/pdf,image/*"
+                          className="hidden"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            if (file) {
+                              handleInvoiceAttachmentUpload(file)
+                            }
+                            event.target.value = ""
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            const input = document.getElementById("invoice-attachment-input") as HTMLInputElement | null
+                            input?.click()
+                          }}
+                          disabled={uploadingInvoiceAttachment}
+                          className="h-10"
+                        >
+                          {uploadingInvoiceAttachment ? (
+                            <>
+                              <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></span>
+                              Uploading...
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-4 h-4 mr-2" />
+                              Upload Attachment
+                            </>
+                          )}
+                        </Button>
+                        <p className="text-xs text-gray-500">Accepted: PDF, JPG, PNG</p>
+                      </div>
 
-                        {/* Partial Payment Amount Fields */}
-                        {paymentStatus === 'partial' && (
-                          <div className="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div>
-                                <Label className="text-sm font-semibold text-gray-700 mb-2 block">
-                                  Amount Paid (₹)
-                                </Label>
-                                <Input
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  value={partialPaymentAmount}
-                                  onChange={(e) => {
-                                    const paid = parseFloat(e.target.value) || 0
-                                    setPartialPaymentAmount(e.target.value)
-                                    // Auto-calculate remaining amount
-                                    if (order?.total_price) {
-                                      const remaining = Math.max(0, order.total_price - paid)
-                                      setRemainingPaymentAmount(remaining.toFixed(2))
-                                    }
-                                  }}
-                                  placeholder="Enter amount paid"
-                    className="h-10"
-                  />
-                                {order?.total_price && partialPaymentAmount && (
-                                  <p className="text-xs text-gray-500 mt-1">
-                                    Total: ₹{order.total_price.toFixed(2)}
-                                  </p>
-                                )}
-                </div>
-                <div>
-                  <Label className="text-sm font-semibold text-gray-700 mb-2 block">
-                                  Remaining Amount (₹)
-                  </Label>
-                                <Input
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  value={remainingPaymentAmount}
-                                  onChange={(e) => setRemainingPaymentAmount(e.target.value)}
-                                  placeholder="Auto-calculated"
-                                  className="h-10 bg-gray-50"
-                                  readOnly
-                                />
-                                {order?.total_price && remainingPaymentAmount && (
-                  <p className="text-xs text-gray-500 mt-1">
-                                    {((parseFloat(remainingPaymentAmount) / order.total_price) * 100).toFixed(1)}% remaining
-                  </p>
-                                )}
-                </div>
-                            </div>
-                            {order?.total_price && partialPaymentAmount && (
-                              <div className="mt-2 p-2 bg-white rounded border border-blue-300">
-                                <div className="flex items-center justify-between text-sm">
-                                  <span className="text-gray-600">Payment Progress:</span>
-                                  <span className="font-semibold text-blue-700">
-                                    {((parseFloat(partialPaymentAmount) / order.total_price) * 100).toFixed(1)}% Paid
-                                  </span>
+                      {invoiceAttachments.length === 0 ? (
+                        <div className="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-lg p-4">
+                          No attachments uploaded yet.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {invoiceAttachments.map((attachment) => (
+                            <div
+                              key={attachment.id}
+                              className="flex flex-wrap items-center justify-between gap-3 p-3 border border-gray-200 rounded-lg bg-white"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-md bg-blue-50 text-blue-600">
+                                  <File className="w-4 h-4" />
                                 </div>
-                                <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
-                                  <div
-                                    className="bg-blue-600 h-2 rounded-full transition-all"
-                                    style={{
-                                      width: `${Math.min(100, (parseFloat(partialPaymentAmount) / order.total_price) * 100)}%`
-                                    }}
-                                  ></div>
+                                <div>
+                                  <p className="text-sm font-medium text-gray-900">{attachment.file_name}</p>
+                                  <p className="text-xs text-gray-500">
+                                    {(attachment.file_size ? (attachment.file_size / 1024).toFixed(1) : "-")}
+                                    {attachment.file_size ? " KB" : ""}
+                                    {attachment.created_at
+                                      ? ` • ${new Date(attachment.created_at).toLocaleDateString()}`
+                                      : ""}
+                                  </p>
                                 </div>
                               </div>
-                            )}
-                          </div>
-                        )}
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => window.open(attachment.file_url, '_blank')}
+                                  className="h-8 text-xs"
+                                >
+                                  <Download className="w-3 h-3 mr-1" />
+                                  Download
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={async () => {
+                                    if (confirm("Delete this attachment?")) {
+                                      const result = await deleteInvoiceAttachment(attachment.id)
+                                      if (result.success) {
+                                        await loadInvoiceAttachments()
+                                        setSuccess("Attachment deleted!")
+                                        setTimeout(() => setSuccess(null), 2000)
+                                      } else {
+                                        setError(result.error || "Failed to delete attachment")
+                                      }
+                                    }
+                                  }}
+                                  className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Step 3: Add Payment Record */}
+                  <div>
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <Label className="text-sm font-semibold text-gray-700">
+                        3) Add Payment in Record
+                      </Label>
+                      <span className="text-xs text-gray-500">Adds an entry to payment history</span>
+                    </div>
+
+                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <Label className="text-xs font-semibold text-gray-600">Amount (₹) *</Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={paymentAmount}
+                            onChange={(e) => setPaymentAmount(e.target.value)}
+                            placeholder="e.g. 25000"
+                            className="h-10"
+                            disabled={!invoiceNumber || !canRecordPayment || addingPayment}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs font-semibold text-gray-600">Payment Date</Label>
+                          <Input
+                            type="date"
+                            value={paymentDate || new Date().toISOString().split('T')[0]}
+                            onChange={(e) => setPaymentDate(e.target.value)}
+                            className="h-10"
+                            disabled={!invoiceNumber || !canRecordPayment || addingPayment}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs font-semibold text-gray-600">Method</Label>
+                          <Select
+                            value={paymentMethod || "cash"}
+                            onValueChange={setPaymentMethod}
+                            disabled={!invoiceNumber || !canRecordPayment || addingPayment}
+                          >
+                            <SelectTrigger className="h-10">
+                              <SelectValue placeholder="Select method" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="cash">Cash</SelectItem>
+                              <SelectItem value="upi">UPI</SelectItem>
+                              <SelectItem value="neft">NEFT</SelectItem>
+                              <SelectItem value="cheque">Cheque</SelectItem>
+                              <SelectItem value="rtgs">RTGS</SelectItem>
+                              <SelectItem value="card">Card</SelectItem>
+                              <SelectItem value="other">Other</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-xs font-semibold text-gray-600">Reference</Label>
+                          <Input
+                            type="text"
+                            value={paymentReference}
+                            onChange={(e) => setPaymentReference(e.target.value)}
+                            placeholder="Txn / Cheque / Ref no."
+                            className="h-10"
+                            disabled={!invoiceNumber || !canRecordPayment || addingPayment}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs font-semibold text-gray-600">Notes</Label>
+                          <Input
+                            type="text"
+                            value={paymentNotes}
+                            onChange={(e) => setPaymentNotes(e.target.value)}
+                            placeholder="Any notes"
+                            className="h-10"
+                            disabled={!invoiceNumber || !canRecordPayment || addingPayment}
+                          />
+                        </div>
+                      </div>
+
+                      {!invoiceNumber && (
+                        <p className="text-xs text-amber-700">
+                          Please set an invoice number first.
+                        </p>
+                      )}
+
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          onClick={handleAddPaymentRecord}
+                          disabled={!invoiceNumber || !canRecordPayment || addingPayment}
+                          className="bg-green-600 hover:bg-green-700 text-white h-10 px-6"
+                        >
+                          {addingPayment ? (
+                            <>
+                              <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                              Adding...
+                            </>
+                          ) : (
+                            <>
+                              <DollarSign className="w-4 h-4 mr-2" />
+                              Add Payment
+                            </>
+                          )}
+                        </Button>
                       </div>
                     </div>
-                  )}
+                  </div>
+
+                  {/* Payment History */}
+                  <div>
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <Label className="text-sm font-semibold text-gray-700">Payment History</Label>
+                      {loadingPayments ? (
+                        <span className="text-xs text-gray-500">Loading...</span>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={loadOrderPayments}
+                          disabled={loadingPayments}
+                          className="h-8 text-xs"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loadingPayments ? 'animate-spin' : ''}`} />
+                          Refresh
+                        </Button>
+                      )}
+                    </div>
+
+                    {orderPayments.length === 0 ? (
+                      <div className="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-lg p-4">
+                        No payments recorded yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {orderPayments.map((p) => (
+                          <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50/50">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base font-semibold text-gray-900">₹{Number(p.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <span className="text-xs text-gray-500">• {p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '-'}</span>
+                                {p.payment_method && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100 font-semibold uppercase tracking-wide">
+                                    {p.payment_method}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-600">
+                                {p.reference ? `Ref: ${p.reference}` : ""}
+                                {p.reference && p.notes ? " • " : ""}
+                                {p.notes || ""}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={async () => {
+                                  if (confirm("Delete this payment record?")) {
+                                    const result = await deleteOrderPayment(p.id)
+                                    if (result.success) {
+                                      await loadOrderPayments()
+                                      setSuccess("Payment record deleted!")
+                                      setTimeout(() => setSuccess(null), 2000)
+                                    } else {
+                                      setError(result.error || "Failed to delete payment")
+                                    }
+                                  }
+                                }}
+                                className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                title="Delete payment"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   {(!productionRecords || productionRecords.length === 0) && (!dispatches || dispatches.length === 0) && (
                     <div className="text-center py-8 text-gray-500 text-sm">
@@ -2947,28 +3228,30 @@ export default function OrderDetailsPage() {
                     </div>
                   )}
 
-                  {/* Update Button */}
+                  {/* Optional: keep existing status updater as “Summary” */}
                   {invoiceNumber && (
                     <>
                       <div className="h-px bg-gray-200"></div>
-                      <div className="flex justify-end">
-                  <Button
-                    onClick={handleUpdatePayment}
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div className="text-xs text-gray-500">
+                          Optional: Update overall order payment status (Pending / Partial / Paid).
+                        </div>
+                        <Button
+                          onClick={handleUpdatePayment}
                           className="bg-blue-600 hover:bg-blue-700 text-white h-10 px-6"
-                  >
-                    <Check className="w-4 h-4 mr-2" />
-                          Update Invoice Record
-                  </Button>
-                </div>
+                        >
+                          <Check className="w-4 h-4 mr-2" />
+                          Update Order Payment Status
+                        </Button>
+                      </div>
                     </>
                   )}
-              </div>
-            </CardContent>
-          </Card>
+                </div>
+              </CardContent>
+            </Card>
 
-            {/* Payment Summary */}
-            {invoiceNumber && (
-              <Card className="shadow-sm border border-gray-200">
+            {/* Payment Summary - Always visible */}
+            <Card className="shadow-sm border border-gray-200">
                 <CardHeader className="bg-gray-50 border-b border-gray-200 pb-4">
                   <CardTitle className="flex items-center gap-2.5 text-xl font-semibold text-gray-900 mb-2">
                     <DollarSign className="w-5 h-5 text-blue-600" />
@@ -2982,19 +3265,18 @@ export default function OrderDetailsPage() {
                         <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
                           Invoice Number
                         </Label>
-                        <p className="text-base font-semibold text-gray-900">{invoiceNumber || 'Not set'}</p>
+                        <p className="text-base font-semibold text-gray-900">{invoiceNumber || '—'}</p>
                       </div>
                       <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                         <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
                           Payment Status
                         </Label>
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                          paymentStatus === 'complete'
-                            ? "bg-green-100 text-green-700"
-                            : paymentStatus === 'partial'
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${paymentStatus === 'complete'
+                          ? "bg-green-100 text-green-700"
+                          : paymentStatus === 'partial'
                             ? "bg-blue-100 text-blue-700"
                             : "bg-yellow-100 text-yellow-700"
-                        }`}>
+                          }`}>
                           {paymentStatus === 'complete' ? 'Paid' : paymentStatus === 'partial' ? 'Partial' : 'Pending'}
                         </span>
                       </div>
@@ -3021,8 +3303,8 @@ export default function OrderDetailsPage() {
                             Payment Date
                           </Label>
                           <p className="text-base font-semibold text-gray-900">
-                            {new Date(paymentDate).toLocaleDateString('en-US', { 
-                              month: 'long', 
+                            {new Date(paymentDate).toLocaleDateString('en-US', {
+                              month: 'long',
                               day: 'numeric',
                               year: 'numeric'
                             })}
@@ -3043,7 +3325,6 @@ export default function OrderDetailsPage() {
                   </div>
                 </CardContent>
               </Card>
-            )}
           </div>
         </TabsContent>
 
@@ -3070,13 +3351,12 @@ export default function OrderDetailsPage() {
                     {paymentFollowups.map((followup) => (
                       <div
                         key={followup.id}
-                        className={`p-4 border rounded-lg ${
-                          followup.payment_received
-                            ? "bg-green-50 border-green-200"
-                            : new Date(followup.followup_date) < new Date()
+                        className={`p-4 border rounded-lg ${followup.payment_received
+                          ? "bg-green-50 border-green-200"
+                          : new Date(followup.followup_date) < new Date()
                             ? "bg-red-50 border-red-200"
                             : "bg-gray-50 border-gray-200"
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex-1">
@@ -3137,7 +3417,7 @@ export default function OrderDetailsPage() {
       {/* Dispatch Modal */}
       {showDispatchModal && dispatchType && (
         <>
-          <div 
+          <div
             className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
             onClick={() => {
               if (!dispatching) {
@@ -3146,7 +3426,7 @@ export default function OrderDetailsPage() {
               }
             }}
           >
-            <Card 
+            <Card
               className="w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl"
               onClick={(e) => e.stopPropagation()}
             >
@@ -3158,8 +3438,8 @@ export default function OrderDetailsPage() {
                       {dispatchType === "full" ? "Full Dispatch" : "Partial Dispatch"}
                     </CardTitle>
                     <CardDescription className="mt-1">
-                      {dispatchType === "full" 
-                        ? "Dispatch all items in this order" 
+                      {dispatchType === "full"
+                        ? "Dispatch all items in this order"
                         : "Select quantities to dispatch for each item"}
                     </CardDescription>
                   </div>
@@ -3184,20 +3464,20 @@ export default function OrderDetailsPage() {
                   <div className="space-y-4">
                     <div className="space-y-3">
                       {order.items.map((item) => {
-                        const inventoryItem = inventoryItems.find(inv => 
+                        const inventoryItem = inventoryItems.find(inv =>
                           inv.id === item.inventory_item_id || inv.id === item.product_id
-                        ) || inventoryItems.find(inv => 
+                        ) || inventoryItems.find(inv =>
                           inv.sub_items?.some(sub => sub.id === item.inventory_item_id || sub.id === item.product_id)
                         )
-                        
+
                         let subItem: SubItem | undefined
                         if (inventoryItem) {
-                          subItem = inventoryItem.sub_items?.find(sub => 
+                          subItem = inventoryItem.sub_items?.find(sub =>
                             sub.id === item.inventory_item_id || sub.id === item.product_id
                           )
                         }
 
-                        const itemName = subItem 
+                        const itemName = subItem
                           ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
                           : inventoryItem?.item_name || `Item`
 
@@ -3257,9 +3537,8 @@ export default function OrderDetailsPage() {
                                 <Label className="text-xs font-semibold text-gray-700 mb-1 block">
                                   Remaining
                                 </Label>
-                                <div className={`h-9 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white flex items-center ${
-                                  remainingQty < 0 ? "text-red-600" : remainingQty === 0 ? "text-green-600 font-semibold" : "text-gray-700"
-                                }`}>
+                                <div className={`h-9 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white flex items-center ${remainingQty < 0 ? "text-red-600" : remainingQty === 0 ? "text-green-600 font-semibold" : "text-gray-700"
+                                  }`}>
                                   {remainingQty}
                                 </div>
                               </div>
@@ -3281,7 +3560,7 @@ export default function OrderDetailsPage() {
                         )
                       })}
                     </div>
-                    
+
                     <div className="pt-4 border-t space-y-4">
                       <div>
                         <Label className="text-sm font-semibold text-gray-700 mb-2 block">
@@ -3301,7 +3580,7 @@ export default function OrderDetailsPage() {
                           ))}
                         </select>
                       </div>
-                      
+
                       <div>
                         <Label className="text-sm font-semibold text-gray-700 mb-2 block">
                           Tracking ID (Optional)
@@ -3329,7 +3608,7 @@ export default function OrderDetailsPage() {
                           return null
                         })()}
                       </div>
-                      
+
                       <div>
                         <Label className="text-sm font-semibold text-gray-700 mb-2 block">
                           Notes (Optional)
@@ -3391,11 +3670,11 @@ export default function OrderDetailsPage() {
       {/* Edit Order Modal */}
       {showEditModal && (
         <>
-          <div 
+          <div
             className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
             onClick={() => setShowEditModal(false)}
           >
-            <Card 
+            <Card
               className="w-full max-w-md shadow-xl"
               onClick={(e) => e.stopPropagation()}
             >
@@ -3474,11 +3753,11 @@ export default function OrderDetailsPage() {
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
         <>
-          <div 
+          <div
             className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
             onClick={() => setShowDeleteConfirm(false)}
           >
-            <Card 
+            <Card
               className="w-full max-w-md shadow-xl"
               onClick={(e) => e.stopPropagation()}
             >

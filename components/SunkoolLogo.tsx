@@ -1,30 +1,32 @@
-export default function SunkoolLogo({ 
+import Image from "next/image"
+
+export default function SunkoolLogo({
   variant = "dark",
-  size = "md" 
-}: { 
+  size = "md",
+  type = "full"
+}: {
   variant?: "dark" | "light"
   size?: "sm" | "md" | "lg"
+  type?: "full" | "icon"
 }) {
-  const sizeClasses = {
-    sm: "w-8 h-8",
-    md: "w-12 h-12",
-    lg: "w-16 h-16",
+  const sizeMap = {
+    sm: { width: 80, height: 28, iconSize: 24 },
+    md: { width: 120, height: 42, iconSize: 32 },
+    lg: { width: 160, height: 56, iconSize: 48 },
   }
 
-  const bgColor = variant === "dark" ? "bg-white" : "bg-slate-900"
-  const textColor = variant === "dark" ? "text-orange-500" : "text-white"
-  const accentColor = variant === "dark" ? "text-blue-600" : "text-blue-400"
+  const isIcon = type === "icon"
 
   return (
-    <div className={`${sizeClasses[size]} rounded-lg flex items-center justify-center ${bgColor} shadow-lg`}>
-      <div className="text-center">
-        <div className={`${textColor} font-bold ${size === "sm" ? "text-xs" : size === "md" ? "text-sm" : "text-base"} leading-none`}>
-          SK
-        </div>
-        <div className={`${accentColor} font-bold ${size === "sm" ? "text-[6px]" : size === "md" ? "text-xs" : "text-sm"} leading-none`}>
-          OMS
-        </div>
-      </div>
+    <div className="flex items-center">
+      <Image
+        src={isIcon ? "/images/logo-icon.png" : "/images/logo.png"}
+        alt="Sunkool OMS"
+        width={isIcon ? sizeMap[size].iconSize : sizeMap[size].width}
+        height={isIcon ? sizeMap[size].iconSize : sizeMap[size].height}
+        className="object-contain"
+        priority
+      />
     </div>
   )
 }
