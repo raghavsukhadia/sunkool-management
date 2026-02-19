@@ -19,7 +19,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import SunkoolLogo from "@/components/SunkoolLogo"
+import SunkoolLogo from "@/components/brand/SunkoolLogo"
 
 export default function DashboardSidebar({
   children,
@@ -48,7 +48,7 @@ export default function DashboardSidebar({
   ]
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="h-screen bg-gray-50 flex overflow-hidden">
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
         <div
@@ -60,13 +60,13 @@ export default function DashboardSidebar({
       {/* Left Sidebar */}
       <aside
         className={cn(
-          "fixed lg:static inset-y-0 left-0 z-50 w-64 bg-[#1e293b] text-white transform transition-transform duration-300 ease-in-out lg:translate-x-0",
+          "fixed lg:relative inset-y-0 left-0 z-50 w-64 bg-[#0f172a] text-white transform transition-transform duration-300 ease-in-out lg:translate-x-0 flex flex-col h-full",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         <div className="flex flex-col h-full">
           {/* Logo/Header */}
-          <div className="flex items-center justify-between h-20 px-4 border-b border-slate-700 bg-gradient-to-r from-slate-800 to-slate-900">
+          <div className="flex items-center justify-between h-20 px-4 border-b border-slate-700/50 bg-[#0f172a]">
             <Link href="/dashboard" className="flex items-center space-x-3 hover:opacity-90 transition-opacity flex-1">
               <SunkoolLogo variant="dark" size="lg" />
             </Link>
@@ -79,7 +79,7 @@ export default function DashboardSidebar({
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
+          <nav className="flex-1 px-4 py-8 space-y-2 overflow-y-auto custom-scrollbar">
             {navItems.map((item) => {
               const Icon = item.icon
               const isActive = pathname === item.href ||
@@ -91,13 +91,13 @@ export default function DashboardSidebar({
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
                   className={cn(
-                    "flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors",
+                    "flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
                     isActive
-                      ? "bg-blue-600 text-white shadow-lg"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                      ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20"
+                      : "text-slate-400 hover:bg-slate-800/50 hover:text-white"
                   )}
                 >
-                  <Icon className={cn("w-5 h-5 mr-3", isActive ? "text-white" : "text-slate-400")} />
+                  <Icon className={cn("w-5 h-5 mr-3 transition-colors", isActive ? "text-white" : "text-slate-500")} />
                   {item.label}
                 </Link>
               )
@@ -105,12 +105,12 @@ export default function DashboardSidebar({
           </nav>
 
           {/* Footer/Sign Out */}
-          <div className="p-4 border-t border-slate-700">
+          <div className="p-4 border-t border-slate-800 bg-[#070b14]">
             <button
               onClick={handleSignOut}
-              className="flex items-center w-full px-4 py-3 text-sm font-medium text-slate-300 rounded-lg hover:bg-slate-800 hover:text-white transition-colors"
+              className="group flex items-center w-full px-4 py-3 text-sm font-semibold text-slate-400 rounded-xl hover:bg-red-500/10 hover:text-red-500 transition-all duration-200 border border-transparent hover:border-red-500/20"
             >
-              <LogOut className="w-5 h-5 mr-3 text-slate-400" />
+              <LogOut className="w-5 h-5 mr-3 text-slate-500 group-hover:text-red-500 transition-colors" />
               Sign Out
             </button>
           </div>
@@ -118,33 +118,33 @@ export default function DashboardSidebar({
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         {/* Top Header Bar */}
-        <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-30">
-          <div className="flex items-center justify-between h-16 px-4 sm:px-6 lg:px-8">
+        <header className="bg-white border-b border-gray-100 shadow-sm z-30 shrink-0">
+          <div className="flex items-center justify-between h-20 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md"
+                className="lg:hidden p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <Menu className="w-6 h-6" />
               </button>
-              <h1 className="ml-4 lg:ml-0 text-xl font-semibold text-gray-900">
-                Order Management System
-              </h1>
-            </div>
-            <div className="flex items-center space-x-4">
-              <div className="hidden sm:flex items-center space-x-2 text-sm text-gray-600">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span>Online</span>
+              <div className="flex flex-col ml-4 lg:ml-0">
+                <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+                  Order Management System
+                </h1>
+                <p className="text-xs text-slate-500 font-medium">Sunkool Management &middot; Dashboard</p>
               </div>
+            </div>
+            <div className="flex items-center space-x-6">
+              {/* Removed decorative elements */}
             </div>
           </div>
         </header>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto bg-gray-50">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <main className="flex-1 overflow-y-auto bg-slate-50/50 scroll-smooth">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-700">
             {children}
           </div>
         </main>

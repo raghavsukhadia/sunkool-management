@@ -18,10 +18,27 @@ import {
 } from "lucide-react"
 import { useDashboardStats } from "@/hooks/useDashboardStats"
 import { createClient } from "@/lib/supabase/client"
-import { RevenueOverview } from "@/components/RevenueOverview"
-import { RecentActivity, ActivityItem } from "@/components/RecentActivity"
-import { OrderTable, Order } from "@/components/OrderTable"
-import SunkoolLogo from "@/components/SunkoolLogo"
+import { RevenueOverview } from "@/components/dashboard/RevenueOverview"
+import { RecentActivity, ActivityItem } from "@/components/dashboard/RecentActivity"
+import { OrderTable, Order } from "@/components/orders/OrderTable"
+import SunkoolLogo from "@/components/brand/SunkoolLogo"
+import { Skeleton } from "@/components/ui/skeleton"
+
+// KPI Card Skeleton
+function KPICardSkeleton() {
+  return (
+    <Card className="border-l-4 border-l-slate-200 animate-pulse">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-8 w-8 rounded-lg" />
+      </CardHeader>
+      <CardContent>
+        <Skeleton className="h-8 w-16 mb-2" />
+        <Skeleton className="h-4 w-32" />
+      </CardContent>
+    </Card>
+  )
+}
 
 // KPI Card Component with percentage change indicator
 function KPICard({
@@ -125,8 +142,9 @@ const generateMockActivityData = (): ActivityItem[] => {
 }
 
 export default function DashboardPage() {
-  const { stats, loading } = useDashboardStats()
+  const { stats, loading: statsLoading } = useDashboardStats()
   const [orders, setOrders] = useState<Order[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(true)
   const [revenueData] = useState(generateMockRevenueData())
   const [activities] = useState<ActivityItem[]>(generateMockActivityData())
   const supabase = createClient()
@@ -134,6 +152,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchOrders = async () => {
       try {
+        setOrdersLoading(true)
         const { data, error } = await supabase
           .from("orders")
           .select(
@@ -163,6 +182,8 @@ export default function DashboardPage() {
         setOrders(mappedOrders)
       } catch (error) {
         console.error("Error fetching orders:", error)
+      } finally {
+        setOrdersLoading(false)
       }
     }
 
@@ -171,56 +192,58 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header with Logo */}
+      {/* Header Info */}
       <div className="flex items-start justify-between">
-        <div className="flex items-center gap-4">
-          <SunkoolLogo variant="light" size="lg" />
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
-            <p className="text-slate-600 mt-1">Professional Order Management System</p>
-          </div>
-        </div>
-        <div className="hidden sm:block">
-          <Button className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
-            <Command className="h-4 w-4" />
-            Ctrl+K
-          </Button>
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
+          <p className="text-slate-500 mt-1 font-medium">Welcome back to Sunkool Management System</p>
         </div>
       </div>
 
       {/* KPI Cards */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-        <KPICard
-          title="Total Orders"
-          value={stats?.totalOrders || 0}
-          icon={<Package className="h-5 w-5 text-blue-600" />}
-          color="border-l-blue-500"
-          change={12}
-          link="/dashboard/orders"
-        />
-        <KPICard
-          title="Pending Orders"
-          value={stats?.pendingOrders || 0}
-          icon={<AlertCircle className="h-5 w-5 text-amber-600" />}
-          color="border-l-amber-500"
-          change={-5}
-          link="/dashboard/orders?status=Pending"
-        />
-        <KPICard
-          title="In Transit"
-          value={stats?.dispatchedOrders || 0}
-          icon={<Truck className="h-5 w-5 text-green-600" />}
-          color="border-l-green-500"
-          change={8}
-        />
-        <KPICard
-          title="Total Revenue"
-          value={`₹${(stats?.totalRevenue || 0).toLocaleString("en-IN")}`}
-          icon={<DollarSign className="h-5 w-5 text-emerald-600" />}
-          color="border-l-emerald-500"
-          change={15}
-          suppressHydrationWarning
-        />
+        {statsLoading ? (
+          <>
+            <KPICardSkeleton />
+            <KPICardSkeleton />
+            <KPICardSkeleton />
+            <KPICardSkeleton />
+          </>
+        ) : (
+          <>
+            <KPICard
+              title="Total Orders"
+              value={stats?.totalOrders || 0}
+              icon={<Package className="h-5 w-5 text-blue-600" />}
+              color="border-l-blue-500"
+              change={12}
+              link="/dashboard/orders"
+            />
+            <KPICard
+              title="Pending Orders"
+              value={stats?.pendingOrders || 0}
+              icon={<AlertCircle className="h-5 w-5 text-amber-600" />}
+              color="border-l-amber-500"
+              change={-5}
+              link="/dashboard/orders?status=Pending"
+            />
+            <KPICard
+              title="In Transit"
+              value={stats?.dispatchedOrders || 0}
+              icon={<Truck className="h-5 w-5 text-green-600" />}
+              color="border-l-green-500"
+              change={8}
+            />
+            <KPICard
+              title="Total Revenue"
+              value={`₹${(stats?.totalRevenue || 0).toLocaleString("en-IN")}`}
+              icon={<DollarSign className="h-5 w-5 text-emerald-600" />}
+              color="border-l-emerald-500"
+              change={15}
+              suppressHydrationWarning
+            />
+          </>
+        )}
       </div>
 
       {/* Revenue Chart & Activity Feed */}
@@ -289,9 +312,17 @@ export default function DashboardPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <Suspense fallback={<div className="text-center py-8 text-slate-500">Loading orders...</div>}>
-            <OrderTable data={orders} isLoading={loading} />
-          </Suspense>
+          {ordersLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : (
+            <OrderTable data={orders} />
+          )}
         </CardContent>
       </Card>
     </div>
