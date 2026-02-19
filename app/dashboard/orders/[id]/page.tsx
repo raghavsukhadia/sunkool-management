@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   getOrderDetails,
   getInventoryItemsForOrder,
@@ -185,19 +186,31 @@ export default function OrderDetailsPage() {
   const [paymentReference, setPaymentReference] = useState<string>("")
   const [paymentNotes, setPaymentNotes] = useState<string>("")
 
+  const fetchAllOrderData = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      await Promise.all([
+        loadOrderDetails(),
+        loadInventoryItems(),
+        loadDispatches(),
+        loadCourierCompanies(),
+        loadProductionLists(),
+        loadProductionRecords(),
+        loadInvoiceAttachments(),
+        loadOrderPayments()
+      ])
+    } catch (err: any) {
+      console.error("Parallel fetch error:", err)
+      setError("Some data failed to load. Please refresh.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (orderId) {
-      loadOrderDetails()
-      loadInventoryItems()
-      loadDispatches()
-      loadCourierCompanies()
-      loadProductionLists()
-      loadProductionRecords()
-      loadInvoiceAttachments()
-      loadOrderPayments()
-      if (order?.cash_discount) {
-        loadPaymentFollowups()
-      }
+      fetchAllOrderData()
     }
   }, [orderId])
 
@@ -275,20 +288,15 @@ export default function OrderDetailsPage() {
   }, [order])
 
   const loadOrderDetails = async () => {
-    setLoading(true)
-    setError(null)
     try {
       const result = await getOrderDetails(orderId)
       if (result.success && result.data) {
-        const orderData = result.data as any
-        setOrder(orderData)
+        setOrder(result.data as any)
       } else {
         setError(result.error || "Failed to load order details")
       }
     } catch (err: any) {
       setError(err.message || "An error occurred")
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -736,6 +744,121 @@ export default function OrderDetailsPage() {
     }
   }, [showDispatchModal, dispatchType, order?.items])
 
+  const handleDownloadLatestTrackingSlip = async () => {
+    if (!order) return
+
+    setGeneratingTrackingSlip("universal")
+    try {
+      let dispatchData: any
+
+      if (dispatches.length > 0) {
+        // Sort dispatches by date descending to get the latest
+        const latestDispatch = [...dispatches].sort((a, b) =>
+          new Date(b.dispatch_date || 0).getTime() - new Date(a.dispatch_date || 0).getTime()
+        )[0]
+
+        // Find the associated production record for this dispatch if it exists
+        const productionRecord = productionRecords.find(pr => pr.id === latestDispatch.production_record_id)
+
+        // Map dispatch items for the PDF
+        const dispatchItems = latestDispatch.dispatch_items?.map((di: any) => {
+          const orderItem = order.items.find((item: any) => item.id === di.order_item_id)
+          let itemName = "Item"
+
+          if (orderItem) {
+            let inventoryItem = inventoryItems.find((item: any) => item.id === orderItem.inventory_item_id || item.id === orderItem.product_id)
+            let subItem
+
+            if (!inventoryItem) {
+              for (const parentItem of inventoryItems) {
+                subItem = parentItem.sub_items?.find((sub: any) =>
+                  sub.id === orderItem.inventory_item_id || sub.id === orderItem.product_id
+                )
+                if (subItem) {
+                  inventoryItem = parentItem
+                  break
+                }
+              }
+            }
+
+            itemName = subItem
+              ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
+              : inventoryItem?.item_name || "Item"
+          }
+
+          return {
+            name: itemName,
+            quantity: di.quantity
+          }
+        }) || []
+
+        dispatchData = {
+          dispatchType: latestDispatch.dispatch_type || 'full',
+          dispatchDate: latestDispatch.dispatch_date || new Date().toISOString(),
+          trackingId: latestDispatch.tracking_id || 'TBA',
+          courierName: latestDispatch.courier_companies?.name || 'Standard Delivery',
+          productionNumber: productionRecord?.production_number,
+          items: dispatchItems
+        }
+      } else {
+        // No dispatches yet - generate a "Pending" slip with all order items
+        const allItems = order.items.map((oi: any) => {
+          let itemName = "Item"
+          let inventoryItem = inventoryItems.find((item: any) => item.id === oi.inventory_item_id || item.id === oi.product_id)
+          let subItem
+
+          if (!inventoryItem) {
+            for (const parentItem of inventoryItems) {
+              subItem = parentItem.sub_items?.find((sub: any) =>
+                sub.id === oi.inventory_item_id || sub.id === oi.product_id
+              )
+              if (subItem) {
+                inventoryItem = parentItem
+                break
+              }
+            }
+          }
+
+          itemName = subItem
+            ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
+            : inventoryItem?.item_name || "Item"
+
+          return {
+            name: itemName,
+            quantity: oi.quantity
+          }
+        })
+
+        dispatchData = {
+          dispatchType: 'Full Order (Pending)',
+          dispatchDate: new Date().toISOString(),
+          trackingId: 'TBA',
+          courierName: 'Shipment Pending',
+          items: allItems
+        }
+      }
+
+      const logoDataUrl = await fetchLogoDataUrl()
+      const { blob, filename } = generateTrackingSlipPDF(order, dispatchData, { logoDataUrl })
+
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+
+      setSuccess("Tracking slip generated successfully!")
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err: any) {
+      setError(err.message || "Failed to generate tracking slip")
+    } finally {
+      setGeneratingTrackingSlip(null)
+    }
+  }
+
   const handleOpenDispatchModal = (type: "partial" | "full") => {
     if (!order?.items || order.items.length === 0) {
       setError("Cannot dispatch: Order has no items")
@@ -1034,10 +1157,18 @@ export default function OrderDetailsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-3"></div>
-          <p className="text-gray-500">Loading order details...</p>
+      <div className="space-y-6 pb-20">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-10 w-32" />
+          <div className="flex gap-2">
+            <Skeleton className="h-10 w-24" />
+            <Skeleton className="h-10 w-24" />
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <Skeleton className="h-[200px] w-full" />
+          <Skeleton className="h-[400px] w-full" />
         </div>
       </div>
     )
@@ -1181,12 +1312,28 @@ export default function OrderDetailsPage() {
       {/* Customer Information - Always visible */}
       <Card className="shadow-sm">
         <CardHeader className="bg-gray-50 border-b">
-          <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
-            <div className="p-1.5 bg-blue-100 rounded-md">
-              <User className="w-4 h-4 text-blue-600" />
-            </div>
-            Customer Information
-          </CardTitle>
+          <div className="flex items-center justify-between gap-4 w-full">
+            <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
+              <div className="p-1.5 bg-blue-100 rounded-md">
+                <User className="w-4 h-4 text-blue-600" />
+              </div>
+              Customer Information
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-2 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700 shadow-sm transition-all"
+              onClick={handleDownloadLatestTrackingSlip}
+              disabled={generatingTrackingSlip !== null}
+            >
+              {generatingTrackingSlip !== null ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FileDown className="w-3.5 h-3.5" />
+              )}
+              <span className="hidden sm:inline">Tracking Slip</span>
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="pt-6">
           <div className="space-y-3">
@@ -2191,12 +2338,35 @@ export default function OrderDetailsPage() {
                                 {/* Information Grid */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                   {dispatch.courier_companies && (
-                                    <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                                      <div className="flex items-center gap-2 mb-2">
-                                        <Truck className="w-4 h-4 text-blue-600" />
-                                        <Label className="text-xs font-semibold text-gray-600">Courier Company</Label>
+                                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-5 bg-gray-50 rounded-lg border border-gray-100 hover:bg-gray-100/80 transition-colors">
+                                      <div className="flex items-center gap-4">
+                                        <div className="p-2.5 bg-white rounded-lg shadow-sm">
+                                          <Truck className="w-5 h-5 text-indigo-600" />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <span className="text-sm font-semibold text-gray-900">
+                                            {dispatch.courier_companies?.name || "Standard Delivery"}
+                                          </span>
+                                          <p className="text-xs text-gray-500 font-medium">
+                                            Shipment on {new Date(dispatch.dispatch_date).toLocaleDateString('en-IN', {
+                                              day: '2-digit',
+                                              month: 'short',
+                                              year: 'numeric'
+                                            })}
+                                          </p>
+                                        </div>
                                       </div>
-                                      <p className="text-base font-bold text-gray-900">{dispatch.courier_companies.name}</p>
+
+                                      <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                                        {dispatch.tracking_id && (
+                                          <div className="flex items-center px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-md text-xs font-bold border border-indigo-100">
+                                            ID: {dispatch.tracking_id}
+                                          </div>
+                                        )}
+                                        <div className="flex items-center px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-xs font-bold border border-blue-100">
+                                          {dispatch.dispatch_type === 'full' ? 'Full Dispatch' : 'Partial'}
+                                        </div>
+                                      </div>
                                     </div>
                                   )}
                                   {dispatch.tracking_id && (
@@ -2221,132 +2391,6 @@ export default function OrderDetailsPage() {
                                       </div>
                                     </div>
                                   )}
-                                </div>
-
-                                {/* Tracking Slip Preview */}
-                                <div className="p-5 bg-white border-2 border-gray-300 rounded-lg shadow-sm">
-                                  <div className="flex items-center justify-between mb-4">
-                                    <Label className="text-sm font-semibold text-gray-700">Tracking Slip</Label>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={async () => {
-                                        if (!order) return
-
-                                        setGeneratingTrackingSlip(dispatch.id)
-                                        try {
-                                          const dispatchItems = dispatch.dispatch_items?.map((di: any) => {
-                                            const orderItem = di.order_items
-                                            let itemName = `Item`
-
-                                            if (orderItem) {
-                                              let inventoryItem: InventoryItem | undefined
-                                              let subItem: SubItem | undefined
-
-                                              inventoryItem = inventoryItems.find(inv =>
-                                                inv.id === orderItem.inventory_item_id || inv.id === orderItem.product_id
-                                              )
-
-                                              if (!inventoryItem) {
-                                                for (const parentItem of inventoryItems) {
-                                                  subItem = parentItem.sub_items?.find(sub =>
-                                                    sub.id === orderItem.inventory_item_id || sub.id === orderItem.product_id
-                                                  )
-                                                  if (subItem) {
-                                                    inventoryItem = parentItem
-                                                    break
-                                                  }
-                                                }
-                                              }
-
-                                              itemName = subItem
-                                                ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
-                                                : inventoryItem?.item_name || `Item`
-                                            }
-
-                                            return {
-                                              name: itemName,
-                                              quantity: di.quantity
-                                            }
-                                          }) || []
-
-                                          const dispatchData = {
-                                            dispatchType: dispatch.dispatch_type || 'full',
-                                            dispatchDate: dispatch.dispatch_date || new Date().toISOString(),
-                                            trackingId: dispatch.tracking_id,
-                                            courierName: dispatch.courier_companies?.name,
-                                            productionNumber: productionRecord?.production_number,
-                                            items: dispatchItems
-                                          }
-
-                                          const logoDataUrl = await fetchLogoDataUrl()
-                                          const { blob, filename } = generateTrackingSlipPDF(order, dispatchData, { logoDataUrl })
-
-                                          const url = URL.createObjectURL(blob)
-                                          const link = document.createElement('a')
-                                          link.href = url
-                                          link.download = filename
-                                          document.body.appendChild(link)
-                                          link.click()
-                                          document.body.removeChild(link)
-                                          URL.revokeObjectURL(url)
-
-                                          setSuccess("Tracking slip generated successfully!")
-                                          setTimeout(() => setSuccess(null), 3000)
-                                        } catch (err: any) {
-                                          setError(err.message || "Failed to generate tracking slip")
-                                        } finally {
-                                          setGeneratingTrackingSlip(null)
-                                        }
-                                      }}
-                                      disabled={generatingTrackingSlip === dispatch.id}
-                                      className="h-8 text-xs"
-                                    >
-                                      {generatingTrackingSlip === dispatch.id ? (
-                                        <>
-                                          <div className="w-3 h-3 mr-1.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-                                          Generating...
-                                        </>
-                                      ) : (
-                                        <>
-                                          <FileDown className="w-3 h-3 mr-1.5" />
-                                          Download PDF
-                                        </>
-                                      )}
-                                    </Button>
-                                  </div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="border-r border-gray-200 pr-6">
-                                      <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">FROM</Label>
-                                      <div className="text-sm text-gray-900 space-y-1">
-                                        <p className="font-bold text-base">SUNKOOL SOLUTION</p>
-                                        <p>510, WESTERN PALACE,</p>
-                                        <p>CONGRESS NAGAR, OPP.PARK</p>
-                                        <p>NAGPUR - 440012</p>
-                                        <p className="mt-2">MOB. NO. 9156321123</p>
-                                      </div>
-                                    </div>
-                                    <div className="pl-0 md:pl-6">
-                                      <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">TO,</Label>
-                                      <div className="text-sm text-gray-900 space-y-1">
-                                        <p className="font-bold text-base">{order?.customers?.name || 'Customer Name'}</p>
-                                        {order?.customers?.address ? (
-                                          <div>
-                                            {order.customers.address.split(',').map((line: string, idx: number) => (
-                                              <p key={idx}>{line.trim()}</p>
-                                            ))}
-                                          </div>
-                                        ) : (
-                                          <p className="text-gray-400 italic">Address not available</p>
-                                        )}
-                                        {order?.customers?.phone ? (
-                                          <p className="mt-2">MOB. NO. {order.customers.phone}</p>
-                                        ) : (
-                                          <p className="mt-2 text-gray-400 italic">MOB. NO. Not available</p>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
                                 </div>
 
                                 {/* Items Section */}
@@ -3252,79 +3296,79 @@ export default function OrderDetailsPage() {
 
             {/* Payment Summary - Always visible */}
             <Card className="shadow-sm border border-gray-200">
-                <CardHeader className="bg-gray-50 border-b border-gray-200 pb-4">
-                  <CardTitle className="flex items-center gap-2.5 text-xl font-semibold text-gray-900 mb-2">
-                    <DollarSign className="w-5 h-5 text-blue-600" />
-                    Payment Summary
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-6">
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <CardHeader className="bg-gray-50 border-b border-gray-200 pb-4">
+                <CardTitle className="flex items-center gap-2.5 text-xl font-semibold text-gray-900 mb-2">
+                  <DollarSign className="w-5 h-5 text-blue-600" />
+                  Payment Summary
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
+                        Invoice Number
+                      </Label>
+                      <p className="text-base font-semibold text-gray-900">{invoiceNumber || '—'}</p>
+                    </div>
+                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
+                        Payment Status
+                      </Label>
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${paymentStatus === 'complete'
+                        ? "bg-green-100 text-green-700"
+                        : paymentStatus === 'partial'
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-yellow-100 text-yellow-700"
+                        }`}>
+                        {paymentStatus === 'complete' ? 'Paid' : paymentStatus === 'partial' ? 'Partial' : 'Pending'}
+                      </span>
+                    </div>
+                    {paymentStatus === 'partial' && partialPaymentAmount && remainingPaymentAmount && (
                       <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                         <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
-                          Invoice Number
+                          Partial Payment Details
                         </Label>
-                        <p className="text-base font-semibold text-gray-900">{invoiceNumber || '—'}</p>
-                      </div>
-                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                        <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
-                          Payment Status
-                        </Label>
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${paymentStatus === 'complete'
-                          ? "bg-green-100 text-green-700"
-                          : paymentStatus === 'partial'
-                            ? "bg-blue-100 text-blue-700"
-                            : "bg-yellow-100 text-yellow-700"
-                          }`}>
-                          {paymentStatus === 'complete' ? 'Paid' : paymentStatus === 'partial' ? 'Partial' : 'Pending'}
-                        </span>
-                      </div>
-                      {paymentStatus === 'partial' && partialPaymentAmount && remainingPaymentAmount && (
-                        <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                          <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
-                            Partial Payment Details
-                          </Label>
-                          <div className="grid grid-cols-2 gap-4 mt-2">
-                            <div>
-                              <p className="text-xs text-gray-600">Amount Paid</p>
-                              <p className="text-base font-semibold text-gray-900">₹{parseFloat(partialPaymentAmount).toFixed(2)}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-600">Remaining</p>
-                              <p className="text-base font-semibold text-orange-600">₹{parseFloat(remainingPaymentAmount).toFixed(2)}</p>
-                            </div>
+                        <div className="grid grid-cols-2 gap-4 mt-2">
+                          <div>
+                            <p className="text-xs text-gray-600">Amount Paid</p>
+                            <p className="text-base font-semibold text-gray-900">₹{parseFloat(partialPaymentAmount).toFixed(2)}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-600">Remaining</p>
+                            <p className="text-base font-semibold text-orange-600">₹{parseFloat(remainingPaymentAmount).toFixed(2)}</p>
                           </div>
                         </div>
-                      )}
-                      {(paymentStatus === 'complete' || paymentStatus === 'partial') && paymentDate && (
-                        <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                          <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
-                            Payment Date
-                          </Label>
-                          <p className="text-base font-semibold text-gray-900">
-                            {new Date(paymentDate).toLocaleDateString('en-US', {
-                              month: 'long',
-                              day: 'numeric',
-                              year: 'numeric'
-                            })}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                    {zohoBillingDetails && (
+                      </div>
+                    )}
+                    {(paymentStatus === 'complete' || paymentStatus === 'partial') && paymentDate && (
                       <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                        <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">
-                          ZOHO Billing Details
+                        <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
+                          Payment Date
                         </Label>
-                        <pre className="text-xs font-mono text-gray-700 whitespace-pre-wrap break-words">
-                          {typeof zohoBillingDetails === 'string' ? zohoBillingDetails : JSON.stringify(zohoBillingDetails, null, 2)}
-                        </pre>
+                        <p className="text-base font-semibold text-gray-900">
+                          {new Date(paymentDate).toLocaleDateString('en-US', {
+                            month: 'long',
+                            day: 'numeric',
+                            year: 'numeric'
+                          })}
+                        </p>
                       </div>
                     )}
                   </div>
-                </CardContent>
-              </Card>
+                  {zohoBillingDetails && (
+                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">
+                        ZOHO Billing Details
+                      </Label>
+                      <pre className="text-xs font-mono text-gray-700 whitespace-pre-wrap break-words">
+                        {typeof zohoBillingDetails === 'string' ? zohoBillingDetails : JSON.stringify(zohoBillingDetails, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 

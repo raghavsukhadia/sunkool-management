@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import SunkoolLogo from "@/components/SunkoolLogo"
+import SunkoolLogo from "@/components/brand/SunkoolLogo"
 
 export default function LogoHeader() {
   return (
