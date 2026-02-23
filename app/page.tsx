@@ -1,159 +1,238 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { Button } from '@/components/ui/button'
-import { ArrowRight, BarChart3, ShieldCheck, Zap, ArrowUpRight } from 'lucide-react'
+import {
+  ArrowRight,
+  ArrowUpRight,
+  BarChart3,
+  Boxes,
+  Car,
+  ClipboardCheck,
+  Factory,
+  ShieldCheck,
+  Truck,
+} from 'lucide-react'
 import SunkoolLogo from '@/components/brand/SunkoolLogo'
+
+const modules = [
+  {
+    title: 'Sales To Build',
+    description: 'Capture dealer orders, validate quantities, and push approved jobs to production in one flow.',
+    icon: ClipboardCheck,
+  },
+  {
+    title: 'Product Catalog',
+    description: 'Manage car-care SKUs, packaging variants, and active inventory relationships.',
+    icon: Boxes,
+  },
+  {
+    title: 'Production Control',
+    description: 'Generate production records, monitor completion, and keep dispatch readiness visible.',
+    icon: Factory,
+  },
+  {
+    title: 'Dispatch Tracking',
+    description: 'Handle partial/full dispatches with courier assignment, shipment status, and references.',
+    icon: Truck,
+  },
+]
 
 export default async function HomePage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
   return (
-    <div className="flex flex-col min-h-screen bg-background selection:bg-primary/10">
-      {/* Navigation */}
-      <header className="px-4 lg:px-8 h-20 flex items-center border-b bg-background/80 backdrop-blur-xl sticky top-0 z-50">
-        <div className="flex items-center gap-2">
+    <div className="min-h-screen bg-[radial-gradient(1200px_500px_at_70%_-20%,rgba(251,146,60,0.16),transparent),linear-gradient(180deg,#f8fafc_0%,#eef2f7_100%)] text-slate-900">
+      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-xl">
+        <div className="mx-auto flex h-20 w-full max-w-7xl items-center gap-6 px-4 md:px-8">
           <SunkoolLogo size="md" />
-        </div>
-        <nav className="ml-auto flex items-center gap-4 sm:gap-8">
-          <Link href="#features" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors hidden sm:block">
-            Features
+
+          <nav className="ml-auto hidden items-center gap-7 text-sm font-medium text-slate-600 md:flex">
+            <Link href="#modules" className="hover:text-slate-900 transition-colors">
+              Modules
+            </Link>
+            <Link href="#workflow" className="hover:text-slate-900 transition-colors">
+              Workflow
+            </Link>
+            <Link href="#insights" className="hover:text-slate-900 transition-colors">
+              Insights
+            </Link>
+          </nav>
+
+          <Link href={user ? '/dashboard' : '/login'}>
+            <Button className="rounded-full bg-slate-900 px-6 text-white hover:bg-slate-800">
+              {user ? 'Open Dashboard' : 'Sign In'} <ArrowUpRight className="ml-2 h-4 w-4" />
+            </Button>
           </Link>
-          {user ? (
-            <Link href="/dashboard">
-              <Button className="rounded-full px-6 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all active:scale-95">
-                Dashboard
-              </Button>
-            </Link>
-          ) : (
-            <Link href="/login">
-              <Button className="rounded-full px-6 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all active:scale-95">
-                Sign In <ArrowUpRight className="ml-2 size-4" />
-              </Button>
-            </Link>
-          )}
-        </nav>
+        </div>
       </header>
 
-      <main className="flex-1">
-        {/* Hero Section */}
-        <section className="relative w-full py-20 md:py-32 lg:py-48 overflow-hidden bg-zinc-950 text-white">
-          {/* Background Mesh Gradients */}
-          <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[120px] mix-blend-screen animate-pulse"></div>
-            <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[120px] mix-blend-screen animate-pulse delay-700"></div>
-          </div>
+      <main>
+        <section className="mx-auto grid w-full max-w-7xl gap-10 px-4 pb-16 pt-16 md:grid-cols-2 md:items-center md:px-8 md:pt-24">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">
+              <Car className="h-3.5 w-3.5" />
+              Automotive OMS Platform
+            </div>
 
-          <div className="container relative z-10 px-4 md:px-6 mx-auto">
-            <div className="flex flex-col items-center space-y-8 text-center max-w-4xl mx-auto">
-              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/10 bg-white/5 text-sm font-medium backdrop-blur-sm animate-in fade-in slide-in-from-bottom-3 duration-1000">
-                <span className="flex size-2 rounded-full bg-indigo-500 animate-pulse"></span>
-                Next-Gen Order Management
+            <h1 className="mt-5 text-4xl font-black leading-tight text-slate-950 md:text-6xl">
+              Run Your Car Product Operations Without The Chaos.
+            </h1>
+
+            <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600 md:text-lg">
+              Sunkool OMS connects order intake, production, dispatch, and payment tracking for your auto-product business.
+              Your team gets one shared operating view instead of scattered sheets and calls.
+            </p>
+
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Link href={user ? '/dashboard/orders' : '/login'}>
+                <Button size="lg" className="w-full rounded-xl bg-amber-500 px-7 text-slate-950 hover:bg-amber-400 sm:w-auto">
+                  Start Managing Orders <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </Link>
+              <Link href="#modules">
+                <Button size="lg" variant="outline" className="w-full rounded-xl border-slate-300 bg-white sm:w-auto">
+                  Explore Modules
+                </Button>
+              </Link>
+            </div>
+
+            <div id="insights" className="mt-8 grid max-w-xl grid-cols-3 gap-3">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Orders</p>
+                <p className="mt-1 text-2xl font-bold">24/7</p>
               </div>
-
-              <div className="space-y-4">
-                <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl/none animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-150">
-                  Efficient Operations for <br className="hidden md:inline" />
-                  <span className="bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-white to-purple-400">
-                    Modern Business
-                  </span>
-                </h1>
-                <p className="mx-auto max-w-[700px] text-zinc-400 md:text-xl/relaxed lg:text-2xl/relaxed animate-in fade-in slide-in-from-bottom-5 duration-1000 delay-300">
-                  Streamline your workflow, track inventory in real-time, and boost productivity with our state-of-the-art management solution.
-                </p>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Dispatch View</p>
+                <p className="mt-1 text-2xl font-bold">Live</p>
               </div>
-
-              <div className="flex flex-col sm:flex-row gap-4 animate-in fade-in slide-in-from-bottom-6 duration-1000 delay-500">
-                <Link href={user ? "/dashboard" : "/login"}>
-                  <Button size="lg" className="h-14 px-10 text-lg rounded-full shadow-2xl shadow-indigo-600/20 hover:shadow-indigo-600/40 hover:-translate-y-1 transition-all">
-                    Start Managing Now <ArrowRight className="ml-2 h-5 w-5" />
-                  </Button>
-                </Link>
-                <Link href="#features">
-                  <Button variant="outline" size="lg" className="h-14 px-10 text-lg rounded-full border-white/10 hover:bg-white/5 bg-transparent backdrop-blur-sm transition-all hover:-translate-y-1">
-                    See Features
-                  </Button>
-                </Link>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Audit Trail</p>
+                <p className="mt-1 text-2xl font-bold">100%</p>
               </div>
             </div>
           </div>
 
-          {/* Abstract Grid Decor */}
-          <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-[0.05] pointer-events-none"></div>
+          <div className="relative">
+            <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-br from-amber-300/40 via-orange-300/20 to-transparent blur-2xl" />
+
+            <div className="relative overflow-hidden rounded-[1.6rem] border border-slate-200 bg-white p-5 shadow-[0_25px_80px_rgba(15,23,42,0.12)]">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Operations Board</p>
+                  <p className="text-lg font-bold">Today&apos;s Flow</p>
+                </div>
+                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">Stable</span>
+              </div>
+
+              <div className="mt-5 space-y-4">
+                {[
+                  ['Orders Approved', '42', 'bg-blue-500'],
+                  ['In Production', '17', 'bg-amber-500'],
+                  ['Ready To Dispatch', '11', 'bg-emerald-500'],
+                ].map(([label, value, color]) => (
+                  <div key={label} className="rounded-xl border border-slate-200 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-sm font-medium text-slate-700">{label}</p>
+                      <p className="text-sm font-bold text-slate-900">{value}</p>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100">
+                      <div className={`h-2 rounded-full ${color}`} style={{ width: label === 'Orders Approved' ? '82%' : label === 'In Production' ? '55%' : '43%' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <BarChart3 className="h-4 w-4 text-amber-600" />
+                  Dispatch Performance
+                </div>
+                <p className="mt-1 text-xs text-slate-600">On-time delivery improved by 18% after workflow standardization.</p>
+              </div>
+            </div>
+          </div>
         </section>
 
-        {/* Features Section */}
-        <section id="features" className="w-full py-24 md:py-32 bg-white relative">
-          <div className="container px-4 md:px-6 mx-auto">
-            <div className="flex flex-col items-center justify-center space-y-4 text-center mb-16">
-              <h2 className="text-3xl font-bold tracking-tight sm:text-5xl">Built for Growth</h2>
-              <p className="text-muted-foreground text-lg max-w-[600px]">
-                Everything you need to scale your operations without the overhead of complex systems.
-              </p>
+        <section id="modules" className="mx-auto w-full max-w-7xl px-4 py-16 md:px-8">
+          <div className="mb-10 flex items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Core Modules</p>
+              <h2 className="mt-2 text-3xl font-black text-slate-950 md:text-4xl">Built for Automotive Product Teams</h2>
+            </div>
+            <div className="hidden rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 md:block">
+              One platform. Clear ownership.
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {modules.map((module) => (
+              <article
+                key={module.title}
+                className="group rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+              >
+                <div className="inline-flex rounded-2xl bg-slate-900 p-3 text-white">
+                  <module.icon className="h-5 w-5" />
+                </div>
+                <h3 className="mt-4 text-xl font-bold text-slate-950">{module.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600">{module.description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section id="workflow" className="border-y border-slate-200 bg-white/70">
+          <div className="mx-auto w-full max-w-7xl px-4 py-16 md:px-8">
+            <h2 className="text-3xl font-black text-slate-950 md:text-4xl">How Your Team Moves Work</h2>
+            <div className="mt-8 grid gap-4 md:grid-cols-4">
+              {[
+                ['1. Intake', 'Capture order + assign customer + validate item list.'],
+                ['2. Produce', 'Generate production records and track completion.'],
+                ['3. Dispatch', 'Create partial or full dispatch with courier details.'],
+                ['4. Collect', 'Record payments and close the order trail.'],
+              ].map(([title, text]) => (
+                <div key={title} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <p className="text-sm font-bold text-slate-900">{title}</p>
+                  <p className="mt-2 text-sm text-slate-600">{text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="mx-auto w-full max-w-7xl px-4 py-16 md:px-8">
+          <div className="rounded-[2rem] border border-slate-200 bg-slate-950 p-8 text-white md:p-12">
+            <div className="grid gap-8 md:grid-cols-2 md:items-center">
+              <div>
+                <h2 className="text-3xl font-black leading-tight md:text-4xl">Give your OMS a serious front door.</h2>
+                <p className="mt-3 text-slate-300">
+                  Designed for car-product operations where every missed dispatch or untracked payment costs real money.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row md:justify-end">
+                <Link href={user ? '/dashboard' : '/login'}>
+                  <Button size="lg" className="w-full rounded-xl bg-amber-500 px-8 text-slate-950 hover:bg-amber-400 sm:w-auto">
+                    {user ? 'Go To Dashboard' : 'Sign In To Continue'}
+                  </Button>
+                </Link>
+                <Link href="/dashboard/orders">
+                  <Button size="lg" variant="outline" className="w-full rounded-xl border-slate-600 bg-transparent text-white hover:bg-slate-900 sm:w-auto">
+                    View Orders
+                  </Button>
+                </Link>
+              </div>
             </div>
 
-            <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="group flex flex-col items-center space-y-4 text-center p-8 rounded-3xl border border-transparent bg-slate-50 hover:bg-white hover:border-slate-100 hover:shadow-[0_20px_50px_rgba(0,0,0,0.05)] transition-all duration-500">
-                <div className="p-4 bg-indigo-50 rounded-2xl group-hover:scale-110 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-500">
-                  <Zap className="h-8 w-8 text-indigo-600 group-hover:text-white" />
-                </div>
-                <h3 className="text-2xl font-bold">Real-time Processing</h3>
-                <p className="text-muted-foreground text-lg leading-relaxed">
-                  Instant updates on orders, inventory, and status changes across your entire organization.
-                </p>
-              </div>
-
-              <div className="group flex flex-col items-center space-y-4 text-center p-8 rounded-3xl border border-transparent bg-slate-50 hover:bg-white hover:border-slate-100 hover:shadow-[0_20px_50px_rgba(0,0,0,0.05)] transition-all duration-500">
-                <div className="p-4 bg-purple-50 rounded-2xl group-hover:scale-110 group-hover:bg-purple-600 group-hover:text-white transition-all duration-500">
-                  <BarChart3 className="h-8 w-8 text-purple-600 group-hover:text-white" />
-                </div>
-                <h3 className="text-2xl font-bold">Advanced Analytics</h3>
-                <p className="text-muted-foreground text-lg leading-relaxed">
-                  Gain insights into your business performance with detailed reports and visualizations.
-                </p>
-              </div>
-
-              <div className="group flex flex-col items-center space-y-4 text-center p-8 rounded-3xl border border-transparent bg-slate-50 hover:bg-white hover:border-slate-100 hover:shadow-[0_20px_50px_rgba(0,0,0,0.05)] transition-all duration-500">
-                <div className="p-4 bg-emerald-50 rounded-2xl group-hover:scale-110 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-500">
-                  <ShieldCheck className="h-8 w-8 text-emerald-600 group-hover:text-white" />
-                </div>
-                <h3 className="text-2xl font-bold">Secure & Reliable</h3>
-                <p className="text-muted-foreground text-lg leading-relaxed">
-                  Your data is protected with enterprise-grade security and automated daily backups.
-                </p>
-              </div>
+            <div className="mt-8 flex flex-wrap items-center gap-6 text-sm text-slate-300">
+              <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-400" /> Secure role-based access</span>
+              <span className="inline-flex items-center gap-2"><Factory className="h-4 w-4 text-amber-400" /> Production linked to dispatch</span>
+              <span className="inline-flex items-center gap-2"><Truck className="h-4 w-4 text-blue-400" /> Real shipment status tracking</span>
             </div>
           </div>
         </section>
       </main>
-
-      <footer className="py-12 border-t bg-slate-50/50">
-        <div className="container px-4 md:px-6 mx-auto flex flex-col gap-8">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-            <SunkoolLogo size="md" />
-            <nav className="flex gap-8">
-              <Link className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" href="#">
-                Terms
-              </Link>
-              <Link className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" href="#">
-                Privacy
-              </Link>
-              <Link className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" href="#">
-                Twitter
-              </Link>
-            </nav>
-          </div>
-          <div className="border-t pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-sm text-muted-foreground">
-              &copy; {new Date().getFullYear()} Sunkool Management Inc. All rights reserved.
-            </p>
-            <div className="text-sm text-zinc-400">
-              Built for speed and scale.
-            </div>
-          </div>
-        </div>
-      </footer>
     </div>
   )
 }
-

@@ -307,8 +307,8 @@ export function generateProductionChecklistPDF(
     const headerHeight = 8
     const COLS = {
       INDEX: 10,
-      MAIN: 50,
-      SUB: 50,
+      MAIN: 62,
+      SUB: 38,
       ORDERED: 23,
       PACKING: 23,
       CHECK: 24
@@ -447,18 +447,9 @@ export function generateProductionChecklistPDF(
       processedIds.add(item.id)
     })
 
-    // 2. Sort naturally and assign sequential index
+    // 2. Keep user-added order and assign sequential index
     // Also FILTER out rows with qty <= 0 (important for partial production)
     const filteredRows = displayRows.filter(row => row.qty > 0)
-
-    filteredRows.sort((a, b) => {
-      const mainComp = a.mainName.localeCompare(b.mainName, undefined, { numeric: true, sensitivity: 'base' })
-      if (mainComp !== 0) return mainComp
-      // If same main, parent row (subName empty) comes first
-      if (a.subName === '' && b.subName !== '') return -1
-      if (a.subName !== '' && b.subName === '') return 1
-      return a.subName.localeCompare(b.subName, undefined, { numeric: true, sensitivity: 'base' })
-    })
     filteredRows.forEach((row, i) => row.index = i + 1)
 
     // 3. Render rows in full grid
@@ -726,27 +717,6 @@ export function generateTrackingSlipPDF(
     doc.line(x, y, x + w, y)
   }
 
-  const drawBarcode = (x: number, y: number, width: number, height: number, code: string) => {
-    const pattern = code.replace(/[^A-Z0-9]/g, '') || 'SK123456'
-    let cursorX = x
-    const barSpacing = 0.3
-
-    doc.setFillColor(...COLORS.BLACK)
-    for (let i = 0; i < 60 && cursorX < x + width; i++) {
-      const charCode = pattern.charCodeAt(i % pattern.length)
-      const isWide = charCode % 3 === 0
-      const barWidth = isWide ? 0.8 : 0.4
-
-      doc.rect(cursorX, y, barWidth, height, 'F')
-      cursorX += barWidth + barSpacing
-    }
-
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'bold')
-    doc.setTextColor(...COLORS.BLACK)
-    doc.text(code, x + width / 2, y + height + 5, { align: 'center' })
-  }
-
   // Draw external thin border around entire content
   doc.setDrawColor(COLORS.GRAY_BORDER[0], COLORS.GRAY_BORDER[1], COLORS.GRAY_BORDER[2])
   doc.setLineWidth(0.2)
@@ -781,109 +751,103 @@ export function generateTrackingSlipPDF(
   // --- 2. TO SECTION (Clean Block Format) ---
   // Header Bar
   doc.setFillColor(...COLORS.BLUE_HEADER)
-  doc.rect(MARGIN, currentY, CONTENT_WIDTH, 8, 'F')
-  doc.setFontSize(9)
+  doc.rect(MARGIN, currentY, CONTENT_WIDTH, 10, 'F')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(13)
   doc.setTextColor(...COLORS.WHITE)
-  doc.text('TO (CUSTOMER DETAILS):', MARGIN + 3, currentY + 5.5)
-  currentY += 8
+  doc.text('TO (CUSTOMER DETAILS):', MARGIN + 3.5, currentY + 7)
+  currentY += 10
 
   // Details Box
-  const toBoxHeight = 42
+  const toBoxHeight = 64
   doc.setDrawColor(...COLORS.BLACK)
   doc.setLineWidth(BORDER_WIDTH)
   doc.rect(MARGIN, currentY, CONTENT_WIDTH, toBoxHeight, 'S')
 
-  let contentY = currentY + 10
+  let contentY = currentY + 12
   const pad = 8
 
   doc.setTextColor(...COLORS.BLACK)
 
   // Name in Bold
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(14)
+  doc.setFontSize(20)
   const customerName = (order.customers?.name || '').toUpperCase()
   doc.text(customerName, MARGIN + pad, contentY)
 
-  // Address and Phone in Normal
-  contentY += 8
+  // Address and phone with larger, traceable text
+  contentY += 11
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(11)
+  doc.setFontSize(14)
   const address = (order.customers?.address || '').toUpperCase()
   const addrLines = doc.splitTextToSize(address, CONTENT_WIDTH - pad * 2)
-  doc.text(addrLines.slice(0, 3), MARGIN + pad, contentY)
+  const toAddressLines = addrLines.slice(0, 4)
+  doc.text(toAddressLines, MARGIN + pad, contentY)
 
-  contentY += (addrLines.slice(0, 3).length * 6)
+  contentY += (toAddressLines.length * 6)
   if (order.customers?.phone) {
-    doc.text(`MOB: ${order.customers.phone}`, MARGIN + pad, contentY)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(13)
+    doc.text(`MOB: ${order.customers.phone}`, MARGIN + pad, contentY + 2)
   }
 
   currentY += toBoxHeight + 4
 
   // --- 3. FROM SECTION ---
   doc.setFillColor(...COLORS.BLUE_HEADER)
-  doc.rect(MARGIN, currentY, CONTENT_WIDTH, 8, 'F')
-  doc.setFontSize(9)
+  doc.rect(MARGIN, currentY, CONTENT_WIDTH, 10, 'F')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(13)
   doc.setTextColor(...COLORS.WHITE)
-  doc.text('FROM:', MARGIN + 3, currentY + 5.5)
-  currentY += 8
+  doc.text('FROM:', MARGIN + 3.5, currentY + 7)
+  currentY += 10
 
-  const fromBoxHeight = 28
+  const fromBoxHeight = 40
   doc.setDrawColor(...COLORS.BLACK)
   doc.setLineWidth(BORDER_WIDTH)
   doc.rect(MARGIN, currentY, CONTENT_WIDTH, fromBoxHeight, 'S')
 
-  contentY = currentY + 8
+  contentY = currentY + 10
   doc.setTextColor(...COLORS.BLACK)
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(12)
+  doc.setFontSize(16)
   doc.text('SUNKOOL SOLUTION', MARGIN + pad, contentY)
-  doc.setFontSize(9)
+  doc.setFontSize(12)
   doc.setFont('helvetica', 'normal')
-  contentY += 6
+  contentY += 8
   doc.text('510, WESTERN PALACE, CONGRESS NAGAR, OPP.', MARGIN + pad, contentY)
-  contentY += 5
+  contentY += 6.5
   doc.text('PARK, NAGPUR - 440012', MARGIN + pad, contentY)
-  contentY += 5
+  contentY += 6.5
   doc.text('MOB. NO. 9156321123', MARGIN + pad, contentY)
 
   currentY += fromBoxHeight + 4
 
-  // --- 4. BOTTOM SECTION (SPLIT) ---
+  // --- 4. PARCEL DETAILS (FULL WIDTH) ---
   const splitY = currentY
-  const boxW = CONTENT_WIDTH / 2
   const boxH = 45
 
-  // Left: Tracking
+  // Full-width Parcel Details
   doc.setFillColor(...COLORS.BLUE_HEADER)
-  doc.rect(MARGIN, splitY, boxW, 8, 'F')
+  doc.rect(MARGIN, splitY, CONTENT_WIDTH, 8, 'F')
   doc.setFontSize(9)
   doc.setTextColor(...COLORS.WHITE)
-  doc.text('TRACKING NUMBER:', MARGIN + 3, splitY + 5.5)
-
-  doc.setDrawColor(...COLORS.BLACK)
-  doc.rect(MARGIN, splitY + 8, boxW, boxH, 'S')
-  const tracking = dispatch.trackingId || order.internal_order_number || 'SK-0000000'
-  drawBarcode(MARGIN + boxW / 2 - 25, splitY + 22, 50, 15, tracking)
-
-  // Right: Parcel Details
-  doc.setFillColor(...COLORS.BLUE_HEADER)
-  doc.rect(MARGIN + boxW, splitY, boxW, 8, 'F')
-  doc.text('PARCEL DETAILS:', MARGIN + boxW + 3, splitY + 5.5)
+  doc.text('PARCEL DETAILS:', MARGIN + 3, splitY + 5.5)
 
   doc.setDrawColor(...COLORS.BLACK)
   doc.setLineWidth(BORDER_WIDTH)
-  doc.rect(MARGIN + boxW, splitY + 8, boxW, boxH, 'S')
+  doc.rect(MARGIN, splitY + 8, CONTENT_WIDTH, boxH, 'S')
 
   let rightContentY = splitY + 18
   doc.setTextColor(...COLORS.BLACK)
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(10)
-  doc.text('Weight:', MARGIN + boxW + pad, rightContentY)
-  drawLine(MARGIN + boxW + pad + 15, rightContentY + 1.5, boxW - pad * 2 - 15)
+  doc.setFontSize(11)
+  doc.text('Weight:', MARGIN + pad, rightContentY)
+  drawLine(MARGIN + pad + 18, rightContentY + 1.5, CONTENT_WIDTH - pad * 2 - 18)
 
   rightContentY += 12
-  doc.text('Dimensions:', MARGIN + boxW + pad, rightContentY)
-  drawLine(MARGIN + boxW + pad, rightContentY + 8, boxW - pad * 2)
+  doc.text('Dimensions:', MARGIN + pad, rightContentY)
+  drawLine(MARGIN + pad + 25, rightContentY + 1.5, CONTENT_WIDTH - pad * 2 - 25)
 
   currentY += boxH + 12
 
@@ -925,5 +889,3 @@ export function generateTrackingSlipPDF(
 
   return { blob: pdfBlob, filename }
 }
-
-

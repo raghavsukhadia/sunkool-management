@@ -21,6 +21,7 @@ import {
   addItemToOrder,
   updateOrderItemQuantity,
   removeItemFromOrder,
+  createReturnDispatch,
   createDispatch,
   getOrderDispatches,
   updateDispatchStatus,
@@ -185,6 +186,15 @@ export default function OrderDetailsPage() {
   const [paymentMethod, setPaymentMethod] = useState<string>("")
   const [paymentReference, setPaymentReference] = useState<string>("")
   const [paymentNotes, setPaymentNotes] = useState<string>("")
+
+  const getNetDispatchedForItem = (orderItemId: string) => {
+    return dispatches.reduce((sum, dispatch) => {
+      const dispatchQtyForItem = dispatch.dispatch_items?.reduce((itemSum: number, di: any) => {
+        return di.order_items?.id === orderItemId ? itemSum + di.quantity : itemSum
+      }, 0) || 0
+      return sum + dispatchQtyForItem
+    }, 0)
+  }
 
   const fetchAllOrderData = async () => {
     setLoading(true)
@@ -738,11 +748,12 @@ export default function OrderDetailsPage() {
     if (showDispatchModal && order?.items) {
       const initialQuantities: Record<string, number> = {}
       order.items.forEach(item => {
-        initialQuantities[item.id] = dispatchType === "full" ? item.quantity : 0
+        const remainingToDispatch = Math.max(0, item.quantity - getNetDispatchedForItem(item.id))
+        initialQuantities[item.id] = dispatchType === "full" ? remainingToDispatch : 0
       })
       setDispatchQuantities(initialQuantities)
     }
-  }, [showDispatchModal, dispatchType, order?.items])
+  }, [showDispatchModal, dispatchType, order?.items, dispatches])
 
   const handleDownloadLatestTrackingSlip = async () => {
     if (!order) return
@@ -876,7 +887,7 @@ export default function OrderDetailsPage() {
     const orderItem = order?.items?.find(item => item.id === orderItemId)
     if (!orderItem) return
 
-    const maxQuantity = orderItem.quantity
+    const maxQuantity = Math.max(0, orderItem.quantity - getNetDispatchedForItem(orderItemId))
     const newQuantity = Math.max(0, Math.min(quantity, maxQuantity))
 
     setDispatchQuantities(prev => ({
@@ -1139,10 +1150,24 @@ export default function OrderDetailsPage() {
           )
 
           if (confirmReturn) {
-            // User wants to create return dispatch
-            setError("Return dispatch feature coming soon. For now, please contact support to process the return before deleting this item.")
-            // TODO: Implement return dispatch UI
-            // This would open a modal/dialog to create the return dispatch
+            const returnResult = await createReturnDispatch(orderId, [{
+              order_item_id: itemId,
+              quantity: result.dispatchedQuantity
+            }], `Auto return dispatch for item removal${itemName ? `: ${itemName}` : ''}`)
+
+            if (!returnResult.success) {
+              setError(returnResult.error || "Failed to create return dispatch")
+              return
+            }
+
+            const retryResult = await removeItemFromOrder(itemId) as any
+            if (retryResult.success) {
+              setSuccess("Return dispatch created and item removed successfully!")
+              await Promise.all([loadOrderDetails(), loadDispatches()])
+              setTimeout(() => setSuccess(null), 3000)
+            } else {
+              setError(retryResult.error || "Return dispatch created, but item removal failed")
+            }
           } else {
             setError(result.error)
           }
@@ -3526,12 +3551,7 @@ export default function OrderDetailsPage() {
                           : inventoryItem?.item_name || `Item`
 
                         // Get already dispatched quantity from dispatches - FIX: Show context
-                        const alreadyDispatched = dispatches.reduce((sum, d) => {
-                          const dispatchQtyForItem = d.dispatch_items?.reduce((itemSum: number, di: any) => {
-                            return di.order_items?.id === item.id ? itemSum + di.quantity : itemSum
-                          }, 0) || 0
-                          return sum + dispatchQtyForItem
-                        }, 0)
+                        const alreadyDispatched = getNetDispatchedForItem(item.id)
 
                         const dispatchQty = dispatchQuantities[item.id] || 0
                         const remainingQty = item.quantity - alreadyDispatched - dispatchQty
@@ -3835,4 +3855,3 @@ export default function OrderDetailsPage() {
     </div>
   )
 }
-
