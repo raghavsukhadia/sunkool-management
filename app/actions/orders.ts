@@ -447,31 +447,37 @@ export async function updateOrderItemQuantity(orderItemId: string, quantity: num
 export async function removeItemFromOrder(orderItemId: string) {
   const supabase = await createClient()
 
-  // Check if item has been dispatched - CRITICAL FIX
+  // Check dispatch history for this item (includes returns as negative quantities)
   const { data: dispatchItems, error: checkError } = await supabase
     .from("dispatch_items")
-    .select("id")
+    .select("id, quantity")
     .eq("order_item_id", orderItemId)
-    .limit(1)
 
   if (checkError) {
     return { success: false, error: `Failed to check dispatch status: ${checkError.message}` }
   }
 
-  if (dispatchItems && dispatchItems.length > 0) {
-    // Get dispatch quantity details
-    const { data: detailedDispatch } = await supabase
-      .from("dispatch_items")
-      .select("quantity, dispatches!inner(dispatch_date, dispatch_type)")
-      .eq("order_item_id", orderItemId)
+  const outstandingDispatched = dispatchItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
 
-    const totalDispatched = detailedDispatch?.reduce((sum, item) => sum + item.quantity, 0) || 0
-
+  // Block deletion only when there is still net quantity with customer
+  if (outstandingDispatched > 0) {
     return {
       success: false,
-      error: `Cannot delete this item - ${totalDispatched} units have already been dispatched. To remove this item, first create a return dispatch for the dispatched units, then try deleting again.`,
+      error: `Cannot delete this item - ${outstandingDispatched} units are still dispatched. To remove this item, first create a return dispatch for the remaining dispatched units, then try deleting again.`,
       canCreateReturn: true,
-      dispatchedQuantity: totalDispatched
+      dispatchedQuantity: outstandingDispatched
+    }
+  }
+
+  // If dispatch and return history nets to zero, remove dispatch item rows to satisfy FK constraint
+  if (dispatchItems && dispatchItems.length > 0) {
+    const { error: cleanupError } = await supabase
+      .from("dispatch_items")
+      .delete()
+      .eq("order_item_id", orderItemId)
+
+    if (cleanupError) {
+      return { success: false, error: `Failed to clear dispatch history for item deletion: ${cleanupError.message}` }
     }
   }
 
@@ -730,17 +736,21 @@ export async function createReturnDispatch(
 
   // Validate that items were actually dispatched
   for (const returnItem of returnItems) {
+    if (returnItem.quantity <= 0) {
+      return { success: false, error: "Return quantity must be greater than 0" }
+    }
+
     const { data: dispatchedItems } = await supabase
       .from("dispatch_items")
       .select("quantity")
       .eq("order_item_id", returnItem.order_item_id)
 
-    const totalDispatched = dispatchedItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
+    const outstandingDispatched = dispatchedItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
 
-    if (totalDispatched < returnItem.quantity) {
+    if (outstandingDispatched < returnItem.quantity) {
       return {
         success: false,
-        error: `Cannot return ${returnItem.quantity} units. Only ${totalDispatched} units were dispatched.`
+        error: `Cannot return ${returnItem.quantity} units. Only ${outstandingDispatched} units are currently dispatched.`
       }
     }
   }
@@ -884,8 +894,10 @@ export async function updateDispatchStatus(
         .from("dispatches")
         .select("shipment_status")
         .eq("order_id", dispatchData.order_id)
+        .neq("dispatch_type", "return")
 
-      const allDelivered = allDispatches?.every(d => d.shipment_status === 'delivered') || false
+      const allDelivered = (allDispatches?.length || 0) > 0
+        && allDispatches!.every(d => d.shipment_status === 'delivered')
 
       if (allDelivered) {
         await supabase
@@ -1965,4 +1977,3 @@ export async function deleteProductionRecord(recordId: string) {
 
   return { success: true }
 }
-

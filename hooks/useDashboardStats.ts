@@ -48,7 +48,7 @@ export function useDashboardStats() {
         deliveredOrders: orders.filter(o => o.order_status === "Delivered").length,
         totalRevenue: orders.reduce((sum, o) => sum + (o.total_price || 0), 0),
         unpaidInvoices: orders.filter(o => o.payment_status === "Pending" && o.order_status === "Delivered").length,
-        partialPaymentOrders: orders.filter(o => o.payment_status === "Partial Payment").length,
+        partialPaymentOrders: orders.filter(o => o.payment_status === "Partial").length,
         missingSalesOrderNumber: orders.filter(o => !o.sales_order_number).length,
         lastUpdated: new Date(),
       }

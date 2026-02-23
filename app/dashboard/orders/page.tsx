@@ -75,7 +75,7 @@ export default function OrdersPage() {
 
   // Filter and sort orders
   const filteredAndSortedOrders = (() => {
-    let filtered = orders
+    let filtered = [...orders]
 
     // Search filter
     if (searchTerm) {
@@ -159,6 +159,8 @@ export default function OrdersPage() {
         return "bg-yellow-100 text-yellow-800"
       case "Delivered Unpaid":
         return "bg-orange-100 text-orange-800"
+      case "Partial":
+        return "bg-blue-100 text-blue-800"
       case "Refunded":
         return "bg-red-100 text-red-800"
       default:
@@ -277,6 +279,7 @@ export default function OrdersPage() {
                     <option value="all">All Payment Statuses</option>
                     <option value="Pending">Pending</option>
                     <option value="Paid">Paid</option>
+                    <option value="Partial">Partial</option>
                     <option value="Delivered Unpaid">Delivered Unpaid</option>
                     <option value="Refunded">Refunded</option>
                   </select>
