@@ -35,11 +35,17 @@ export async function sendMessage(
   message: string
 ): Promise<SendMessageResult> {
   const normalizedReceiver = toReceiverMobileNo(receiverMobileNo)
+  // Normalize line endings to \n, collapse multiple newlines/spaces; preserve single newlines for formatting
+  const normalizedMessage = message
+    .replace(/\r\n|\r/g, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim()
   const body = new URLSearchParams({
     username: config.username,
     password: config.password,
     receiverMobileNo: normalizedReceiver,
-    message: message.replace(/\r\n|\n|\r/g, " ").replace(/\s{2,}/g, " ").trim(),
+    message: normalizedMessage,
   })
 
   try {
@@ -102,6 +108,34 @@ export async function sendOrderCreated(
     `Customer Name: ${payload.customerName}. ` +
     (payload.salesOrderNumber ? `Sales Order: ${payload.salesOrderNumber}. ` : "") +
     `Please review and begin production.`
+  return sendMessageToRecipients(config, recipientPhones, message)
+}
+
+export type ProductionRecordCreatedPayload = {
+  orderNumber: string
+  customerName: string
+  items: { name: string; quantity: number }[]
+  orderSystemBaseUrl: string
+  orderId: string
+}
+
+export async function sendProductionRecordCreated(
+  config: MessageAutoSenderConfig,
+  recipientPhones: string[],
+  payload: ProductionRecordCreatedPayload
+): Promise<SendMessageResult[]> {
+  const orderUrl = `${payload.orderSystemBaseUrl.replace(/\/$/, "")}/dashboard/orders/${payload.orderId}`
+  const itemLines = payload.items
+    .map((item, i) => `${i + 1}. ${item.name} – Ordered: ${item.quantity}`)
+    .join("\n")
+  const message =
+    `🚨 *New Order Added to Production Queue*\n\n` +
+    `*Order Number:* ${payload.orderNumber}\n` +
+    `*Customer Name:* ${payload.customerName}\n\n` +
+    `*Item Details:*\n\n` +
+    (itemLines || "No items") +
+    `\n\nOpen Order System:\n${orderUrl}\n\n` +
+    `Please open the order in the system, review specifications, and begin production.`
   return sendMessageToRecipients(config, recipientPhones, message)
 }
 

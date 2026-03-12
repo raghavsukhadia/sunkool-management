@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
-import { enqueueNotification, sendOrderCreatedNotification } from "@/app/actions/notifications"
+import { sendProductionRecordCreatedNotification } from "@/app/actions/notifications"
 import { getCourierCompanies } from "@/app/actions/management"
 
 // Generate next internal order number in sequence (SK01, SK02, SK03...)
@@ -132,32 +132,6 @@ export async function createOrder(formData: {
   revalidatePath("/dashboard/orders/new")
   revalidatePath("/dashboard/follow-up")
 
-  // Enqueue and send WhatsApp notification for production (fire-and-forget; do not block order creation)
-  ;(async () => {
-    try {
-      const { data: customer } = await supabase
-        .from("customers")
-        .select("name")
-        .eq("id", formData.customer_id)
-        .maybeSingle()
-      const customerName = (customer as { name?: string } | null)?.name ?? ""
-      const payload = {
-        order_id: order.id,
-        order_number: order.internal_order_number,
-        customer_name: customerName,
-        sales_order_number: order.sales_order_number ?? "",
-      }
-      await enqueueNotification("order_created", payload)
-      await sendOrderCreatedNotification({
-        order_number: payload.order_number,
-        customer_name: payload.customer_name,
-        sales_order_number: payload.sales_order_number,
-      })
-    } catch (err) {
-      console.error("[createOrder] notification failed:", err)
-    }
-  })()
-
   return { success: true, data: order }
 }
 
@@ -239,8 +213,14 @@ export async function getAllOrders() {
         : (order.total_price ?? 0)
       const totalPaid = totalPaidByOrder[order.id] || 0
       const amountDue = Math.max(0, requested - totalPaid)
+      // Only show "Paid" when there was an amount to pay and it's fully covered.
+      // If requested is 0 and no payments, treat as Pending (not Paid).
       const derivedPaymentStatus =
-        amountDue === 0 ? "Paid" : totalPaid > 0 ? "Partial" : "Pending"
+        amountDue === 0 && (requested > 0 || totalPaid > 0)
+          ? "Paid"
+          : totalPaid > 0
+            ? "Partial"
+            : "Pending"
       return {
         ...order,
         item_count: itemCounts[order.id] || 0,
@@ -1790,6 +1770,81 @@ export async function createProductionRecord(
         uploaded_by: profile.id,
       })
   }
+
+  // Fire-and-forget: send WhatsApp notification with order and item details
+  ;(async () => {
+    try {
+      const { data: orderRow } = await supabase
+        .from("orders")
+        .select("internal_order_number, customer_id")
+        .eq("id", orderId)
+        .single()
+
+      if (!orderRow?.customer_id) return
+
+      const { data: customer } = await supabase
+        .from("customers")
+        .select("name")
+        .eq("id", orderRow.customer_id)
+        .maybeSingle()
+
+      const { data: orderItems } = await supabase
+        .from("order_items")
+        .select("id, inventory_item_id, product_id, quantity")
+        .eq("order_id", orderId)
+        .order("created_at", { ascending: true })
+
+      if (!orderItems?.length) return
+
+      const allInvIds = [...new Set(
+        orderItems.flatMap((oi: { inventory_item_id?: string; product_id?: string }) =>
+          [oi.inventory_item_id, oi.product_id].filter(Boolean) as string[]
+        )
+      )]
+
+      const { data: invRows } = await supabase
+        .from("inventory_items")
+        .select("id, item_name, parent_item_id")
+        .in("id", allInvIds)
+
+      const invMap = new Map<string, { item_name: string; parent_item_id: string | null }>()
+      for (const row of invRows || []) {
+        invMap.set(row.id, { item_name: row.item_name ?? "", parent_item_id: row.parent_item_id ?? null })
+      }
+
+      const items: { name: string; quantity: number }[] = orderItems.map(
+        (oi: { inventory_item_id?: string; product_id?: string; quantity: number }, index: number) => {
+          const invId = oi.inventory_item_id
+          const prodId = oi.product_id
+          const inv = invId ? invMap.get(invId) : undefined
+          const prod = prodId ? invMap.get(prodId) : undefined
+
+          let name: string
+          if (inv?.parent_item_id) {
+            const parent = invMap.get(inv.parent_item_id)
+            name = parent ? `${parent.item_name} → ${inv.item_name}` : inv.item_name
+          } else if (prod?.parent_item_id === invId && inv) {
+            name = `${inv.item_name} → ${prod.item_name}`
+          } else if (prod?.parent_item_id) {
+            const parent = invMap.get(prod.parent_item_id)
+            name = parent ? `${parent.item_name} → ${prod.item_name}` : prod.item_name
+          } else {
+            name = (inv?.item_name || prod?.item_name) || `Item ${index + 1}`
+          }
+          return { name, quantity: oi.quantity }
+        }
+      )
+
+      await sendProductionRecordCreatedNotification({
+        order_number: orderRow.internal_order_number ?? `ORD-${orderId.substring(0, 8)}`,
+        customer_name: (customer as { name?: string } | null)?.name ?? "",
+        items,
+        order_id: orderId,
+      })
+    } catch (err) {
+      console.error("[createProductionRecord] notification failed:", err)
+    }
+  })()
 
   // If this was the first partial production, order status was already updated above
   // Reload order details to reflect status change

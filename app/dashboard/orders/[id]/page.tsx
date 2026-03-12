@@ -204,12 +204,13 @@ export default function OrderDetailsPage() {
     return { totalPaid, requested, amountDue, hasRequestedPayment: requested > 0 }
   }, [order, orderPayments])
 
-  // Derived payment status from actual amounts (so it stays correct when requested amount is changed)
+  // Derived payment status from actual amounts. Only show Paid when there was an amount to pay and it's fully covered.
   const derivedPaymentStatus = useMemo((): "complete" | "partial" | "pending" => {
-    if (paymentSummary.amountDue === 0) return "complete"
-    if (paymentSummary.totalPaid > 0) return "partial"
+    const { amountDue, requested, totalPaid } = paymentSummary
+    if (amountDue === 0 && (requested > 0 || totalPaid > 0)) return "complete"
+    if (totalPaid > 0) return "partial"
     return "pending"
-  }, [paymentSummary.amountDue, paymentSummary.totalPaid])
+  }, [paymentSummary.amountDue, paymentSummary.requested, paymentSummary.totalPaid])
 
   // Single follow-up after 14 days: only show the one at (first dispatch + 14 days), hide old 14-daily entries
   const paymentFollowupDisplay = useMemo(() => {

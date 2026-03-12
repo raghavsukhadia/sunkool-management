@@ -230,3 +230,42 @@ export async function sendOrderCreatedNotification(payload: {
     })
   }
 }
+
+/** Sends production record created notification (when "Create Production Record" is clicked). */
+export async function sendProductionRecordCreatedNotification(payload: {
+  order_number: string
+  customer_name: string
+  items: { name: string; quantity: number }[]
+  order_id: string
+}) {
+  const [configRes, recipientsRes] = await Promise.all([
+    getWhatsAppConfig(),
+    getNotificationRecipients(),
+  ])
+
+  const config = toServiceConfig(configRes.success ? configRes.data : null)
+  const recipients = (recipientsRes.success && recipientsRes.data
+    ? recipientsRes.data as { id: string; name: string; phone: string; is_active: boolean }[]
+    : []
+  ).filter((r) => r.is_active)
+
+  if (!config) {
+    console.warn("[notifications] sendProductionRecordCreated: missing endpoint, username, or password; skipping send")
+    return
+  }
+  if (recipients.length === 0) {
+    console.warn("[notifications] sendProductionRecordCreated: no active recipients; skipping send")
+    return
+  }
+
+  const phones = recipients.map((r) => r.phone?.trim()).filter(Boolean) as string[]
+  const orderSystemBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://sunkool-management.vercel.app").replace(/\/$/, "")
+
+  await notificationService.sendProductionRecordCreated(config, phones, {
+    orderNumber: payload.order_number,
+    customerName: payload.customer_name,
+    items: payload.items,
+    orderSystemBaseUrl,
+    orderId: payload.order_id,
+  })
+}
