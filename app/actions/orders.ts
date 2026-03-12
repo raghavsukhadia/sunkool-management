@@ -1823,9 +1823,9 @@ export async function createProductionRecord(
           if (inv?.parent_item_id) {
             const parent = invMap.get(inv.parent_item_id)
             name = parent ? `${parent.item_name} → ${inv.item_name}` : inv.item_name
-          } else if (prod?.parent_item_id === invId && inv) {
+          } else if (prod && prod.parent_item_id === invId && inv) {
             name = `${inv.item_name} → ${prod.item_name}`
-          } else if (prod?.parent_item_id) {
+          } else if (prod && prod.parent_item_id) {
             const parent = invMap.get(prod.parent_item_id)
             name = parent ? `${parent.item_name} → ${prod.item_name}` : prod.item_name
           } else {
