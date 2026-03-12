@@ -1,0 +1,10 @@
+-- ============================================
+-- Order Status Stages (New workflow)
+-- ============================================
+-- Run in two steps (Postgres requires new enum values to be committed before use):
+--
+-- Step 1: Run order-status-stages-part1-enum.sql   (adds enum values)
+-- Step 2: Run order-status-stages-part2-data.sql  (migrates data, sets default)
+--
+-- Or run this file in Supabase SQL Editor as two separate executions:
+-- First execution: Part 1 only (lines 12-17). Then run Part 2 (lines 19-43).

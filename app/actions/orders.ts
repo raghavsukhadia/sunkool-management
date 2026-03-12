@@ -116,7 +116,7 @@ export async function createOrder(formData: {
       internal_order_number: internalOrderNumber, // Auto-generated internal order number
       sales_order_number: formData.sales_order_number || null, // Manual sales order number from other platforms
       cash_discount: formData.cash_discount,
-      order_status: "Pending",
+      order_status: "New Order",
       payment_status: "Pending",
       total_price: 0, // Will be updated when items are added
       created_by: profile.id,
@@ -368,28 +368,7 @@ export async function addItemToOrder(orderId: string, inventoryItemId: string, q
     }
   }
 
-  // Update order status workflow: If order is Pending and has items, move to Approved
-  const { data: order } = await supabase
-    .from("orders")
-    .select("order_status")
-    .eq("id", orderId)
-    .single()
-
-  if (order && order.order_status === "Pending") {
-    // Check if order has items now
-    const { data: orderItems } = await supabase
-      .from("order_items")
-      .select("id")
-      .eq("order_id", orderId)
-
-    if (orderItems && orderItems.length > 0) {
-      // Update status to Approved (ready for production)
-      await supabase
-        .from("orders")
-        .update({ order_status: "Approved" })
-        .eq("id", orderId)
-    }
-  }
+  // Order stays in "New Order" when items are added; moves to "In Progress" when first production record is created
 
   revalidatePath(`/dashboard/orders/${orderId}`)
   return { success: true }
@@ -644,44 +623,8 @@ export async function createDispatch(
     return { success: false, error: dispatchItemsError.message }
   }
 
-  // Update order status
-  let newOrderStatus = order.order_status
-  if (dispatchType === "full") {
-    newOrderStatus = "Dispatched"
-  } else {
-    // Check if all items are fully dispatched
-    const totalOrderQuantity = orderItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
-    const totalDispatchedQuantity = dispatchItems.reduce((sum, item) => sum + item.quantity, 0)
-
-    // Get all previous dispatches for this order
-    const { data: previousDispatches } = await supabase
-      .from("dispatches")
-      .select("id")
-      .eq("order_id", orderId)
-      .neq("id", dispatch.id)
-
-    if (previousDispatches && previousDispatches.length > 0) {
-      const { data: previousDispatchItems } = await supabase
-        .from("dispatch_items")
-        .select("quantity")
-        .in("dispatch_id", previousDispatches.map(d => d.id))
-
-      const previousTotal = previousDispatchItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
-      const newTotal = previousTotal + totalDispatchedQuantity
-
-      if (newTotal >= totalOrderQuantity) {
-        newOrderStatus = "Dispatched"
-      } else {
-        newOrderStatus = "Partial Dispatch"
-      }
-    } else {
-      if (totalDispatchedQuantity >= totalOrderQuantity) {
-        newOrderStatus = "Dispatched"
-      } else {
-        newOrderStatus = "Partial Dispatch"
-      }
-    }
-  }
+  // Update order status: dispatch created -> Ready for Dispatch (In Transit is set when shipment is marked Picked Up)
+  const newOrderStatus = "Ready for Dispatch"
 
   // Update order status
   const { error: updateError } = await supabase
@@ -882,6 +825,14 @@ export async function updateDispatchStatus(
     return { success: false, error: error.message }
   }
 
+  // If status is 'picked_up', update order status to 'In Transit'
+  if (status === 'picked_up' && dispatch?.order_id) {
+    await supabase
+      .from("orders")
+      .update({ order_status: "In Transit" })
+      .eq("id", dispatch.order_id)
+  }
+
   // If status is 'delivered', update order status to 'Delivered'
   if (status === 'delivered') {
     const { data: dispatchData } = await supabase
@@ -942,7 +893,7 @@ export async function updateOrderPayment(
     }
 
     // Check that order is in a dispatched state before payment
-    const dispatchedStates = ['Partial Dispatch', 'Dispatched', 'Delivered']
+    const dispatchedStates = ['Ready for Dispatch', 'In Transit', 'Delivered']
     if (!dispatchedStates.includes(order.order_status)) {
       return {
         success: false,
@@ -980,6 +931,18 @@ export async function updateOrderPayment(
   // Note: payment_date is not stored on orders; use order_payments for per-payment dates.
   if (requestedPaymentAmount !== undefined) {
     updateData.requested_payment_amount = requestedPaymentAmount === null || requestedPaymentAmount === undefined || Number.isNaN(requestedPaymentAmount) ? null : requestedPaymentAmount
+  }
+
+  // When invoice number is set and order is Ready for Dispatch, auto-set order status to Invoiced
+  if (invoiceNumber !== undefined && invoiceNumber?.trim()) {
+    const { data: orderRow } = await supabase
+      .from("orders")
+      .select("order_status")
+      .eq("id", orderId)
+      .single()
+    if (orderRow?.order_status === "Ready for Dispatch") {
+      updateData.order_status = "Invoiced"
+    }
   }
 
   const { data, error } = await supabase
@@ -1255,21 +1218,36 @@ export async function updateOrder(
     const currentStatus = order.order_status
     const newStatus = formData.order_status
 
-    // Define valid state transitions
+    // Define valid state transitions (new order stages)
     const validTransitions: Record<string, string[]> = {
-      'Pending': ['Approved', 'Cancelled'],
-      'Approved': ['In Production', 'Pending', 'Cancelled'],
-      'In Production': ['Partial Dispatch', 'Dispatched', 'Approved', 'Cancelled'],
-      'Partial Dispatch': ['In Production', 'Dispatched', 'Cancelled'],
-      'Dispatched': ['Delivered', 'Partial Dispatch', 'Cancelled'],
-      'Delivered': ['Cancelled'],
-      'Cancelled': []
+      'New Order': ['In Progress', 'Void'],
+      'In Progress': ['Ready for Dispatch', 'Void'],
+      'Ready for Dispatch': ['Invoiced', 'In Transit', 'Void'],
+      'Invoiced': ['In Transit', 'Void'],
+      'In Transit': ['Delivered', 'Void'],
+      'Delivered': ['Void'],
+      'Void': []
     }
 
     if (!validTransitions[currentStatus]?.includes(newStatus)) {
       return {
         success: false,
         error: `Invalid status transition: Cannot change from "${currentStatus}" to "${newStatus}". Valid next statuses: ${validTransitions[currentStatus]?.join(', ') || 'None'}`
+      }
+    }
+
+    // Invoiced: require invoice_number to be set
+    if (newStatus === 'Invoiced') {
+      const { data: orderRow } = await supabase
+        .from("orders")
+        .select("invoice_number")
+        .eq("id", orderId)
+        .single()
+      if (!orderRow?.invoice_number?.trim()) {
+        return {
+          success: false,
+          error: "Please set Invoice Number before marking order as Invoiced."
+        }
       }
     }
   }
@@ -1771,6 +1749,19 @@ export async function createProductionRecord(
       })
   }
 
+  // First production record: move order from New Order to In Progress
+  const { data: orderForStatus } = await supabase
+    .from("orders")
+    .select("order_status")
+    .eq("id", orderId)
+    .single()
+  if (orderForStatus?.order_status === "New Order") {
+    await supabase
+      .from("orders")
+      .update({ order_status: "In Progress" })
+      .eq("id", orderId)
+  }
+
   // Fire-and-forget: send WhatsApp notification with order and item details
   ;(async () => {
     try {
@@ -2118,7 +2109,7 @@ export async function addOrderPayment(
     return { success: false, error: "Order not found" }
   }
 
-  const dispatchedStates = ['Partial Dispatch', 'Dispatched', 'Delivered']
+  const dispatchedStates = ['Ready for Dispatch', 'In Transit', 'Delivered']
   const hasDispatchedStatus = dispatchedStates.includes(order.order_status)
 
   // Also allow if order has dispatch records (handles cases where status wasn't updated)

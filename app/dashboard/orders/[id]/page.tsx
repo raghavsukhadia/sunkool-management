@@ -315,7 +315,7 @@ export default function OrderDetailsPage() {
   // Predicate used across the payment UI to determine whether payments can be recorded.
   // An order is eligible for payment recording if its status indicates dispatch OR if
   // there are existing dispatch records (handles legacy/stale status cases).
-  const dispatchedStates = ['Partial Dispatch', 'Dispatched', 'Delivered']
+  const dispatchedStates = ['Ready for Dispatch', 'In Transit', 'Delivered']
   const canRecordPayment = dispatchedStates.includes(order?.order_status || '') || (dispatches && dispatches.length > 0)
 
   const loadOrderPayments = async () => {
@@ -645,11 +645,10 @@ export default function OrderDetailsPage() {
         await loadOrderDetails() // Reload to get updated order status
         await loadProductionRecords()
         // Reset form only if not partial order (partial orders stay in partial mode)
-        if (productionType === "full" || order?.order_status !== "Partial Order") {
+        if (productionType === "full" || (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")) {
           setProductionType("full")
           setProductionQuantities({})
         } else {
-          // For partial orders, reset quantities but keep type as partial
           setProductionQuantities({})
         }
         setTimeout(() => setSuccess(null), 3000)
@@ -716,38 +715,38 @@ export default function OrderDetailsPage() {
     }
   }
 
-  // Get next workflow step
+  // Get next workflow step (new order stages)
   const getNextWorkflowStep = () => {
     if (!order) return null
 
     switch (order.order_status) {
-      case "Pending":
+      case "New Order":
         return {
-          message: "Add items to this order to proceed",
+          message: "Add items and create a production record to move to In Progress.",
           action: null,
           color: "yellow"
         }
-      case "Approved":
+      case "In Progress":
         return {
-          message: "Order is approved and ready for production. Generate PDF for production team.",
-          action: "In Production",
-          color: "blue"
-        }
-      case "In Production":
-        return {
-          message: "Order is in production. Once ready, proceed to dispatch.",
+          message: "Order is in production. Create a dispatch in the Shipment tab when ready.",
           action: null,
           color: "purple"
         }
-      case "Partial Dispatch":
+      case "Ready for Dispatch":
         return {
-          message: "Order is partially dispatched. Complete remaining items or mark as fully dispatched.",
+          message: "Material is packed. Set invoice number, then mark shipment as Picked Up when it leaves.",
           action: null,
           color: "orange"
         }
-      case "Dispatched":
+      case "Invoiced":
         return {
-          message: "Order has been dispatched. Awaiting delivery confirmation.",
+          message: "Invoice set. Mark shipment as Picked Up when material leaves the facility.",
+          action: null,
+          color: "blue"
+        }
+      case "In Transit":
+        return {
+          message: "Order is in transit. Mark shipment as Delivered when customer confirms.",
           action: "Delivered",
           color: "green"
         }
@@ -757,6 +756,8 @@ export default function OrderDetailsPage() {
           action: null,
           color: "emerald"
         }
+      case "Void":
+        return null
       default:
         return null
     }
@@ -2084,7 +2085,7 @@ export default function OrderDetailsPage() {
                     disabled={
                       !order?.items ||
                       order.items.length === 0 ||
-                      order.order_status === "Cancelled" ||
+                      order.order_status === "Void" ||
                       creatingRecord ||
                       (productionType === "partial" && Object.values(productionQuantities).every(qty => qty === 0)) ||
                       (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")
@@ -2957,7 +2958,7 @@ export default function OrderDetailsPage() {
                     <div>
                       <h3 className="text-sm font-semibold text-red-900 mb-1">Payment Recording Not Available</h3>
                       <p className="text-sm text-red-800">
-                        Orders must be dispatched before adding payment records. Current order status: <strong>{order?.order_status || 'Pending'}</strong>. Complete production and create a dispatch in the <strong>Shipment</strong> tab first.
+                        Orders must be dispatched before adding payment records. Current order status: <strong>{order?.order_status || 'New Order'}</strong>. Complete production and create a dispatch in the <strong>Shipment</strong> tab first.
                       </p>
                     </div>
                   </div>

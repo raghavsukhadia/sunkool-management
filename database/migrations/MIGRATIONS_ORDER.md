@@ -2,31 +2,34 @@
 
 Apply these SQL files in order on a fresh/staging Supabase database. Review each file before applying.
 
+All paths below are relative to the repo root; files live in `database/migrations/`.
+
 Recommended order:
 
-1. `Database/supabase-schema.sql` — base schema and enums
-2. `Database/inventory-schema.sql`
-3. `Database/product-categories-schema.sql`
-4. `Database/add-internal-order-number.sql`
-5. `Database/add-partial-order-status.sql`
-6. `Database/add-shipment-status.sql`
-7. `Database/add-partial-payment-status.sql`
-8. `Database/dispatch-schema.sql`
-9. `Database/production-lists-migration.sql`
-10. `Database/production-records-migration.sql`
-11. `Database/inventory-sub-items-migration.sql`
-12. `Database/production-records-migration.sql`
-13. `Database/dispatch-courier-tracking-migration.sql`
-14. `Database/add-dispatch-items-unique-constraint.sql`
-15. `Database/orders-payment-production-migration.sql`
-16. `Database/invoice-attachments-migration.sql`
-17. `Database/order-payments-migration.sql`
-18. `Database/orders-customer-cash-discount-migration.sql`
-19. `Database/fix-order-delete-cascade.sql` (or `fix-order-delete-cascade-simple.sql` as appropriate)
-20. `Database/fix-sub-items-serial-numbers.sql` / `Database/prevent-sub-items-serial-numbers.sql`
-21. `Database/dispatch-schema.sql` (if additional patching required)
-22. `Database/storage-production-pdfs-policies.sql`
-23. `Database/database-updates.sql` (final catch-all updates)
+1. `database/migrations/supabase-schema.sql` — base schema and enums
+2. `database/migrations/inventory-schema.sql`
+3. `database/migrations/product-categories-schema.sql`
+4. `database/migrations/add-internal-order-number.sql`
+5. `database/migrations/add-partial-order-status.sql`
+6. `database/migrations/add-shipment-status.sql`
+7. `database/migrations/add-partial-payment-status.sql`
+8. `database/migrations/dispatch-schema.sql`
+9. `database/migrations/production-lists-migration.sql`
+10. `database/migrations/production-records-migration.sql`
+11. `database/migrations/inventory-sub-items-migration.sql`
+12. `database/migrations/dispatch-courier-tracking-migration.sql`
+13. `database/migrations/add-dispatch-items-unique-constraint.sql`
+14. `database/migrations/orders-payment-production-migration.sql`
+15. `database/migrations/invoice-attachments-migration.sql`
+16. `database/migrations/order-payments-migration.sql`
+17. `database/migrations/orders-customer-cash-discount-migration.sql`
+18. `database/migrations/fix-order-delete-cascade.sql` (or `fix-order-delete-cascade-simple.sql` as appropriate)
+19. `database/migrations/fix-sub-items-serial-numbers.sql` / `database/migrations/prevent-sub-items-serial-numbers.sql`
+20. `database/migrations/storage-production-pdfs-policies.sql`
+21. `database/migrations/database-updates.sql` (final catch-all updates)
+22. **Order status stages (run in two separate steps):**
+    - 22a. `database/migrations/order-status-stages-part1-enum.sql` — adds new enum values (New Order, In Progress, Ready for Dispatch, Invoiced, In Transit, Void). **Run and commit/finish this step first.**
+    - 22b. `database/migrations/order-status-stages-part2-data.sql` — migrates existing order statuses and sets default. **Run only after part 1 has been applied** (Postgres requires new enum values to be committed before use).
 
 Notes:
 - Run these on a staging Supabase instance first and verify application behavior before running on production.
@@ -40,8 +43,8 @@ Example commands (local dev / supabase CLI):
 supabase db remote set "postgresql://<user>:<pass>@<host>:5432/postgres"
 
 # Apply in order
-psql "$DATABASE_URL" -f Database/supabase-schema.sql
-psql "$DATABASE_URL" -f Database/inventory-schema.sql
+psql "$DATABASE_URL" -f database/migrations/supabase-schema.sql
+psql "$DATABASE_URL" -f database/migrations/inventory-schema.sql
 # ... repeat for each file in the recommended order
 ```
 

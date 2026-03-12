@@ -137,19 +137,19 @@ export default function OrdersPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "Pending":
+      case "New Order":
         return "bg-yellow-100 text-yellow-800"
-      case "Approved":
-        return "bg-blue-100 text-blue-800"
-      case "In Production":
+      case "In Progress":
         return "bg-purple-100 text-purple-800"
-      case "Partial Dispatch":
+      case "Ready for Dispatch":
         return "bg-orange-100 text-orange-800"
-      case "Dispatched":
-        return "bg-green-100 text-green-800"
+      case "Invoiced":
+        return "bg-blue-100 text-blue-800"
+      case "In Transit":
+        return "bg-indigo-100 text-indigo-800"
       case "Delivered":
         return "bg-emerald-100 text-emerald-800"
-      case "Cancelled":
+      case "Void":
         return "bg-red-100 text-red-800"
       default:
         return "bg-gray-100 text-gray-800"
@@ -265,13 +265,13 @@ export default function OrdersPage() {
                     className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                   >
                     <option value="all">All Statuses</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Approved">Approved</option>
-                    <option value="In Production">In Production</option>
-                    <option value="Partial Dispatch">Partial Dispatch</option>
-                    <option value="Dispatched">Dispatched</option>
+                    <option value="New Order">New Order</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Ready for Dispatch">Ready for Dispatch</option>
+                    <option value="Invoiced">Invoiced</option>
+                    <option value="In Transit">In Transit</option>
                     <option value="Delivered">Delivered</option>
-                    <option value="Cancelled">Cancelled</option>
+                    <option value="Void">Void</option>
                   </select>
                 </div>
                 <div>
@@ -297,7 +297,7 @@ export default function OrdersPage() {
                 </div>
                 <div className="text-center p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg border border-green-100">
                   <div className="text-3xl font-bold text-green-700">
-                    {orders.filter(o => o.order_status === "Dispatched" || o.order_status === "Delivered").length}
+                    {orders.filter(o => o.order_status === "In Transit" || o.order_status === "Delivered").length}
                   </div>
                   <div className="text-xs font-medium text-gray-600 mt-1.5">Completed</div>
                 </div>

@@ -225,7 +225,7 @@ export default function DashboardPage() {
               icon={<AlertCircle className="h-5 w-5 text-amber-600" />}
               color="border-l-amber-500"
               change={-5}
-              link="/dashboard/orders?status=Pending"
+              link="/dashboard/orders?status=New Order"
             />
             <KPICard
               title="In Transit"

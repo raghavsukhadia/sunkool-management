@@ -38,7 +38,7 @@ A professional, single-user Order Management System built with Next.js 14, TypeS
    ```
 
 2. **Set up environment variables:**
-   - Copy `.env.local.example` to `.env.local`
+   - Copy `.env.example` to `.env.local`
    - Fill in your Supabase credentials:
      ```
      NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url

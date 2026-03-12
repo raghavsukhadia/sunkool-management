@@ -29,10 +29,10 @@ export async function getDashboardStats(): Promise<
 
     const stats: DashboardStats = {
       totalOrders: list.length,
-      pendingOrders: list.filter((o) => o.order_status === "Pending").length,
-      inProductionOrders: list.filter((o) => o.order_status === "In Production").length,
+      pendingOrders: list.filter((o) => o.order_status === "New Order").length,
+      inProductionOrders: list.filter((o) => o.order_status === "In Progress").length,
       dispatchedOrders: list.filter(
-        (o) => o.order_status === "Partial Dispatch" || o.order_status === "Dispatched"
+        (o) => o.order_status === "Ready for Dispatch" || o.order_status === "In Transit" || o.order_status === "Invoiced"
       ).length,
       deliveredOrders: list.filter((o) => o.order_status === "Delivered").length,
       totalRevenue: list.reduce((sum, o) => sum + (o.total_price ?? 0), 0),

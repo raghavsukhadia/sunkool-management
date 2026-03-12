@@ -68,11 +68,13 @@ interface OrderTableProps {
 }
 
 const statusColorMap: Record<string, { bg: string; text: string }> = {
-  Pending: { bg: "bg-amber-100", text: "text-amber-700" },
-  "In Production": { bg: "bg-blue-100", text: "text-blue-700" },
-  "Partial Dispatch": { bg: "bg-cyan-100", text: "text-cyan-700" },
-  Dispatched: { bg: "bg-indigo-100", text: "text-indigo-700" },
+  "New Order": { bg: "bg-amber-100", text: "text-amber-700" },
+  "In Progress": { bg: "bg-purple-100", text: "text-purple-700" },
+  "Ready for Dispatch": { bg: "bg-orange-100", text: "text-orange-700" },
+  Invoiced: { bg: "bg-blue-100", text: "text-blue-700" },
+  "In Transit": { bg: "bg-indigo-100", text: "text-indigo-700" },
   Delivered: { bg: "bg-green-100", text: "text-green-700" },
+  Void: { bg: "bg-red-100", text: "text-red-700" },
 }
 
 const paymentStatusColorMap: Record<string, { bg: string; text: string }> = {
@@ -143,7 +145,7 @@ export function OrderTable({ data, isLoading = false }: OrderTableProps) {
       ),
       cell: ({ row }) => {
         const status = row.getValue("order_status") as string
-        const colors = statusColorMap[status] || statusColorMap.Pending
+        const colors = statusColorMap[status] || { bg: "bg-gray-100", text: "text-gray-700" }
         return (
           <span
             className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${colors.bg} ${colors.text}`}
@@ -291,11 +293,13 @@ export function OrderTable({ data, isLoading = false }: OrderTableProps) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="Pending">Pending</SelectItem>
-            <SelectItem value="In Production">In Production</SelectItem>
-            <SelectItem value="Partial Dispatch">Partial Dispatch</SelectItem>
-            <SelectItem value="Dispatched">Dispatched</SelectItem>
+            <SelectItem value="New Order">New Order</SelectItem>
+            <SelectItem value="In Progress">In Progress</SelectItem>
+            <SelectItem value="Ready for Dispatch">Ready for Dispatch</SelectItem>
+            <SelectItem value="Invoiced">Invoiced</SelectItem>
+            <SelectItem value="In Transit">In Transit</SelectItem>
             <SelectItem value="Delivered">Delivered</SelectItem>
+            <SelectItem value="Void">Void</SelectItem>
           </SelectContent>
         </Select>
 

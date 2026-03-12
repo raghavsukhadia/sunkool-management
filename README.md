@@ -80,7 +80,7 @@ cd sunkool-management
 npm install
 
 # Set up environment variables
-cp .env.local.example .env.local
+cp .env.example .env.local
 # Edit .env.local with your Supabase credentials
 
 # Run development server
@@ -174,11 +174,13 @@ See [Database Setup Guide](./Setup/DATABASE_SETUP.md) for complete schema.
 
 ### Order Lifecycle
 
+Order status progresses through these stages:
+
 ```
-Pending → Approved → In Production → Partial Dispatch/Dispatched → Delivered
+New Order → In Progress → Ready for Dispatch → Invoiced → In Transit → Delivered
 ```
 
-With optional Cancelled state at any point.
+With optional **Void** (cancelled) state at any point. Payment statuses are Pending, Partial, or Paid.
 
 ### Dispatch Validation
 
