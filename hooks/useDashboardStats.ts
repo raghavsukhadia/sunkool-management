@@ -3,20 +3,9 @@
 import { useEffect, useState, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { RealtimeChannel } from "@supabase/supabase-js"
-import { getDashboardStats } from "@/app/actions/dashboard"
+import { getDashboardStats, type DashboardStats } from "@/app/actions/dashboard"
 
-export interface DashboardStats {
-  totalOrders: number
-  pendingOrders: number
-  inProductionOrders: number
-  dispatchedOrders: number
-  deliveredOrders: number
-  totalRevenue: number
-  unpaidInvoices: number
-  partialPaymentOrders: number
-  missingSalesOrderNumber: number
-  lastUpdated: Date
-}
+export type { DashboardStats }
 
 export function useDashboardStats() {
   const [stats, setStats] = useState<DashboardStats | null>(null)

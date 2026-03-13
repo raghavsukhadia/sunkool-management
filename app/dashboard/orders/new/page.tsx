@@ -366,7 +366,7 @@ export default function NewOrderPage() {
                       <FormDescription className="text-xs text-gray-600">
                         {cashDiscount ? (
                           <span className="text-blue-700 font-medium">
-                            ✓ This order will appear in "Payment Followup" section. Payment tracking will be required for 14 days until payment is received.
+                            ✓ This order will appear in &quot;Payment Followup&quot; section. Payment tracking will be required for 14 days until payment is received.
                           </span>
                         ) : (
                           "Check this box if cash discount applies to this order. The order will appear in Payment Followup section with 14 days of followup required."

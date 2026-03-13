@@ -74,7 +74,6 @@ import {
   File,
   FileDown,
   AlertCircle,
-  ArrowRight,
   Factory,
   Zap,
   RefreshCw,
@@ -712,54 +711,6 @@ export default function OrderDetailsPage() {
       }
     } catch (err: any) {
       setError(err.message || "An error occurred")
-    }
-  }
-
-  // Get next workflow step (new order stages)
-  const getNextWorkflowStep = () => {
-    if (!order) return null
-
-    switch (order.order_status) {
-      case "New Order":
-        return {
-          message: "Add items and create a production record to move to In Progress.",
-          action: null,
-          color: "yellow"
-        }
-      case "In Progress":
-        return {
-          message: "Order is in production. Create a dispatch in the Shipment tab when ready.",
-          action: null,
-          color: "purple"
-        }
-      case "Ready for Dispatch":
-        return {
-          message: "Material is packed. Set invoice number, then mark shipment as Picked Up when it leaves.",
-          action: null,
-          color: "orange"
-        }
-      case "Invoiced":
-        return {
-          message: "Invoice set. Mark shipment as Picked Up when material leaves the facility.",
-          action: null,
-          color: "blue"
-        }
-      case "In Transit":
-        return {
-          message: "Order is in transit. Mark shipment as Delivered when customer confirms.",
-          action: "Delivered",
-          color: "green"
-        }
-      case "Delivered":
-        return {
-          message: "Order has been delivered successfully.",
-          action: null,
-          color: "emerald"
-        }
-      case "Void":
-        return null
-      default:
-        return null
     }
   }
 
@@ -1411,53 +1362,6 @@ export default function OrderDetailsPage() {
         </div>
       )}
 
-      {/* Workflow Guidance */}
-      {getNextWorkflowStep() && (
-        <Card className={`shadow-sm border-l-4 ${getNextWorkflowStep()?.color === "yellow" ? "border-yellow-500 bg-yellow-50" :
-          getNextWorkflowStep()?.color === "blue" ? "border-blue-500 bg-blue-50" :
-            getNextWorkflowStep()?.color === "purple" ? "border-purple-500 bg-purple-50" :
-              getNextWorkflowStep()?.color === "orange" ? "border-orange-500 bg-orange-50" :
-                getNextWorkflowStep()?.color === "green" ? "border-green-500 bg-green-50" :
-                  "border-emerald-500 bg-emerald-50"
-          }`}>
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-3">
-              <AlertCircle className={`w-5 h-5 mt-0.5 ${getNextWorkflowStep()?.color === "yellow" ? "text-yellow-600" :
-                getNextWorkflowStep()?.color === "blue" ? "text-blue-600" :
-                  getNextWorkflowStep()?.color === "purple" ? "text-purple-600" :
-                    getNextWorkflowStep()?.color === "orange" ? "text-orange-600" :
-                      getNextWorkflowStep()?.color === "green" ? "text-green-600" :
-                        "text-emerald-600"
-                }`} />
-              <div className="flex-1">
-                <p className={`text-sm font-medium ${getNextWorkflowStep()?.color === "yellow" ? "text-yellow-800" :
-                  getNextWorkflowStep()?.color === "blue" ? "text-blue-800" :
-                    getNextWorkflowStep()?.color === "purple" ? "text-purple-800" :
-                      getNextWorkflowStep()?.color === "orange" ? "text-orange-800" :
-                        getNextWorkflowStep()?.color === "green" ? "text-green-800" :
-                          "text-emerald-800"
-                  }`}>
-                  {getNextWorkflowStep()?.message}
-                </p>
-                {getNextWorkflowStep()?.action && (
-                  <Button
-                    size="sm"
-                    onClick={() => handleUpdateOrderStatus(getNextWorkflowStep()!.action!)}
-                    className={`mt-3 ${getNextWorkflowStep()?.color === "blue" ? "bg-blue-600 hover:bg-blue-700" :
-                      getNextWorkflowStep()?.color === "green" ? "bg-green-600 hover:bg-green-700" :
-                        "bg-gray-600 hover:bg-gray-700"
-                      } text-white`}
-                  >
-                    Move to {getNextWorkflowStep()?.action}
-                    <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Customer Information - Always visible */}
       <Card className="shadow-sm">
         <CardHeader className="bg-gray-50 border-b">
@@ -1648,7 +1552,7 @@ export default function OrderDetailsPage() {
                                 <div className="overflow-y-auto flex-1">
                                   {filteredItems.length === 0 ? (
                                     <div className="px-3 py-4 text-sm text-gray-500 text-center">
-                                      No items found matching "{searchTerm}"
+                                      No items found matching &quot;{searchTerm}&quot;
                                     </div>
                                   ) : (
                                     <div className="py-1">
@@ -1746,12 +1650,16 @@ export default function OrderDetailsPage() {
                         </Label>
                         <Input
                           id="quantity"
-                          type="number"
-                          min="1"
+                          type="text"
+                          inputMode="numeric"
                           value={quantity}
-                          onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\D/g, "")
+                            const num = raw === "" ? 1 : Math.max(1, parseInt(raw, 10))
+                            setQuantity(num)
+                          }}
                           className="h-10"
-                          placeholder="Enter quantity"
+                          placeholder="e.g. 1, 10, 100"
                         />
                       </div>
                     </div>
@@ -2361,7 +2269,7 @@ export default function OrderDetailsPage() {
               ) : dispatches.length === 0 ? (
                 <div className="text-center py-8">
                   <p className="text-gray-500 font-medium">No dispatches created yet</p>
-                  <p className="text-sm text-gray-400 mt-1">Use the "Create Dispatch" button above to create a dispatch for a production record</p>
+                  <p className="text-sm text-gray-400 mt-1">Use the &quot;Create Dispatch&quot; button above to create a dispatch for a production record</p>
                 </div>
               ) : (
                 <div className="space-y-4">

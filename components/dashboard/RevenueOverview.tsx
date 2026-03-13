@@ -21,11 +21,13 @@ interface RevenueDataPoint {
 
 interface RevenueOverviewProps {
   data: RevenueDataPoint[]
+  dayLabel?: string
 }
 
-export function RevenueOverview({ data }: RevenueOverviewProps) {
+export function RevenueOverview({ data, dayLabel = "7 days" }: RevenueOverviewProps) {
   const totalRevenue = data.reduce((sum, point) => sum + point.revenue, 0)
-  const avgRevenue = totalRevenue / data.length || 0
+  const avgRevenue = data.length ? totalRevenue / data.length : 0
+  const hasData = data.length > 0
 
   return (
     <Card className="shadow-sm border-slate-200">
@@ -34,7 +36,7 @@ export function RevenueOverview({ data }: RevenueOverviewProps) {
           <div>
             <CardTitle className="text-lg text-slate-900">Revenue Overview</CardTitle>
             <CardDescription className="text-slate-600">
-              Daily revenue trends for the last 7 days
+              Daily revenue trends for the last {dayLabel}
             </CardDescription>
           </div>
           <div className="text-right" suppressHydrationWarning>
@@ -46,6 +48,11 @@ export function RevenueOverview({ data }: RevenueOverviewProps) {
         </div>
       </CardHeader>
       <CardContent>
+        {!hasData ? (
+          <div className="flex h-[300px] items-center justify-center text-slate-500 text-sm">
+            No revenue data for this period
+          </div>
+        ) : (
         <ResponsiveContainer width="100%" height={300}>
           <AreaChart
             data={data}
@@ -86,6 +93,7 @@ export function RevenueOverview({ data }: RevenueOverviewProps) {
             />
           </AreaChart>
         </ResponsiveContainer>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-slate-200">

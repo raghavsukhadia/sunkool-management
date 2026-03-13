@@ -1,12 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { getAllOrders } from "@/app/actions/orders"
+import { getAllOrders, getCompletedOrderIds, getOrdersExportData } from "@/app/actions/orders"
 import {
   ShoppingCart,
   Plus,
@@ -19,7 +19,9 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  Download,
 } from "lucide-react"
+import * as XLSX from "xlsx"
 
 interface Order {
   id: string
@@ -45,8 +47,11 @@ function getOrderDisplayTotal(order: Order): number {
   return order.requested_payment_amount != null ? Number(order.requested_payment_amount) : (order.total_price ?? 0)
 }
 
+const VALID_STATUSES = ["New Order", "In Progress", "Ready for Dispatch", "Invoiced", "In Transit", "Delivered", "Void"]
+
 export default function OrdersPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -56,20 +61,95 @@ export default function OrdersPage() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [paymentFilter, setPaymentFilter] = useState<string>("all")
+  const [completedOrderIds, setCompletedOrderIds] = useState<string[]>([])
+  const [completedOnly, setCompletedOnly] = useState(false)
+  const [exporting, setExporting] = useState(false)
+
+  useEffect(() => {
+    const status = searchParams.get("status")
+    if (status && VALID_STATUSES.includes(status)) {
+      setStatusFilter(status)
+      setShowSearchPanel(true)
+    }
+  }, [searchParams])
 
   useEffect(() => {
     loadOrders()
   }, [])
 
+  const handleExport = async () => {
+    const ids = filteredAndSortedOrders.map((o) => o.id)
+    if (ids.length === 0) {
+      setError("No orders to export")
+      return
+    }
+    setExporting(true)
+    setError(null)
+    try {
+      const res = await getOrdersExportData(ids)
+      if (!res.success || !res.data) {
+        setError(res.error || "Export failed")
+        return
+      }
+      const headers = [
+        "Order Id",
+        "Order ID",
+        "Timestamp",
+        "Dispatched date",
+        "Customer Name",
+        "Inv No",
+        "Order Status",
+        "Order",
+        "Bill To",
+        "Ship To",
+        "Card Pic",
+        "Docket no",
+        "COURIER NAME",
+        "Expected Delivered",
+      ]
+      const rows = res.data.map((r) => [
+        r.internal_order_number ?? "",
+        r.sales_order_number ?? "",
+        r.created_at,
+        r.dispatch_date,
+        r.customer_name,
+        r.invoice_number ?? "",
+        r.order_status,
+        r.item_details,
+        r.bill_to,
+        r.ship_to,
+        r.card_pic,
+        r.tracking_id ?? "",
+        r.courier_name,
+        r.expected_delivered,
+      ])
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "Orders")
+      const date = new Date().toISOString().slice(0, 10)
+      XLSX.writeFile(wb, `orders-export-${date}.xlsx`)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Export failed")
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const loadOrders = async () => {
     setLoading(true)
     setError(null)
     try {
-      const result = await getAllOrders()
-      if (result.success && result.data) {
-        setOrders(result.data as any as Order[])
+      const [ordersResult, completedResult] = await Promise.all([
+        getAllOrders(),
+        getCompletedOrderIds(),
+      ])
+      if (ordersResult.success && ordersResult.data) {
+        setOrders(ordersResult.data as any as Order[])
       } else {
-        setError(result.error || "Failed to load orders")
+        setError(ordersResult.error || "Failed to load orders")
+      }
+      if (completedResult.success && completedResult.data) {
+        setCompletedOrderIds(completedResult.data)
       }
     } catch (err: any) {
       setError(err.message || "An error occurred")
@@ -103,6 +183,14 @@ export default function OrdersPage() {
     // Payment status filter
     if (paymentFilter !== "all") {
       filtered = filtered.filter(order => order.payment_status === paymentFilter)
+    }
+
+    // Completed filter: default "All Orders" excludes completed; clicking "Completed" shows only completed
+    const completedSet = new Set(completedOrderIds)
+    if (completedOnly) {
+      filtered = filtered.filter(order => completedSet.has(order.id))
+    } else {
+      filtered = filtered.filter(order => !completedSet.has(order.id))
     }
 
     // Sort
@@ -192,13 +280,24 @@ export default function OrdersPage() {
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">All Orders</h1>
           <p className="text-gray-600 mt-1.5 text-sm">Manage and track all orders</p>
         </div>
-        <Button
-          onClick={() => router.push("/dashboard/orders/new")}
-          className="bg-blue-600 hover:bg-blue-700 text-white"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          New Order
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={handleExport}
+            disabled={exporting}
+            variant="outline"
+            className="gap-2"
+          >
+            <Download className="w-4 h-4" />
+            {exporting ? "Exporting..." : "Export"}
+          </Button>
+          <Button
+            onClick={() => router.push("/dashboard/orders/new")}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            New Order
+          </Button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -295,12 +394,21 @@ export default function OrdersPage() {
                   <div className="text-3xl font-bold text-blue-700">{filteredAndSortedOrders.length}</div>
                   <div className="text-xs font-medium text-gray-600 mt-1.5">Filtered Orders</div>
                 </div>
-                <div className="text-center p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg border border-green-100">
-                  <div className="text-3xl font-bold text-green-700">
-                    {orders.filter(o => o.order_status === "In Transit" || o.order_status === "Delivered").length}
-                  </div>
+                <button
+                  type="button"
+                  onClick={() => setCompletedOnly((prev) => !prev)}
+                  className={`text-center w-full p-4 rounded-lg border transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 ${
+                    completedOnly
+                      ? "bg-gradient-to-br from-green-100 to-emerald-100 border-green-300 ring-2 ring-green-400"
+                      : "bg-gradient-to-br from-green-50 to-emerald-50 border-green-100 hover:from-green-100 hover:to-emerald-100"
+                  }`}
+                >
+                  <div className="text-3xl font-bold text-green-700">{completedOrderIds.length}</div>
                   <div className="text-xs font-medium text-gray-600 mt-1.5">Completed</div>
-                </div>
+                  {completedOnly && (
+                    <div className="text-xs text-green-700 mt-1 font-medium">Showing completed only · click to clear</div>
+                  )}
+                </button>
                 <div className="text-center p-4 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg border border-purple-100">
                   <div className="text-3xl font-bold text-purple-700">
                     ₹{filteredAndSortedOrders.reduce((sum, o) => sum + getOrderDisplayTotal(o), 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
@@ -325,23 +433,37 @@ export default function OrdersPage() {
               ({filteredAndSortedOrders.length})
             </span>
           </CardTitle>
-          <CardDescription className="mt-1.5">Click on any order to view details</CardDescription>
+          <CardDescription className="mt-1.5 flex items-center gap-2 flex-wrap">
+            {completedOnly ? (
+              <>Click on any order to view details. <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Showing completed only</span></>
+            ) : (
+              <>In-progress orders only. Click the <strong>Completed</strong> card above to see {completedOrderIds.length} finished order{completedOrderIds.length !== 1 ? "s" : ""}.</>
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           {filteredAndSortedOrders.length === 0 ? (
             <div className="text-center py-12">
               <ShoppingCart className="w-12 h-12 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500 font-medium">
-                {searchTerm || statusFilter !== "all" || paymentFilter !== "all" 
-                  ? "No orders match your filters" 
-                  : "No orders yet"}
+                {completedOnly
+                  ? "No completed orders match your filters"
+                  : searchTerm || statusFilter !== "all" || paymentFilter !== "all"
+                    ? "No orders match your filters"
+                    : completedOrderIds.length > 0
+                      ? "All orders are completed"
+                      : "No orders yet"}
               </p>
               <p className="text-sm text-gray-400 mt-1">
-                {searchTerm || statusFilter !== "all" || paymentFilter !== "all" 
-                  ? "Try adjusting your search or filters" 
-                  : "Create your first order to get started"}
+                {completedOnly
+                  ? "Completed = all items produced, all delivered, full amount paid."
+                  : searchTerm || statusFilter !== "all" || paymentFilter !== "all"
+                    ? "Try adjusting your search or filters"
+                    : completedOrderIds.length > 0
+                      ? "Click the Completed card above to see finished orders."
+                      : "Create your first order to get started"}
               </p>
-              {!searchTerm && statusFilter === "all" && paymentFilter === "all" && (
+              {!searchTerm && statusFilter === "all" && paymentFilter === "all" && !completedOnly && completedOrderIds.length === 0 && (
                 <Button
                   onClick={() => router.push("/dashboard/orders/new")}
                   className="mt-4 bg-blue-600 hover:bg-blue-700 text-white"

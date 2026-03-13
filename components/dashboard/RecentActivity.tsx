@@ -1,6 +1,7 @@
 "use client"
 
 import React from "react"
+import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { AlertCircle, CheckCircle2, Clock, Edit2, Plus, Trash2 } from "lucide-react"
@@ -76,7 +77,7 @@ export function RecentActivity({ activities }: RecentActivityProps) {
       <CardHeader className="pb-3">
         <CardTitle className="text-lg text-slate-900">Recent Activity</CardTitle>
         <CardDescription className="text-slate-600">
-          Latest order updates and changes
+          Latest 5 order updates and changes
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -91,19 +92,11 @@ export function RecentActivity({ activities }: RecentActivityProps) {
               const config = actionConfig[activity.action]
               const Icon = config.icon
 
-              return (
-                <div
-                  key={activity.id}
-                  className={`flex items-start gap-3 pb-4 ${
-                    idx !== activities.length - 1 ? "border-b border-slate-200" : ""
-                  }`}
-                >
-                  {/* Icon */}
+              const rowContent = (
+                <>
                   <div className={`p-2 rounded-lg ${config.color} flex-shrink-0 mt-0.5`}>
                     <Icon className="h-4 w-4" />
                   </div>
-
-                  {/* Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <div>
@@ -126,6 +119,23 @@ export function RecentActivity({ activities }: RecentActivityProps) {
                       </span>
                     </div>
                   </div>
+                </>
+              )
+
+              return (
+                <div
+                  key={activity.id}
+                  className={`flex items-start gap-3 pb-4 ${
+                    idx !== activities.length - 1 ? "border-b border-slate-200" : ""
+                  } ${activity.orderId ? "hover:bg-slate-50 rounded-md -mx-1 px-1 transition-colors" : ""}`}
+                >
+                  {activity.orderId ? (
+                    <Link href={`/dashboard/orders/${activity.orderId}`} className="flex items-start gap-3 flex-1 min-w-0">
+                      {rowContent}
+                    </Link>
+                  ) : (
+                    rowContent
+                  )}
                 </div>
               )
             })}

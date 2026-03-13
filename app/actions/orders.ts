@@ -234,6 +234,112 @@ export async function getAllOrders() {
   return { success: true, data: orders || [], error: null }
 }
 
+/** Returns order IDs that meet strict "completed" criteria: all items produced, all delivered, full amount paid. Excludes Void. */
+export async function getCompletedOrderIds(): Promise<{
+  success: boolean
+  data: string[] | null
+  error: string | null
+}> {
+  const supabase = await createClient()
+
+  const { data: orders, error: ordersError } = await supabase
+    .from("orders")
+    .select("id, total_price, requested_payment_amount")
+    .neq("order_status", "Void")
+
+  if (ordersError) {
+    return { success: false, error: ordersError.message, data: null }
+  }
+  if (!orders || orders.length === 0) {
+    return { success: true, data: [], error: null }
+  }
+
+  const orderIds = orders.map((o) => o.id)
+
+  const [
+    { data: orderItems },
+    { data: productionRecords },
+    { data: dispatches },
+    { data: payments },
+  ] = await Promise.all([
+    supabase.from("order_items").select("id, order_id, quantity").in("order_id", orderIds),
+    supabase
+      .from("production_records")
+      .select("order_id, production_type, selected_quantities")
+      .in("order_id", orderIds)
+      .eq("status", "completed"),
+    supabase.from("dispatches").select("id, order_id, shipment_status, dispatch_type").in("order_id", orderIds),
+    supabase.from("order_payments").select("order_id, amount").in("order_id", orderIds),
+  ])
+
+  const dispatchIds = (dispatches || []).map((d) => d.id)
+  let dispatchItemsData: { order_item_id: string; quantity: number; dispatch_id: string }[] = []
+  if (dispatchIds.length > 0) {
+    const { data: di } = await supabase
+      .from("dispatch_items")
+      .select("order_item_id, quantity, dispatch_id")
+      .in("dispatch_id", dispatchIds)
+    dispatchItemsData = di || []
+  }
+
+  const totalPaidByOrder: Record<string, number> = {}
+  ;(payments || []).forEach((p: { order_id: string; amount: number }) => {
+    const id = p.order_id
+    totalPaidByOrder[id] = (totalPaidByOrder[id] || 0) + Number(p.amount || 0)
+  })
+
+  const dispatchById = new Map((dispatches || []).map((d) => [d.id, d]))
+  const deliveredDispatchIds = new Set(
+    (dispatches || []).filter((d) => d.dispatch_type !== "return" && d.shipment_status === "delivered").map((d) => d.id)
+  )
+
+  const producedByOrderItem: Record<string, number> = {}
+  for (const item of orderItems || []) {
+    producedByOrderItem[item.id] = 0
+  }
+  for (const rec of productionRecords || []) {
+    const sq = (rec.selected_quantities as Record<string, number> | null) || null
+    const orderItemsForOrder = (orderItems || []).filter((i) => i.order_id === rec.order_id)
+    for (const item of orderItemsForOrder) {
+      if (rec.production_type === "full") {
+        producedByOrderItem[item.id] = (producedByOrderItem[item.id] || 0) + item.quantity
+      } else if (sq && sq[item.id] != null) {
+        producedByOrderItem[item.id] = (producedByOrderItem[item.id] || 0) + (Number(sq[item.id]) || 0)
+      }
+    }
+  }
+
+  const deliveredByOrderItem: Record<string, number> = {}
+  for (const item of orderItems || []) {
+    deliveredByOrderItem[item.id] = 0
+  }
+  for (const di of dispatchItemsData) {
+    const disp = dispatchById.get(di.dispatch_id)
+    if (disp && disp.dispatch_type !== "return" && disp.shipment_status === "delivered") {
+      deliveredByOrderItem[di.order_item_id] = (deliveredByOrderItem[di.order_item_id] || 0) + (di.quantity || 0)
+    }
+  }
+
+  const completedIds: string[] = []
+  for (const order of orders) {
+    const requested =
+      order.requested_payment_amount != null ? Number(order.requested_payment_amount) : (order.total_price ?? 0)
+    const totalPaid = totalPaidByOrder[order.id] || 0
+    const amountDue = Math.max(0, requested - totalPaid)
+    const fullPaid = amountDue === 0 && (requested > 0 || totalPaid > 0)
+
+    const items = (orderItems || []).filter((i) => i.order_id === order.id)
+    const allProduced = items.length === 0 || items.every((i) => (producedByOrderItem[i.id] || 0) >= i.quantity)
+    const allDelivered = items.length === 0 || items.every((i) => (deliveredByOrderItem[i.id] || 0) >= i.quantity)
+
+    if (allProduced && allDelivered && fullPaid) {
+      completedIds.push(order.id)
+    }
+  }
+
+  return { success: true, data: completedIds, error: null }
+}
+
 // Get order details with customer and items
 export async function getOrderDetails(orderId: string) {
   const supabase = await createClient()
@@ -276,6 +382,194 @@ export async function getOrderDetails(orderId: string) {
     },
     error: null
   }
+}
+
+export type OrdersExportRow = {
+  orderId: string
+  internal_order_number: string | null
+  sales_order_number: string | null
+  created_at: string
+  dispatch_date: string
+  customer_name: string
+  invoice_number: string | null
+  order_status: string
+  item_details: string
+  bill_to: string
+  ship_to: string
+  card_pic: string
+  tracking_id: string | null
+  courier_name: string
+  expected_delivered: string
+}
+
+/** Returns one row per order for Excel export (batched). */
+export async function getOrdersExportData(orderIds: string[]): Promise<{
+  success: boolean
+  data: OrdersExportRow[] | null
+  error: string | null
+}> {
+  const supabase = await createClient()
+  if (!orderIds || orderIds.length === 0) {
+    return { success: true, data: [], error: null }
+  }
+
+  const emptyRow = (orderId: string): OrdersExportRow => ({
+    orderId,
+    internal_order_number: null,
+    sales_order_number: null,
+    created_at: "",
+    dispatch_date: "",
+    customer_name: "",
+    invoice_number: null,
+    order_status: "",
+    item_details: "",
+    bill_to: "",
+    ship_to: "",
+    card_pic: "",
+    tracking_id: null,
+    courier_name: "",
+    expected_delivered: ""
+  })
+
+  const { data: orders, error: ordersError } = await supabase
+    .from("orders")
+    .select(`
+      id,
+      internal_order_number,
+      sales_order_number,
+      created_at,
+      invoice_number,
+      order_status,
+      customers:customer_id (
+        name,
+        address
+      )
+    `)
+    .in("id", orderIds)
+
+  if (ordersError) {
+    return { success: false, error: ordersError.message, data: null }
+  }
+
+  const orderMap = new Map<string, OrdersExportRow>()
+  for (const o of orders || []) {
+    const order = o as {
+      id: string
+      internal_order_number: string | null
+      sales_order_number: string | null
+      created_at: string
+      invoice_number: string | null
+      order_status: string
+      customers?: { name?: string; address?: string } | null
+    }
+    const customer = order.customers
+    const createdAt = order.created_at
+      ? new Date(order.created_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
+      : ""
+    orderMap.set(order.id, {
+      orderId: order.id,
+      internal_order_number: order.internal_order_number ?? null,
+      sales_order_number: order.sales_order_number ?? null,
+      created_at: createdAt,
+      dispatch_date: "",
+      customer_name: customer?.name ?? "",
+      invoice_number: order.invoice_number ?? null,
+      order_status: order.order_status ?? "",
+      item_details: "",
+      bill_to: "",
+      ship_to: customer?.address ?? "",
+      card_pic: "",
+      tracking_id: null,
+      courier_name: "",
+      expected_delivered: ""
+    })
+  }
+
+  const ids = [...orderMap.keys()]
+
+  const { data: orderItems } = await supabase
+    .from("order_items")
+    .select("order_id, quantity, inventory_item_id, product_id")
+    .in("order_id", ids)
+
+  const inventoryIds = new Set<string>()
+  for (const item of orderItems || []) {
+    const row = item as { inventory_item_id?: string; product_id?: string }
+    if (row.inventory_item_id) inventoryIds.add(row.inventory_item_id)
+    if (row.product_id) inventoryIds.add(row.product_id)
+  }
+
+  let itemNameById: Record<string, string> = {}
+  if (inventoryIds.size > 0) {
+    const { data: invItems } = await supabase
+      .from("inventory_items")
+      .select("id, item_name")
+      .in("id", [...inventoryIds])
+    for (const inv of invItems || []) {
+      const i = inv as { id: string; item_name: string }
+      itemNameById[i.id] = i.item_name ?? ""
+    }
+  }
+
+  const itemDetailsByOrder: Record<string, string[]> = {}
+  for (const item of orderItems || []) {
+    const row = item as { order_id: string; quantity: number; inventory_item_id?: string; product_id?: string }
+    const name = itemNameById[row.inventory_item_id ?? ""] || itemNameById[row.product_id ?? ""] || "Item"
+    const part = `${name} x ${row.quantity}`
+    if (!itemDetailsByOrder[row.order_id]) itemDetailsByOrder[row.order_id] = []
+    itemDetailsByOrder[row.order_id].push(part)
+  }
+  for (const orderId of ids) {
+    const row = orderMap.get(orderId)
+    if (row) row.item_details = (itemDetailsByOrder[orderId] || []).join(", ")
+  }
+
+  const { data: dispatches } = await supabase
+    .from("dispatches")
+    .select("order_id, dispatch_date, tracking_id, courier_company_id")
+    .in("order_id", ids)
+    .neq("dispatch_type", "return")
+    .order("dispatch_date", { ascending: false })
+
+  const courierIds = new Set<string>()
+  for (const d of dispatches || []) {
+    const row = d as { courier_company_id?: string }
+    if (row.courier_company_id) courierIds.add(row.courier_company_id)
+  }
+  let courierNameById: Record<string, string> = {}
+  if (courierIds.size > 0) {
+    const { data: couriers } = await supabase
+      .from("courier_companies")
+      .select("id, name")
+      .in("id", [...courierIds])
+    for (const c of couriers || []) {
+      const x = c as { id: string; name: string }
+      courierNameById[x.id] = x.name ?? ""
+    }
+  }
+
+  const firstDispatchByOrder: Record<string, { dispatch_date: string; tracking_id: string | null; courier_name: string }> = {}
+  for (const d of dispatches || []) {
+    const row = d as { order_id: string; dispatch_date?: string; tracking_id?: string | null; courier_company_id?: string }
+    if (firstDispatchByOrder[row.order_id]) continue
+    firstDispatchByOrder[row.order_id] = {
+      dispatch_date: row.dispatch_date ? new Date(row.dispatch_date).toLocaleDateString() : "",
+      tracking_id: row.tracking_id ?? null,
+      courier_name: row.courier_company_id ? courierNameById[row.courier_company_id] ?? "" : ""
+    }
+  }
+  for (const orderId of ids) {
+    const row = orderMap.get(orderId)
+    const disp = firstDispatchByOrder[orderId]
+    if (row && disp) {
+      row.dispatch_date = disp.dispatch_date
+      row.tracking_id = disp.tracking_id
+      row.courier_name = disp.courier_name
+    }
+  }
+
+  const result = orderIds.map((id) => orderMap.get(id) ?? emptyRow(id))
+  return { success: true, data: result, error: null }
 }
 
 // Get inventory items for order (parent items with sub-items)

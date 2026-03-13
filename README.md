@@ -257,10 +257,18 @@ See [Vercel Deployment Guide](./VERCEL_DEPLOYMENT_GUIDE.md) for detailed instruc
 
 ### Environment Variables for Production
 
+**Required:**
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
+
+**Optional** (for notification links, e.g. WhatsApp order link; defaults to `https://sunkool-management.vercel.app` if unset):
+```env
+NEXT_PUBLIC_APP_URL=https://your-deployed-url.com
+```
+
+Set these in your deployment platform (e.g. Vercel Project Settings > Environment Variables) for Production and Preview. Do not commit `.env` or `.env.local`.
 
 ### Vercel Settings
 

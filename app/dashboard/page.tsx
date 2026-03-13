@@ -1,6 +1,6 @@
 "use client"
 
-import React, { Suspense, useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
@@ -11,20 +11,20 @@ import {
   AlertCircle,
   Plus,
   Factory,
-  TrendingUp,
   Eye,
   Zap,
-  Command,
+  ClipboardList,
 } from "lucide-react"
 import { useDashboardStats } from "@/hooks/useDashboardStats"
 import { createClient } from "@/lib/supabase/client"
+import { getDashboardData } from "@/app/actions/dashboard"
+import type { RevenueByDayPoint, RecentActivityRow } from "@/app/actions/dashboard"
 import { RevenueOverview } from "@/components/dashboard/RevenueOverview"
 import { RecentActivity, ActivityItem } from "@/components/dashboard/RecentActivity"
+import { OrderPipeline } from "@/components/dashboard/OrderPipeline"
 import { OrderTable, Order } from "@/components/orders/OrderTable"
-import SunkoolLogo from "@/components/brand/SunkoolLogo"
 import { Skeleton } from "@/components/ui/skeleton"
 
-// KPI Card Skeleton
 function KPICardSkeleton() {
   return (
     <Card className="border-l-4 border-l-slate-200 animate-pulse">
@@ -40,13 +40,11 @@ function KPICardSkeleton() {
   )
 }
 
-// KPI Card Component with percentage change indicator
 function KPICard({
   title,
   value,
   icon: Icon,
   color,
-  change,
   link,
   suppressHydrationWarning,
 }: {
@@ -54,11 +52,9 @@ function KPICard({
   value: number | string
   icon: React.ReactNode
   color: string
-  change?: number
   link?: string
   suppressHydrationWarning?: boolean
 }) {
-  const isPositive = change && change >= 0
   const cardContent = (
     <Card
       className={`border-l-4 ${color} hover:shadow-lg transition-all duration-200 cursor-pointer group`}
@@ -66,88 +62,55 @@ function KPICard({
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-semibold text-slate-700">{title}</CardTitle>
-        <div className={`p-2 rounded-lg bg-slate-100 group-hover:bg-slate-200 transition-colors`}>
+        <div className="p-2 rounded-lg bg-slate-100 group-hover:bg-slate-200 transition-colors">
           {Icon}
         </div>
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold text-slate-900 mb-2">{value}</div>
-        {change !== undefined && (
-          <div className="flex items-center gap-1">
-            <TrendingUp
-              className={`h-4 w-4 ${isPositive ? "text-green-600" : "text-red-600"
-                }`}
-              style={{
-                transform: isPositive ? "none" : "rotate(180deg)",
-              }}
-            />
-            <span
-              className={`text-xs font-semibold ${isPositive ? "text-green-600" : "text-red-600"
-                }`}
-            >
-              {isPositive ? "+" : ""}
-              {change}% from yesterday
-            </span>
-          </div>
-        )}
+        <div className="text-2xl font-bold text-slate-900">{value}</div>
       </CardContent>
     </Card>
   )
-
   return link ? <Link href={link}>{cardContent}</Link> : cardContent
 }
 
-// Deterministic mock data - replace with actual data from Supabase
-const generateMockRevenueData = () => {
-  const fixedValues = [
-    { date: "Jan 22", revenue: 45000, orders: 8 },
-    { date: "Jan 23", revenue: 52000, orders: 9 },
-    { date: "Jan 24", revenue: 38000, orders: 5 },
-    { date: "Jan 25", revenue: 61000, orders: 11 },
-    { date: "Jan 26", revenue: 55000, orders: 10 },
-    { date: "Jan 27", revenue: 48000, orders: 7 },
-    { date: "Jan 28", revenue: 67000, orders: 12 },
-  ]
-  return fixedValues
-}
-
-// Mock activity data - replace with actual data from Supabase
-const generateMockActivityData = (): ActivityItem[] => {
-  return [
-    {
-      id: "1",
-      action: "created",
-      description: "New order SK001 created",
-      user: { name: "Piyush" },
-      timestamp: new Date(Date.now() - 10 * 60000),
-      orderNumber: "SK001",
-    },
-    {
-      id: "2",
-      action: "updated",
-      description: "Order SK002 status updated to In Production",
-      user: { name: "Admin" },
-      timestamp: new Date(Date.now() - 30 * 60000),
-      orderNumber: "SK002",
-    },
-    {
-      id: "3",
-      action: "shipped",
-      description: "Order SK003 dispatched to customer",
-      user: { name: "Piyush" },
-      timestamp: new Date(Date.now() - 60 * 60000),
-      orderNumber: "SK003",
-    },
-  ]
+function mapActivityToItem(row: RecentActivityRow): ActivityItem {
+  return {
+    id: row.id,
+    action: row.action,
+    description: row.description,
+    user: { name: row.user_name },
+    timestamp: new Date(row.created_at),
+    orderNumber: row.order_number,
+    orderId: row.order_id,
+  }
 }
 
 export default function DashboardPage() {
   const { stats, loading: statsLoading } = useDashboardStats()
   const [orders, setOrders] = useState<Order[]>([])
   const [ordersLoading, setOrdersLoading] = useState(true)
-  const [revenueData] = useState(generateMockRevenueData())
-  const [activities] = useState<ActivityItem[]>(generateMockActivityData())
+  const [revenueByDay, setRevenueByDay] = useState<RevenueByDayPoint[]>([])
+  const [activities, setActivities] = useState<ActivityItem[]>([])
+  const [extraLoading, setExtraLoading] = useState(true)
+  const [extraError, setExtraError] = useState<string | null>(null)
   const supabase = createClient()
+
+  useEffect(() => {
+    const load = async () => {
+      setExtraLoading(true)
+      setExtraError(null)
+      const res = await getDashboardData()
+      if (res.success && res.data) {
+        setRevenueByDay(res.data.revenueByDay)
+        setActivities(res.data.recentActivity.map(mapActivityToItem))
+      } else {
+        setExtraError(res.success ? null : res.error ?? "Failed to load")
+      }
+      setExtraLoading(false)
+    }
+    load()
+  }, [])
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -174,36 +137,38 @@ export default function DashboardPage() {
 
         if (error) throw error
 
-        const mappedOrders = data?.map((order: any) => ({
-          ...order,
-          customer: order.customers,
-        })) || []
-
+        const mappedOrders =
+          data?.map((order: any) => ({
+            ...order,
+            customer: order.customers,
+          })) ?? []
         setOrders(mappedOrders)
-      } catch (error) {
-        console.error("Error fetching orders:", error)
+      } catch (err) {
+        console.error("Error fetching orders:", err)
       } finally {
         setOrdersLoading(false)
       }
     }
-
     fetchOrders()
   }, [supabase])
 
+  const needsAttention =
+    stats &&
+    (stats.unpaidInvoices > 0 || stats.partialPaymentOrders > 0 || stats.missingSalesOrderNumber > 0)
+
   return (
     <div className="space-y-6">
-      {/* Header Info */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-slate-500 mt-1 font-medium">Welcome back to Sunkool Management System</p>
-        </div>
+      <div className="flex flex-col gap-1">
+        <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
+        <p className="text-slate-500 font-medium">OMS at a glance</p>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
         {statsLoading ? (
           <>
+            <KPICardSkeleton />
+            <KPICardSkeleton />
             <KPICardSkeleton />
             <KPICardSkeleton />
             <KPICardSkeleton />
@@ -213,50 +178,128 @@ export default function DashboardPage() {
           <>
             <KPICard
               title="Total Orders"
-              value={stats?.totalOrders || 0}
+              value={stats?.totalOrders ?? 0}
               icon={<Package className="h-5 w-5 text-blue-600" />}
               color="border-l-blue-500"
-              change={12}
               link="/dashboard/orders"
             />
             <KPICard
-              title="Pending Orders"
-              value={stats?.pendingOrders || 0}
+              title="New Order"
+              value={stats?.pendingOrders ?? 0}
               icon={<AlertCircle className="h-5 w-5 text-amber-600" />}
               color="border-l-amber-500"
-              change={-5}
               link="/dashboard/orders?status=New Order"
             />
             <KPICard
-              title="In Transit"
-              value={stats?.dispatchedOrders || 0}
+              title="In Progress"
+              value={stats?.inProductionOrders ?? 0}
+              icon={<ClipboardList className="h-5 w-5 text-purple-600" />}
+              color="border-l-purple-500"
+              link="/dashboard/orders?status=In Progress"
+            />
+            <KPICard
+              title="Dispatched"
+              value={stats?.dispatchedOrders ?? 0}
               icon={<Truck className="h-5 w-5 text-green-600" />}
               color="border-l-green-500"
-              change={8}
+              link="/dashboard/orders"
+            />
+            <KPICard
+              title="Delivered"
+              value={stats?.deliveredOrders ?? 0}
+              icon={<Package className="h-5 w-5 text-emerald-600" />}
+              color="border-l-emerald-500"
+              link="/dashboard/orders?status=Delivered"
             />
             <KPICard
               title="Total Revenue"
-              value={`₹${(stats?.totalRevenue || 0).toLocaleString("en-IN")}`}
-              icon={<DollarSign className="h-5 w-5 text-emerald-600" />}
-              color="border-l-emerald-500"
-              change={15}
+              value={`₹${(stats?.totalRevenue ?? 0).toLocaleString("en-IN")}`}
+              icon={<DollarSign className="h-5 w-5 text-slate-600" />}
+              color="border-l-slate-500"
               suppressHydrationWarning
             />
           </>
         )}
       </div>
 
-      {/* Revenue Chart & Activity Feed */}
+      {/* Order Pipeline */}
+      {!statsLoading && <OrderPipeline stats={stats} />}
+
+      {/* Needs attention */}
+      {needsAttention && (
+        <Card className="shadow-sm border-amber-200 bg-amber-50/50">
+          <CardContent className="py-3">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-700">
+              {stats!.unpaidInvoices > 0 && (
+                <Link
+                  href="/dashboard/follow-up"
+                  className="font-medium text-amber-800 hover:underline"
+                >
+                  {stats!.unpaidInvoices} delivered unpaid
+                </Link>
+              )}
+              {stats!.partialPaymentOrders > 0 && (
+                <Link
+                  href="/dashboard/follow-up"
+                  className="font-medium text-amber-800 hover:underline"
+                >
+                  {stats!.partialPaymentOrders} partial payments
+                </Link>
+              )}
+              {stats!.missingSalesOrderNumber > 0 && (
+                <Link
+                  href="/dashboard/orders"
+                  className="font-medium text-amber-800 hover:underline"
+                >
+                  {stats!.missingSalesOrderNumber} missing sales order #
+                </Link>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Revenue & Activity */}
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <RevenueOverview data={revenueData} />
+          {extraLoading ? (
+            <Card className="shadow-sm border-slate-200">
+              <CardHeader>
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-4 w-56 mt-1" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-[300px] w-full" />
+              </CardContent>
+            </Card>
+          ) : extraError ? (
+            <Card className="shadow-sm border-slate-200">
+              <CardContent className="py-8 text-center text-slate-500 text-sm">
+                {extraError}
+              </CardContent>
+            </Card>
+          ) : (
+            <RevenueOverview data={revenueByDay} dayLabel="7 days" />
+          )}
         </div>
         <div>
-          <RecentActivity activities={activities} />
+          {extraLoading ? (
+            <Card className="shadow-sm border-slate-200">
+              <CardHeader>
+                <Skeleton className="h-5 w-32" />
+                <Skeleton className="h-4 w-48 mt-1" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-64 w-full" />
+              </CardContent>
+            </Card>
+          ) : (
+            <RecentActivity activities={activities} />
+          )}
         </div>
       </div>
 
-      {/* Quick Actions Section */}
+      {/* Quick Actions */}
       <Card className="shadow-sm border-slate-200 bg-gradient-to-r from-blue-50 to-slate-50">
         <CardHeader className="pb-3">
           <CardTitle className="text-lg text-slate-900 flex items-center gap-2">
@@ -294,14 +337,14 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* Recent Orders Table */}
+      {/* Recent Orders */}
       <Card className="shadow-sm border-slate-200">
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-lg text-slate-900">Recent Orders</CardTitle>
               <CardDescription className="text-slate-600">
-                Latest 10 orders in your system
+                Latest 10 orders
               </CardDescription>
             </div>
             <Link href="/dashboard/orders">
@@ -328,4 +371,3 @@ export default function DashboardPage() {
     </div>
   )
 }
-
