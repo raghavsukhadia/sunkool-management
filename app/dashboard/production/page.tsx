@@ -190,14 +190,14 @@ export default function ProductionPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 lg:space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
-          <Factory className="h-8 w-8 text-blue-600" />
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-900 flex items-center gap-2 lg:gap-3">
+          <Factory className="h-6 w-6 lg:h-8 lg:w-8 text-blue-600" />
           Production Queue
         </h1>
-        <p className="text-slate-600 mt-2">
+        <p className="text-slate-600 mt-2 text-sm lg:text-base">
           Track items pending production and manage production records
         </p>
       </div>
@@ -245,12 +245,12 @@ export default function ProductionPage() {
         </Card>
       </div>
 
-      {/* Filter Buttons */}
-      <div className="flex gap-2">
+      {/* Filter Buttons - wrap on mobile, min height for touch */}
+      <div className="flex flex-wrap gap-2">
         <Button
           variant={filter === "pending" ? "default" : "outline"}
           onClick={() => setFilter("pending")}
-          className="gap-2"
+          className="gap-2 min-h-[44px]"
         >
           <Clock className="h-4 w-4" />
           Queue – Item-wise ({queueData?.rows?.length ?? 0})
@@ -258,7 +258,7 @@ export default function ProductionPage() {
         <Button
           variant={filter === "needed" ? "default" : "outline"}
           onClick={() => setFilter("needed")}
-          className="gap-2"
+          className="gap-2 min-h-[44px]"
         >
           <Package className="h-4 w-4" />
           Needed ({neededList.length})
@@ -266,7 +266,7 @@ export default function ProductionPage() {
         <Button
           variant={filter === "inventory-health" ? "default" : "outline"}
           onClick={() => setFilter("inventory-health")}
-          className="gap-2"
+          className="gap-2 min-h-[44px]"
         >
           <Activity className="h-4 w-4" />
           Inventory Health
@@ -294,47 +294,76 @@ export default function ProductionPage() {
                 <p className="text-sm text-slate-400 mt-1">Orders with status Approved or In Production will appear here with item-wise details.</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Order #</th>
-                      <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Customer</th>
-                      <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Item</th>
-                      <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Ordered</th>
-                      <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Produced</th>
-                      <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Remaining</th>
-                      <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-28">Link</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {queueData.rows.map((row) => (
-                      <tr key={row.itemId} className="hover:bg-slate-50/50">
-                        <td className="p-3">
-                          <Link href={`/dashboard/orders/${row.orderId}`} className="font-medium text-blue-600 hover:text-blue-700 inline-flex items-center gap-1">
-                            {row.orderNumber}
-                            <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        </td>
-                        <td className="p-3 text-sm text-slate-700">{row.customerName}</td>
-                        <td className="p-3 text-sm font-medium text-slate-900">{row.itemName}</td>
-                        <td className="p-3 text-center text-sm text-slate-700">{row.ordered}</td>
-                        <td className="p-3 text-center text-sm text-slate-700">{row.produced}</td>
-                        <td className="p-3 text-center">
-                          <span className={`text-sm font-semibold ${row.remaining > 0 ? "text-amber-600" : "text-green-600"}`}>
-                            {row.remaining}
-                          </span>
-                        </td>
-                        <td className="p-3 text-center">
-                          <Link href={`/dashboard/orders/${row.orderId}`} className="text-xs font-medium text-blue-600 hover:text-blue-700">
-                            Open order
-                          </Link>
-                        </td>
+              <>
+                {/* Mobile: card list */}
+                <div className="lg:hidden space-y-3 p-4">
+                  {queueData.rows.map((row) => (
+                    <Link
+                      key={row.itemId}
+                      href={`/dashboard/orders/${row.orderId}`}
+                      className="block rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md active:bg-slate-50"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-slate-900 truncate">{row.orderNumber}</p>
+                          <p className="text-sm text-slate-600 truncate mt-0.5">{row.customerName}</p>
+                          <p className="text-sm font-medium text-slate-800 mt-1">{row.itemName}</p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-slate-500">
+                            <span>Ordered: {row.ordered}</span>
+                            <span>Produced: {row.produced}</span>
+                            <span className={row.remaining > 0 ? "font-semibold text-amber-600" : "font-semibold text-green-600"}>
+                              Remaining: {row.remaining}
+                            </span>
+                          </div>
+                        </div>
+                        <ExternalLink className="h-4 w-4 text-slate-400 shrink-0 mt-1" />
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+                {/* Desktop: table */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Order #</th>
+                        <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Customer</th>
+                        <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Item</th>
+                        <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Ordered</th>
+                        <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Produced</th>
+                        <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Remaining</th>
+                        <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-28">Link</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {queueData.rows.map((row) => (
+                        <tr key={row.itemId} className="hover:bg-slate-50/50">
+                          <td className="p-3">
+                            <Link href={`/dashboard/orders/${row.orderId}`} className="font-medium text-blue-600 hover:text-blue-700 inline-flex items-center gap-1">
+                              {row.orderNumber}
+                              <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          </td>
+                          <td className="p-3 text-sm text-slate-700">{row.customerName}</td>
+                          <td className="p-3 text-sm font-medium text-slate-900">{row.itemName}</td>
+                          <td className="p-3 text-center text-sm text-slate-700">{row.ordered}</td>
+                          <td className="p-3 text-center text-sm text-slate-700">{row.produced}</td>
+                          <td className="p-3 text-center">
+                            <span className={`text-sm font-semibold ${row.remaining > 0 ? "text-amber-600" : "text-green-600"}`}>
+                              {row.remaining}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center">
+                            <Link href={`/dashboard/orders/${row.orderId}`} className="text-xs font-medium text-blue-600 hover:text-blue-700">
+                              Open order
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

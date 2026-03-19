@@ -23,6 +23,7 @@ import { RevenueOverview } from "@/components/dashboard/RevenueOverview"
 import { RecentActivity, ActivityItem } from "@/components/dashboard/RecentActivity"
 import { OrderPipeline } from "@/components/dashboard/OrderPipeline"
 import { OrderTable, Order } from "@/components/orders/OrderTable"
+import { OrderCardList } from "@/components/orders/OrderCardList"
 import { Skeleton } from "@/components/ui/skeleton"
 
 function KPICardSkeleton() {
@@ -157,14 +158,14 @@ export default function DashboardPage() {
     (stats.unpaidInvoices > 0 || stats.partialPaymentOrders > 0 || stats.missingSalesOrderNumber > 0)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 lg:space-y-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-slate-500 font-medium">OMS at a glance</p>
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">Dashboard</h1>
+        <p className="text-slate-500 font-medium text-base">OMS at a glance</p>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+      {/* KPI Cards - mobile: 2x3 grid or horizontal scroll; desktop: 4-6 cols */}
+      <div className="grid gap-4 grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
         {statsLoading ? (
           <>
             <KPICardSkeleton />
@@ -299,7 +300,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Quick Actions */}
+      {/* Quick Actions - mobile: 2x2 grid with touch targets */}
       <Card className="shadow-sm border-slate-200 bg-gradient-to-r from-blue-50 to-slate-50">
         <CardHeader className="pb-3">
           <CardTitle className="text-lg text-slate-900 flex items-center gap-2">
@@ -308,27 +309,27 @@ export default function DashboardPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <Link href="/dashboard/orders/new">
-              <Button className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white">
+              <Button className="w-full min-h-[44px] gap-2 bg-blue-600 hover:bg-blue-700 text-white">
                 <Plus className="h-4 w-4" />
                 New Order
               </Button>
             </Link>
             <Link href="/dashboard/production">
-              <Button variant="outline" className="w-full gap-2 border-slate-300 hover:bg-slate-100">
+              <Button variant="outline" className="w-full min-h-[44px] gap-2 border-slate-300 hover:bg-slate-100">
                 <Factory className="h-4 w-4" />
                 Production Queue
               </Button>
             </Link>
             <Link href="/dashboard/follow-up">
-              <Button variant="outline" className="w-full gap-2 border-slate-300 hover:bg-slate-100">
+              <Button variant="outline" className="w-full min-h-[44px] gap-2 border-slate-300 hover:bg-slate-100">
                 <DollarSign className="h-4 w-4" />
                 Follow-ups
               </Button>
             </Link>
             <Link href="/dashboard/orders">
-              <Button variant="outline" className="w-full gap-2 border-slate-300 hover:bg-slate-100">
+              <Button variant="outline" className="w-full min-h-[44px] gap-2 border-slate-300 hover:bg-slate-100">
                 <Eye className="h-4 w-4" />
                 All Orders
               </Button>
@@ -337,7 +338,7 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* Recent Orders */}
+      {/* Recent Orders - card list on mobile, table on desktop */}
       <Card className="shadow-sm border-slate-200">
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between">
@@ -348,23 +349,35 @@ export default function DashboardPage() {
               </CardDescription>
             </div>
             <Link href="/dashboard/orders">
-              <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700">
+              <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700 min-h-[44px] min-w-[44px]">
                 View All
               </Button>
             </Link>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-4 lg:p-6">
           {ordersLoading ? (
             <div className="space-y-3">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
+              <div className="lg:hidden">
+                <OrderCardList data={[]} isLoading />
+              </div>
+              <div className="hidden lg:block space-y-3">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
             </div>
           ) : (
-            <OrderTable data={orders} />
+            <>
+              <div className="lg:hidden">
+                <OrderCardList data={orders} />
+              </div>
+              <div className="hidden lg:block">
+                <OrderTable data={orders} />
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

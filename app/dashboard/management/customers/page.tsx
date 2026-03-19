@@ -20,6 +20,14 @@ import { Label } from "@/components/ui/label"
 import { createCustomer, getCustomers, deleteCustomer, updateCustomer } from "@/app/actions/management"
 import { useRouter } from "next/navigation"
 import { Users, Plus, ArrowLeft, Search, ArrowUp, ArrowDown, ArrowUpDown, Trash2, Edit2, X, Filter } from "lucide-react"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 
 interface Customer {
   id: string
@@ -52,6 +60,8 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [showSearchPanel, setShowSearchPanel] = useState(true)
+  const [searchSheetOpen, setSearchSheetOpen] = useState(false)
+  const [addFormSheetOpen, setAddFormSheetOpen] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [sortBy, setSortBy] = useState<"name" | "created_at">("name")
@@ -124,6 +134,7 @@ export default function CustomersPage() {
         form.reset()
         setShowAddForm(false)
         setEditingCustomer(null)
+        setAddFormSheetOpen(false)
         await loadCustomers()
         setTimeout(() => {
           setSuccess(null)
@@ -150,6 +161,7 @@ export default function CustomersPage() {
     })
     setShowAddForm(true)
     setError(null)
+    if (typeof window !== "undefined" && window.innerWidth < 1024) setAddFormSheetOpen(true)
   }
 
   const handleDelete = async (id: string) => {
@@ -214,22 +226,22 @@ export default function CustomersPage() {
   })()
 
   return (
-    <div className="space-y-6 pb-8">
-      {/* Header Section */}
+    <div className="space-y-4 lg:space-y-6 pb-8">
+      {/* Header Section - compact on mobile */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-3 mb-1 lg:mb-2">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 min-h-[44px] lg:min-h-0"
             >
               <ArrowLeft className="w-4 h-4" />
               Back
             </Button>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Customer</h1>
+          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 tracking-tight">Customer</h1>
           <p className="text-gray-600 mt-1.5 text-sm">Manage customer information and contacts</p>
         </div>
         <div className="flex gap-2">
@@ -240,11 +252,126 @@ export default function CustomersPage() {
               form.reset()
               setError(null)
             }}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+            className="hidden lg:inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
           >
             <Plus className="w-4 h-4" />
             Add Customer
           </Button>
+          <Sheet open={addFormSheetOpen} onOpenChange={(o) => { setAddFormSheetOpen(o); if (!o) { setShowAddForm(false); setEditingCustomer(null); form.reset() } }}>
+            <SheetTrigger asChild className="lg:hidden">
+              <Button
+                onClick={() => {
+                  setShowAddForm(true)
+                  setEditingCustomer(null)
+                  form.reset()
+                  setError(null)
+                  setAddFormSheetOpen(true)
+                }}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm min-h-[44px]"
+              >
+                <Plus className="w-4 h-4" />
+                Add Customer
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="bottom" className="h-[85vh] rounded-t-2xl overflow-y-auto">
+              <SheetHeader>
+                <SheetTitle>{editingCustomer ? "Edit Customer" : "Add Customer"}</SheetTitle>
+                <SheetDescription>{editingCustomer ? "Update customer information" : "Enter customer information"}</SheetDescription>
+              </SheetHeader>
+              <div className="mt-4">
+                <Form {...form}>
+                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                    <FormField
+                      control={form.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Customer Name *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Customer name" className="min-h-[44px]" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="contact_person"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Contact Person</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Contact person" className="min-h-[44px]" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="email"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Email</FormLabel>
+                          <FormControl>
+                            <Input type="email" placeholder="email@example.com" className="min-h-[44px]" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="phone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Phone</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Phone" className="min-h-[44px]" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="address"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Address</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Address" className="min-h-[44px]" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="notes"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Notes</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Notes (optional)" className="min-h-[44px]" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <div className="flex gap-2 pt-2">
+                      <Button type="submit" disabled={isSubmitting} className="flex-1 min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white">
+                        {isSubmitting ? (editingCustomer ? "Updating..." : "Creating...") : (editingCustomer ? "Update" : "Create")}
+                      </Button>
+                      <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => { setAddFormSheetOpen(false); setEditingCustomer(null); form.reset() }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                </Form>
+              </div>
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
 
@@ -272,9 +399,9 @@ export default function CustomersPage() {
         </div>
       )}
 
-      {/* Add New Customer Form */}
+      {/* Add New Customer Form - desktop only; mobile uses sheet */}
       {showAddForm && (
-        <Card className="border-2 border-blue-100 shadow-md">
+        <Card className="hidden lg:block border-2 border-blue-100 shadow-md">
           <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
             <div className="flex items-center justify-between">
               <div>
@@ -429,8 +556,86 @@ export default function CustomersPage() {
         </Card>
       )}
 
-      {/* Search & Sort Panel */}
-      <Card className="shadow-sm">
+      {/* Mobile: Search & Sort sheet trigger */}
+      <div className="lg:hidden flex justify-end">
+        <Sheet open={searchSheetOpen} onOpenChange={setSearchSheetOpen}>
+          <SheetTrigger asChild>
+            <Button variant="outline" className="flex items-center gap-2 min-h-[44px] border-gray-300">
+              <Filter className="w-4 h-4" />
+              Search & Sort
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="bottom" className="h-[75vh] rounded-t-2xl overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle>Search & Sort</SheetTitle>
+              <SheetDescription>Filter and sort customers</SheetDescription>
+            </SheetHeader>
+            <div className="mt-4 space-y-4">
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Input
+                  placeholder="Search by name, email, phone..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-10 min-h-[44px]"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
+                    title="Clear search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Sort by</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant={sortBy === "name" ? "default" : "outline"}
+                    size="sm"
+                    className="min-h-[44px]"
+                    onClick={() => { setSortBy("name"); setSortDirection(sortDirection === "asc" ? "desc" : "asc") }}
+                  >
+                    Name
+                  </Button>
+                  <Button
+                    variant={sortBy === "created_at" ? "default" : "outline"}
+                    size="sm"
+                    className="min-h-[44px]"
+                    onClick={() => { setSortBy("created_at"); setSortDirection(sortDirection === "asc" ? "desc" : "asc") }}
+                  >
+                    Created
+                  </Button>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full min-h-[44px]"
+                  onClick={() => setSortDirection(sortDirection === "asc" ? "desc" : "asc")}
+                >
+                  {sortDirection === "asc" ? <ArrowUp className="w-4 h-4 mr-1" /> : <ArrowDown className="w-4 h-4 mr-1" />}
+                  {sortDirection === "asc" ? "Ascending" : "Descending"}
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-100">
+                  <div className="text-xl font-bold text-blue-700">{filteredAndSortedCustomers.length}</div>
+                  <div className="text-xs font-medium text-gray-600">Customers</div>
+                </div>
+                <div className="text-center p-3 bg-purple-50 rounded-lg border border-purple-100">
+                  <div className="text-lg font-bold text-purple-700">{searchTerm ? "Filtered" : "All"}</div>
+                  <div className="text-xs font-medium text-gray-600">View</div>
+                </div>
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+
+      {/* Search & Sort Panel - desktop only */}
+      <Card className="hidden lg:block shadow-sm">
         <CardHeader className="pb-4 bg-gray-50 border-b">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -527,7 +732,61 @@ export default function CustomersPage() {
               )}
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              {/* Mobile card list */}
+              <div className="lg:hidden p-4 space-y-3">
+                {filteredAndSortedCustomers.map((customer) => (
+                  <Card key={customer.id} className="border shadow-sm">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-gray-900">{customer.name}</p>
+                          {customer.contact_person && (
+                            <p className="text-xs text-gray-600 mt-0.5">{customer.contact_person}</p>
+                          )}
+                          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-sm">
+                            {customer.phone && (
+                              <a href={`tel:${customer.phone}`} className="text-blue-600 hover:text-blue-700 font-medium">
+                                {customer.phone}
+                              </a>
+                            )}
+                            {customer.email && (
+                              <a href={`mailto:${customer.email}`} className="text-blue-600 hover:text-blue-700 font-medium">
+                                {customer.email}
+                              </a>
+                            )}
+                          </div>
+                          {customer.address && (
+                            <p className="text-xs text-gray-500 mt-1 line-clamp-2">{customer.address}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-9 w-9 p-0 min-h-[44px] min-w-[44px] text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            onClick={() => handleEdit(customer)}
+                            title="Edit"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-9 w-9 p-0 min-h-[44px] min-w-[44px] text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => handleDelete(customer.id)}
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+              {/* Desktop table */}
+              <div className="hidden lg:block overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b bg-gray-50/50">
@@ -620,7 +879,8 @@ export default function CustomersPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

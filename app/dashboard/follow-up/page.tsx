@@ -89,11 +89,11 @@ export default function FollowUpPage() {
   const pendingFollowups = followups.filter(f => !f.payment_received).length
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 lg:space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">Payment Follow-ups</h1>
-        <p className="text-slate-600 mt-2">
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">Payment Follow-ups</h1>
+        <p className="text-slate-600 mt-2 text-sm lg:text-base">
           Track and manage payment follow-ups. When payment is not received within 14 days of dispatch, a follow-up is created for the order.
         </p>
       </div>

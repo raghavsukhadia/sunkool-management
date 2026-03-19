@@ -1435,14 +1435,14 @@ export default function OrderDetailsPage() {
         </CardContent>
       </Card>
 
-      {/* Tabs Section */}
+      {/* Tabs Section - horizontal scroll on mobile, grid on desktop */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full" style={{ gridTemplateColumns: order.cash_discount ? 'repeat(5, 1fr)' : 'repeat(4, 1fr)' }}>
-          <TabsTrigger value="items">
+        <TabsList className="flex flex-nowrap overflow-x-auto gap-1 w-full pb-1 lg:grid lg:overflow-visible lg:pb-1" style={{ gridTemplateColumns: order.cash_discount ? 'repeat(5, 1fr)' : 'repeat(4, 1fr)' }}>
+          <TabsTrigger value="items" className="flex-shrink-0">
             <Package className="w-4 h-4 mr-2" />
             Items
           </TabsTrigger>
-          <TabsTrigger value="production" className="relative">
+          <TabsTrigger value="production" className="relative flex-shrink-0">
             <Factory className="w-4 h-4 mr-2" />
             Production
             {tabRemainingCounts.productionRemaining > 0 && (
@@ -1451,7 +1451,7 @@ export default function OrderDetailsPage() {
               </span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="shipment" className="relative">
+          <TabsTrigger value="shipment" className="relative flex-shrink-0">
             <Truck className="w-4 h-4 mr-2" />
             Shipment
             {tabRemainingCounts.shipmentRemaining > 0 && (
@@ -1460,7 +1460,7 @@ export default function OrderDetailsPage() {
               </span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="payment" className="relative">
+          <TabsTrigger value="payment" className="relative flex-shrink-0">
             <DollarSign className="w-4 h-4 mr-2" />
             Payment
             {tabRemainingCounts.paymentDue && (
@@ -1470,7 +1470,7 @@ export default function OrderDetailsPage() {
             )}
           </TabsTrigger>
           {(order.cash_discount || paymentFollowups.length > 0 || paymentSummary.amountDue > 0) && (
-            <TabsTrigger value="followup">
+            <TabsTrigger value="followup" className="flex-shrink-0">
               <Calendar className="w-4 h-4 mr-2" />
               Payment Followup
             </TabsTrigger>

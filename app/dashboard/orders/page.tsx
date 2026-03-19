@@ -22,6 +22,15 @@ import {
   Download,
 } from "lucide-react"
 import * as XLSX from "xlsx"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
+import { OrderCardList } from "@/components/orders/OrderCardList"
 
 interface Order {
   id: string
@@ -64,6 +73,7 @@ export default function OrdersPage() {
   const [completedOrderIds, setCompletedOrderIds] = useState<string[]>([])
   const [completedOnly, setCompletedOnly] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false)
 
   useEffect(() => {
     const status = searchParams.get("status")
@@ -273,9 +283,9 @@ export default function OrdersPage() {
   }
 
   return (
-    <div className="space-y-6 pb-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
+    <div className="space-y-4 lg:space-y-6 pb-8">
+      {/* Header - desktop */}
+      <div className="hidden lg:flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">All Orders</h1>
           <p className="text-gray-600 mt-1.5 text-sm">Manage and track all orders</p>
@@ -300,6 +310,124 @@ export default function OrdersPage() {
         </div>
       </div>
 
+      {/* Header - mobile: title + Filter + New Order */}
+      <div className="lg:hidden flex items-center justify-between gap-3 pb-2">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold text-gray-900 tracking-tight">Orders</h1>
+          <p className="text-gray-500 text-sm truncate">{filteredAndSortedOrders.length} orders</p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm" className="min-h-[44px] gap-2">
+                <Filter className="w-4 h-4" />
+                Filter
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="bottom" className="h-[85vh] rounded-t-2xl">
+              <SheetHeader>
+                <SheetTitle>Filter & sort</SheetTitle>
+                <SheetDescription className="sr-only">
+                  Filter and sort orders by status, payment, and date.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="mt-6 space-y-5 pb-8">
+                <div>
+                  <Label className="text-sm font-semibold text-gray-700">Search</Label>
+                  <div className="relative mt-1.5">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Input
+                      placeholder="Order #, customer, email, phone..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-9 h-11"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm font-semibold text-gray-700">Order Status</Label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="mt-1.5 flex h-11 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base"
+                  >
+                    <option value="all">All Statuses</option>
+                    {VALID_STATUSES.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <Label className="text-sm font-semibold text-gray-700">Payment Status</Label>
+                  <select
+                    value={paymentFilter}
+                    onChange={(e) => setPaymentFilter(e.target.value)}
+                    className="mt-1.5 flex h-11 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base"
+                  >
+                    <option value="all">All</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Partial">Partial</option>
+                    <option value="Delivered Unpaid">Delivered Unpaid</option>
+                    <option value="Refunded">Refunded</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm font-semibold text-gray-700">Sort by</Label>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as "created_at" | "total_price" | "sales_order_number")}
+                      className="mt-1.5 flex h-11 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base"
+                    >
+                      <option value="created_at">Date</option>
+                      <option value="total_price">Amount</option>
+                      <option value="sales_order_number">Order #</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-semibold text-gray-700">Order</Label>
+                    <select
+                      value={sortDirection}
+                      onChange={(e) => setSortDirection(e.target.value as "asc" | "desc")}
+                      className="mt-1.5 flex h-11 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base"
+                    >
+                      <option value="desc">Newest first</option>
+                      <option value="asc">Oldest first</option>
+                    </select>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCompletedOnly((prev) => !prev)}
+                  className={`w-full text-left p-4 rounded-xl border min-h-[44px] ${
+                    completedOnly ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-200"
+                  }`}
+                >
+                  <span className="font-medium text-gray-900">Completed only</span>
+                  <span className="block text-sm text-gray-500 mt-0.5">
+                    {completedOrderIds.length} completed · {completedOnly ? "Showing completed" : "Tap to show"}
+                  </span>
+                </button>
+                <Button
+                  className="w-full min-h-[44px] bg-amber-500 hover:bg-amber-600 text-slate-900"
+                  onClick={() => setFilterSheetOpen(false)}
+                >
+                  Done
+                </Button>
+              </div>
+            </SheetContent>
+          </Sheet>
+          <Button
+            onClick={() => router.push("/dashboard/orders/new")}
+            className="min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            New
+          </Button>
+        </div>
+      </div>
+
       {/* Messages */}
       {error && (
         <div className="p-4 text-sm text-red-700 bg-red-50 border-l-4 border-red-500 rounded-r-md flex items-center justify-between shadow-sm">
@@ -313,8 +441,8 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {/* Search & Filter Panel */}
-      <Card className="shadow-sm">
+      {/* Search & Filter Panel - desktop only */}
+      <Card className="hidden lg:block shadow-sm">
         <CardHeader className="pb-4 bg-gray-50 border-b">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -421,8 +549,37 @@ export default function OrdersPage() {
         </CardContent>
       </Card>
 
-      {/* Orders Table */}
-      <Card className="shadow-sm">
+      {/* Orders - mobile: card list */}
+      <div className="lg:hidden">
+        {filteredAndSortedOrders.length === 0 ? (
+          <div className="text-center py-12 px-4 rounded-xl border border-slate-200 bg-white">
+            <ShoppingCart className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500 font-medium">
+              {completedOnly
+                ? "No completed orders match your filters"
+                : searchTerm || statusFilter !== "all" || paymentFilter !== "all"
+                  ? "No orders match your filters"
+                  : completedOrderIds.length > 0
+                    ? "All orders are completed"
+                    : "No orders yet"}
+            </p>
+            {!searchTerm && statusFilter === "all" && paymentFilter === "all" && !completedOnly && completedOrderIds.length === 0 && (
+              <Button
+                onClick={() => router.push("/dashboard/orders/new")}
+                className="mt-4 min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Create New Order
+              </Button>
+            )}
+          </div>
+        ) : (
+          <OrderCardList data={filteredAndSortedOrders} />
+        )}
+      </div>
+
+      {/* Orders Table - desktop only */}
+      <Card className="hidden lg:block shadow-sm">
         <CardHeader className="bg-gray-50 border-b">
           <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
             <div className="p-1.5 bg-blue-100 rounded-md">

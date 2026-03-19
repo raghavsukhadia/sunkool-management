@@ -75,7 +75,7 @@ export default async function HomePage() {
   return (
     <div className="min-h-screen bg-[radial-gradient(1200px_500px_at_70%_-20%,rgba(251,146,60,0.16),transparent),linear-gradient(180deg,#f8fafc_0%,#eef2f7_100%)] text-slate-900">
       <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-xl">
-        <div className="mx-auto flex h-20 w-full max-w-7xl items-center gap-6 px-4 md:px-8">
+        <div className="mx-auto flex h-16 md:h-20 w-full max-w-7xl items-center gap-4 md:gap-6 px-4 md:px-8">
           <SunkoolLogo size="md" />
 
           <nav className="ml-auto hidden items-center gap-7 text-sm font-medium text-slate-600 md:flex">
@@ -91,7 +91,7 @@ export default async function HomePage() {
           </nav>
 
           <Link href={user ? '/dashboard' : '/login'}>
-            <Button className="rounded-full bg-slate-900 px-6 text-white hover:bg-slate-800">
+            <Button className="min-h-[44px] rounded-full bg-slate-900 px-5 md:px-6 text-white hover:bg-slate-800 text-base">
               {user ? 'Open Dashboard' : 'Sign In'} <ArrowUpRight className="ml-2 h-4 w-4" />
             </Button>
           </Link>
@@ -116,13 +116,13 @@ export default async function HomePage() {
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <Link href={user ? '/dashboard/orders' : '/login'}>
-                <Button size="lg" className="w-full rounded-xl bg-amber-500 px-7 text-slate-950 hover:bg-amber-400 sm:w-auto">
+              <Link href={user ? '/dashboard/orders' : '/login'} className="w-full sm:w-auto">
+                <Button size="lg" className="w-full min-h-[44px] rounded-xl bg-amber-500 px-7 text-slate-950 hover:bg-amber-400 sm:w-auto">
                   Start Managing Orders <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </Link>
-              <Link href="#features">
-                <Button size="lg" variant="outline" className="w-full rounded-xl border-slate-300 bg-white sm:w-auto">
+              <Link href="#features" className="w-full sm:w-auto">
+                <Button size="lg" variant="outline" className="w-full min-h-[44px] rounded-xl border-slate-300 bg-white sm:w-auto">
                   Explore features
                 </Button>
               </Link>
@@ -225,12 +225,12 @@ export default async function HomePage() {
               </div>
               <div className="flex flex-col gap-3 sm:flex-row md:justify-end">
                 <Link href={user ? '/dashboard' : '/login'}>
-                  <Button size="lg" className="w-full rounded-xl bg-amber-500 px-8 text-slate-950 hover:bg-amber-400 sm:w-auto">
+                  <Button size="lg" className="w-full min-h-[44px] rounded-xl bg-amber-500 px-8 text-slate-950 hover:bg-amber-400 sm:w-auto">
                     {user ? 'Go To Dashboard' : 'Sign In To Continue'}
                   </Button>
                 </Link>
                 <Link href="/dashboard/orders">
-                  <Button size="lg" variant="outline" className="w-full rounded-xl border-slate-600 bg-transparent text-white hover:bg-slate-900 sm:w-auto">
+                  <Button size="lg" variant="outline" className="w-full min-h-[44px] rounded-xl border-slate-600 bg-transparent text-white hover:bg-slate-900 sm:w-auto">
                     View Orders
                   </Button>
                 </Link>

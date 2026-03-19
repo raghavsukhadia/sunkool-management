@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Bell, UserPlus, MessageSquare, Settings, Trash2, Edit2 } from "lucide-react"
+import { Bell, UserPlus, MessageSquare, Settings, Trash2, Edit2, Monitor } from "lucide-react"
 import {
   getNotificationRecipients,
   createNotificationRecipient,
@@ -32,7 +32,20 @@ type Template = { id: string; event_type: string; name: string | null; template_
 const EVENT_TYPES = [{ value: "order_created", label: "Order created (punched)" }]
 const PLACEHOLDERS = "Placeholders: {{order_number}}, {{customer_name}}, {{sales_order_number}}"
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const m = window.matchMedia("(max-width: 1023px)")
+    setIsMobile(m.matches)
+    const listener = () => setIsMobile(m.matches)
+    m.addEventListener("change", listener)
+    return () => m.removeEventListener("change", listener)
+  }, [])
+  return isMobile
+}
+
 export default function NotificationsPage() {
+  const isMobile = useIsMobile()
   const [recipients, setRecipients] = useState<Recipient[]>([])
   const [config, setConfig] = useState<WhatsAppConfig>(null)
   const [templates, setTemplates] = useState<Template[]>([])
@@ -251,10 +264,31 @@ export default function NotificationsPage() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-slate-900">Notifications</h1>
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">Notifications</h1>
         <Card>
           <CardContent className="py-8">
             <p className="text-center text-slate-500">Loading...</p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (isMobile) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-900 flex items-center gap-2">
+          <Bell className="h-6 w-6 lg:h-8 lg:w-8 text-blue-600" />
+          Notifications
+        </h1>
+        <Card className="border-amber-200 border-l-4 bg-amber-50/50">
+          <CardContent className="py-8 px-6">
+            <div className="flex flex-col items-center text-center gap-4">
+              <Monitor className="h-12 w-12 text-slate-400" />
+              <p className="text-slate-700 font-medium">
+                Notifications configuration is available on desktop. Please open this page on a computer to manage recipients and WhatsApp settings.
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>

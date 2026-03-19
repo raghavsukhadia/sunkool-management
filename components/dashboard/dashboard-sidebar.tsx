@@ -15,12 +15,12 @@ import {
   Home,
   Menu,
   X,
-  Users,
   Bell
 } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import SunkoolLogo from "@/components/brand/SunkoolLogo"
+import { MobileBottomNav } from "@/components/dashboard/MobileBottomNav"
 
 export default function DashboardSidebar({
   children,
@@ -51,7 +51,7 @@ export default function DashboardSidebar({
 
   return (
     <div className="h-screen bg-gray-50 flex overflow-hidden">
-      {/* Mobile Sidebar Overlay */}
+      {/* Mobile Sidebar Overlay - only when hamburger opens drawer on desktop-first; on mobile we use bottom nav so sidebar is hidden entirely */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-40 lg:hidden"
@@ -59,14 +59,15 @@ export default function DashboardSidebar({
         />
       )}
 
-      {/* Left Sidebar */}
+      {/* Left Sidebar - hidden on mobile (bottom nav instead), visible lg and up */}
       <aside
         className={cn(
-          "fixed lg:relative inset-y-0 left-0 z-50 w-64 bg-[#0f172a] text-white transform transition-transform duration-300 ease-in-out lg:translate-x-0 flex flex-col h-full",
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          "fixed inset-y-0 left-0 z-50 w-64 bg-[#0f172a] text-white transform transition-transform duration-300 ease-in-out flex-col h-full",
+          "hidden lg:flex lg:relative lg:translate-x-0",
+          sidebarOpen && "flex translate-x-0"
         )}
       >
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full w-64">
           {/* Logo/Header */}
           <div className="flex items-center justify-between h-20 px-4 border-b border-slate-700/50 bg-[#0f172a]">
             <Link href="/dashboard" className="flex items-center space-x-3 hover:opacity-90 transition-opacity flex-1">
@@ -121,21 +122,30 @@ export default function DashboardSidebar({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        {/* Top Header Bar */}
+        {/* Top Header Bar - compact on mobile, no hamburger (bottom nav used) */}
         <header className="bg-white border-b border-gray-100 shadow-sm z-30 shrink-0">
-          <div className="flex items-center justify-between h-20 px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center">
+          <div className="flex items-center justify-between h-14 lg:h-20 px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center min-w-0 gap-2 lg:gap-3">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                className="hidden lg:flex p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors shrink-0"
+                aria-label="Open menu"
               >
                 <Menu className="w-6 h-6" />
               </button>
-              <div className="flex flex-col ml-4 lg:ml-0">
-                <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+              <Link href="/dashboard" className="flex-shrink-0">
+                <span className="hidden lg:inline-block">
+                  <SunkoolLogo variant="dark" size="md" />
+                </span>
+                <span className="lg:hidden">
+                  <SunkoolLogo variant="dark" size="sm" />
+                </span>
+              </Link>
+              <div className="flex flex-col min-w-0">
+                <h1 className="text-base lg:text-xl font-bold text-slate-900 tracking-tight truncate">
                   Order Management System
                 </h1>
-                <p className="text-xs text-slate-500 font-medium">Sunkool Management &middot; Dashboard</p>
+                <p className="text-xs text-slate-500 font-medium hidden sm:block">Sunkool Management &middot; Dashboard</p>
               </div>
             </div>
             <div className="flex items-center space-x-6">
@@ -144,13 +154,16 @@ export default function DashboardSidebar({
           </div>
         </header>
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-y-auto bg-slate-50/50 scroll-smooth">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-700">
+        {/* Main Content - pb for mobile bottom nav */}
+        <main className="flex-1 overflow-y-auto bg-slate-50/50 scroll-smooth pb-20 lg:pb-0">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8 animate-in fade-in duration-700">
             {children}
           </div>
         </main>
       </div>
+
+      {/* Mobile bottom navigation - visible only below lg */}
+      <MobileBottomNav />
     </div>
   )
 }

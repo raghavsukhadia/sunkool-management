@@ -206,7 +206,7 @@ export default function LoginPage() {
               </div>
             )}
 
-            <Button type="submit" className="w-full h-11 text-base shadow-sm" disabled={loading}>
+            <Button type="submit" className="w-full min-h-[44px] h-11 text-base shadow-sm" disabled={loading}>
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -17,14 +17,18 @@ export default function SunkoolLogo({
 
   const isIcon = type === "icon"
 
+  const w = isIcon ? sizeMap[size].iconSize : sizeMap[size].width
+  const h = isIcon ? sizeMap[size].iconSize : sizeMap[size].height
+
   return (
-    <div className="flex items-center">
+    <div className="flex items-center" style={{ width: w, height: h }}>
       <Image
         src={isIcon ? "/images/logo-icon.png" : "/images/logo.png"}
         alt="Sunkool OMS"
-        width={isIcon ? sizeMap[size].iconSize : sizeMap[size].width}
-        height={isIcon ? sizeMap[size].iconSize : sizeMap[size].height}
-        className="object-contain"
+        width={w}
+        height={h}
+        className="object-contain w-full h-full"
+        style={{ width: "auto", height: "auto", maxWidth: "100%", maxHeight: "100%" }}
         priority
       />
     </div>
