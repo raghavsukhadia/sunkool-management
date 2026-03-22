@@ -1094,6 +1094,76 @@ export async function getOrderDispatches(orderId: string) {
   return { success: true, data: dispatches || [], error: null }
 }
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
+
+/** Recompute order_status from delivered quantities vs order lines (non-return dispatches only). */
+async function syncOrderStatusAfterDispatchChange(
+  supabase: SupabaseServerClient,
+  orderId: string
+) {
+  const { data: orderRow } = await supabase
+    .from("orders")
+    .select("order_status")
+    .eq("id", orderId)
+    .single()
+
+  if (!orderRow || orderRow.order_status === "Void") return
+
+  const { data: orderItems } = await supabase
+    .from("order_items")
+    .select("id, quantity")
+    .eq("order_id", orderId)
+
+  const { data: dispatches } = await supabase
+    .from("dispatches")
+    .select("id, shipment_status, dispatch_type")
+    .eq("order_id", orderId)
+
+  const nonReturn = (dispatches || []).filter((d) => d.dispatch_type !== "return")
+  const deliveredDispIds = nonReturn
+    .filter((d) => d.shipment_status === "delivered")
+    .map((d) => d.id)
+
+  const { data: dispatchItems } =
+    deliveredDispIds.length > 0
+      ? await supabase
+          .from("dispatch_items")
+          .select("order_item_id, quantity")
+          .in("dispatch_id", deliveredDispIds)
+      : { data: [] as { order_item_id: string; quantity: number | null }[] }
+
+  const deliveredByItem: Record<string, number> = {}
+  for (const di of dispatchItems || []) {
+    const oid = di.order_item_id
+    if (!oid) continue
+    deliveredByItem[oid] = (deliveredByItem[oid] || 0) + Number(di.quantity || 0)
+  }
+
+  const items = orderItems || []
+  if (items.length === 0) return
+
+  let fullyDelivered = true
+  let someDelivered = false
+  for (const item of items) {
+    const d = deliveredByItem[item.id] || 0
+    if (d > 0) someDelivered = true
+    if (d < Number(item.quantity)) fullyDelivered = false
+  }
+
+  let nextStatus: string | null = null
+  if (fullyDelivered) {
+    nextStatus = "Delivered"
+  } else if (someDelivered) {
+    nextStatus = "Partial Delivered"
+  } else if (nonReturn.some((d) => d.shipment_status === "picked_up")) {
+    nextStatus = "In Transit"
+  }
+
+  if (nextStatus) {
+    await supabase.from("orders").update({ order_status: nextStatus }).eq("id", orderId)
+  }
+}
+
 // Update dispatch shipment status
 export async function updateDispatchStatus(
   dispatchId: string,
@@ -1119,40 +1189,8 @@ export async function updateDispatchStatus(
     return { success: false, error: error.message }
   }
 
-  // If status is 'picked_up', update order status to 'In Transit'
-  if (status === 'picked_up' && dispatch?.order_id) {
-    await supabase
-      .from("orders")
-      .update({ order_status: "In Transit" })
-      .eq("id", dispatch.order_id)
-  }
-
-  // If status is 'delivered', update order status to 'Delivered'
-  if (status === 'delivered') {
-    const { data: dispatchData } = await supabase
-      .from("dispatches")
-      .select("order_id, dispatch_type")
-      .eq("id", dispatchId)
-      .single()
-
-    if (dispatchData) {
-      // Check if all dispatches for this order are delivered
-      const { data: allDispatches } = await supabase
-        .from("dispatches")
-        .select("shipment_status")
-        .eq("order_id", dispatchData.order_id)
-        .neq("dispatch_type", "return")
-
-      const allDelivered = (allDispatches?.length || 0) > 0
-        && allDispatches!.every(d => d.shipment_status === 'delivered')
-
-      if (allDelivered) {
-        await supabase
-          .from("orders")
-          .update({ order_status: "Delivered" })
-          .eq("id", dispatchData.order_id)
-      }
-    }
+  if (dispatch?.order_id) {
+    await syncOrderStatusAfterDispatchChange(supabase, dispatch.order_id)
   }
 
   revalidatePath(`/dashboard/orders/${dispatch.order_id}`)
@@ -1187,7 +1225,7 @@ export async function updateOrderPayment(
     }
 
     // Check that order is in a dispatched state before payment
-    const dispatchedStates = ['Ready for Dispatch', 'In Transit', 'Delivered']
+    const dispatchedStates = ['Ready for Dispatch', 'In Transit', 'Delivered', 'Partial Delivered']
     if (!dispatchedStates.includes(order.order_status)) {
       return {
         success: false,
@@ -1518,7 +1556,8 @@ export async function updateOrder(
       'In Progress': ['Ready for Dispatch', 'Void'],
       'Ready for Dispatch': ['Invoiced', 'In Transit', 'Void'],
       'Invoiced': ['In Transit', 'Void'],
-      'In Transit': ['Delivered', 'Void'],
+      'In Transit': ['Delivered', 'Partial Delivered', 'Void'],
+      'Partial Delivered': ['Delivered', 'Void'],
       'Delivered': ['Void'],
       'Void': []
     }
@@ -2403,7 +2442,7 @@ export async function addOrderPayment(
     return { success: false, error: "Order not found" }
   }
 
-  const dispatchedStates = ['Ready for Dispatch', 'In Transit', 'Delivered']
+  const dispatchedStates = ['Ready for Dispatch', 'In Transit', 'Delivered', 'Partial Delivered']
   const hasDispatchedStatus = dispatchedStates.includes(order.order_status)
 
   // Also allow if order has dispatch records (handles cases where status wasn't updated)

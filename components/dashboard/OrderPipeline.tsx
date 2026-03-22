@@ -21,6 +21,7 @@ const stages: {
   { key: "readyForDispatchOrders", label: "Ready for Dispatch", color: "bg-orange-100 text-orange-800 border-orange-200", statusParam: "Ready for Dispatch" },
   { key: "invoicedOrders", label: "Invoiced", color: "bg-blue-100 text-blue-800 border-blue-200", statusParam: "Invoiced" },
   { key: "inTransitOrders", label: "In Transit", color: "bg-indigo-100 text-indigo-800 border-indigo-200", statusParam: "In Transit" },
+  { key: "partialDeliveredOrders", label: "Partial Delivered", color: "bg-teal-100 text-teal-800 border-teal-200", statusParam: "Partial Delivered" },
   { key: "deliveredOrders", label: "Delivered", color: "bg-emerald-100 text-emerald-800 border-emerald-200", statusParam: "Delivered" },
 ]
 

@@ -56,7 +56,7 @@ function getOrderDisplayTotal(order: Order): number {
   return order.requested_payment_amount != null ? Number(order.requested_payment_amount) : (order.total_price ?? 0)
 }
 
-const VALID_STATUSES = ["New Order", "In Progress", "Ready for Dispatch", "Invoiced", "In Transit", "Delivered", "Void"]
+const VALID_STATUSES = ["New Order", "In Progress", "Ready for Dispatch", "Invoiced", "In Transit", "Partial Delivered", "Delivered", "Void"]
 
 export default function OrdersPage() {
   const router = useRouter()
@@ -245,6 +245,8 @@ export default function OrdersPage() {
         return "bg-blue-100 text-blue-800"
       case "In Transit":
         return "bg-indigo-100 text-indigo-800"
+      case "Partial Delivered":
+        return "bg-teal-100 text-teal-800"
       case "Delivered":
         return "bg-emerald-100 text-emerald-800"
       case "Void":
@@ -497,6 +499,7 @@ export default function OrdersPage() {
                     <option value="Ready for Dispatch">Ready for Dispatch</option>
                     <option value="Invoiced">Invoiced</option>
                     <option value="In Transit">In Transit</option>
+                    <option value="Partial Delivered">Partial Delivered</option>
                     <option value="Delivered">Delivered</option>
                     <option value="Void">Void</option>
                   </select>

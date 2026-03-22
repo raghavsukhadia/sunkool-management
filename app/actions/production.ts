@@ -36,7 +36,7 @@ export async function getProductionQueue(): Promise<
       sales_order_number,
       customers:customer_id ( name )
     `)
-    .in("order_status", ["In Progress", "New Order"])
+    .in("order_status", ["In Progress", "New Order", "Partial Delivered"])
     .order("internal_order_number", { ascending: true })
 
   if (ordersError) {
@@ -185,7 +185,7 @@ export async function getProductionItems(): Promise<
       )
     `
     )
-    .in("orders.order_status", ["New Order", "In Progress", "Ready for Dispatch"])
+    .in("orders.order_status", ["New Order", "In Progress", "Ready for Dispatch", "Partial Delivered"])
     .order("created_at", { ascending: true })
 
   if (itemsError) return { success: false, error: itemsError.message }

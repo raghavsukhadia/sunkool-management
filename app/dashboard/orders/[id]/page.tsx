@@ -314,7 +314,7 @@ export default function OrderDetailsPage() {
   // Predicate used across the payment UI to determine whether payments can be recorded.
   // An order is eligible for payment recording if its status indicates dispatch OR if
   // there are existing dispatch records (handles legacy/stale status cases).
-  const dispatchedStates = ['Ready for Dispatch', 'In Transit', 'Delivered']
+  const dispatchedStates = ['Ready for Dispatch', 'In Transit', 'Delivered', 'Partial Delivered']
   const canRecordPayment = dispatchedStates.includes(order?.order_status || '') || (dispatches && dispatches.length > 0)
 
   const loadOrderPayments = async () => {
@@ -3126,12 +3126,14 @@ export default function OrderDetailsPage() {
                                   )}
                                 </div>
                                 <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${dispatch.shipment_status === 'delivered'
-                                  ? "bg-green-100 text-green-700"
+                                  ? (dispatch.dispatch_type === 'partial' ? "bg-teal-100 text-teal-700" : "bg-green-100 text-green-700")
                                   : dispatch.shipment_status === 'picked_up'
                                     ? "bg-blue-100 text-blue-700"
                                     : "bg-yellow-100 text-yellow-700"
                                   }`}>
-                                  {dispatch.shipment_status === 'delivered' ? 'Delivered' : dispatch.shipment_status === 'picked_up' ? 'Picked Up' : 'Ready'}
+                                  {dispatch.shipment_status === 'delivered'
+                                    ? (dispatch.dispatch_type === 'partial' ? 'Partial Delivered' : 'Delivered')
+                                    : dispatch.shipment_status === 'picked_up' ? 'Picked Up' : 'Ready'}
                                 </span>
                               </div>
                               {dispatch.courier_companies && (

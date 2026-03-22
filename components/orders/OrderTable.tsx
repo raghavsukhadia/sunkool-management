@@ -73,6 +73,7 @@ const statusColorMap: Record<string, { bg: string; text: string }> = {
   "Ready for Dispatch": { bg: "bg-orange-100", text: "text-orange-700" },
   Invoiced: { bg: "bg-blue-100", text: "text-blue-700" },
   "In Transit": { bg: "bg-indigo-100", text: "text-indigo-700" },
+  "Partial Delivered": { bg: "bg-teal-100", text: "text-teal-700" },
   Delivered: { bg: "bg-green-100", text: "text-green-700" },
   Void: { bg: "bg-red-100", text: "text-red-700" },
 }
@@ -298,6 +299,7 @@ export function OrderTable({ data, isLoading = false }: OrderTableProps) {
             <SelectItem value="Ready for Dispatch">Ready for Dispatch</SelectItem>
             <SelectItem value="Invoiced">Invoiced</SelectItem>
             <SelectItem value="In Transit">In Transit</SelectItem>
+            <SelectItem value="Partial Delivered">Partial Delivered</SelectItem>
             <SelectItem value="Delivered">Delivered</SelectItem>
             <SelectItem value="Void">Void</SelectItem>
           </SelectContent>

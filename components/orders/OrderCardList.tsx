@@ -22,6 +22,7 @@ const statusColorMap: Record<string, string> = {
   "Ready for Dispatch": "bg-orange-100 text-orange-700",
   Invoiced: "bg-blue-100 text-blue-700",
   "In Transit": "bg-indigo-100 text-indigo-700",
+  "Partial Delivered": "bg-teal-100 text-teal-700",
   Delivered: "bg-green-100 text-green-700",
   Void: "bg-red-100 text-red-700",
 }

@@ -165,9 +165,10 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards - mobile: 2x3 grid or horizontal scroll; desktop: 4-6 cols */}
-      <div className="grid gap-4 grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+      <div className="grid gap-4 grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         {statsLoading ? (
           <>
+            <KPICardSkeleton />
             <KPICardSkeleton />
             <KPICardSkeleton />
             <KPICardSkeleton />
@@ -204,6 +205,13 @@ export default function DashboardPage() {
               icon={<Truck className="h-5 w-5 text-green-600" />}
               color="border-l-green-500"
               link="/dashboard/orders"
+            />
+            <KPICard
+              title="Partial Delivered"
+              value={stats?.partialDeliveredOrders ?? 0}
+              icon={<Truck className="h-5 w-5 text-teal-600" />}
+              color="border-l-teal-500"
+              link="/dashboard/orders?status=Partial%20Delivered"
             />
             <KPICard
               title="Delivered"

@@ -10,6 +10,7 @@ export interface DashboardStats {
   invoicedOrders: number
   inTransitOrders: number
   dispatchedOrders: number
+  partialDeliveredOrders: number
   deliveredOrders: number
   voidOrders: number
   totalRevenue: number
@@ -60,11 +61,14 @@ export async function getDashboardStats(): Promise<
           o.order_status === "In Transit" ||
           o.order_status === "Invoiced"
       ).length,
+      partialDeliveredOrders: list.filter((o) => o.order_status === "Partial Delivered").length,
       deliveredOrders: list.filter((o) => o.order_status === "Delivered").length,
       voidOrders: list.filter((o) => o.order_status === "Void").length,
       totalRevenue: list.reduce((sum, o) => sum + (o.total_price ?? 0), 0),
       unpaidInvoices: list.filter(
-        (o) => o.payment_status === "Pending" && o.order_status === "Delivered"
+        (o) =>
+          o.payment_status === "Pending" &&
+          (o.order_status === "Delivered" || o.order_status === "Partial Delivered")
       ).length,
       partialPaymentOrders: list.filter((o) => o.payment_status === "Partial").length,
       missingSalesOrderNumber: list.filter((o) => !o.sales_order_number).length,
@@ -131,7 +135,7 @@ function statusToAction(
   oldPayment: string | null
 ): RecentActivityRow["action"] {
   if (newPayment === "Paid" && oldPayment !== "Paid") return "paid"
-  if (newStatus === "Delivered") return "shipped"
+  if (newStatus === "Delivered" || newStatus === "Partial Delivered") return "shipped"
   return "updated"
 }
 
