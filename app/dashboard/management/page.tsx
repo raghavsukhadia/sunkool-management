@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Package, Truck, Users, Gift } from "lucide-react"
+import { Package, Truck, Users } from "lucide-react"
 import { ManagementSignOut } from "@/components/dashboard/ManagementSignOut"
 
 export default function ManagementPage() {
@@ -9,7 +9,7 @@ export default function ManagementPage() {
     <div className="space-y-6 lg:space-y-8">
       <div>
         <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 mb-1">More</h1>
-        <p className="text-gray-600">Manage data, rewards, and account</p>
+        <p className="text-gray-600">Manage data and account</p>
       </div>
 
       <div className="grid gap-4 lg:gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
@@ -59,19 +59,7 @@ export default function ManagementPage() {
         </Card>
       </div>
 
-      {/* Rewards and Sign out - visible on all, extra emphasis on mobile (More tab) */}
-      <div className="border-t border-slate-200 pt-6 space-y-3">
-        <Link href="/dashboard/rewards" className="block">
-          <Card className="hover:shadow-md transition-shadow border-l-4 border-l-amber-500">
-            <CardHeader className="p-4 lg:p-6">
-              <CardTitle className="flex items-center text-lg">
-                <Gift className="w-5 h-5 mr-2 text-amber-600" />
-                Rewards
-              </CardTitle>
-              <CardDescription>Distributor points and rewards</CardDescription>
-            </CardHeader>
-          </Card>
-        </Link>
+      <div className="border-t border-slate-200 pt-6">
         <div className="lg:hidden">
           <ManagementSignOut />
         </div>
