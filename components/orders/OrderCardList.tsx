@@ -148,14 +148,25 @@ export function OrderCardList({ data, isLoading = false }: OrderCardListProps) {
                       {(lines ?? []).map((item, i) => (
                         <li
                           key={`${item.name}-${i}`}
-                          className="flex items-start gap-2 text-sm"
+                          className="flex flex-col gap-1 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-2"
                         >
                           <span className="min-w-0 flex-1 leading-snug text-slate-800">
                             {item.name}
                           </span>
-                          <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-slate-700">
-                            ×{item.quantity}
-                          </span>
+                          <div className="flex shrink-0 flex-wrap gap-1.5">
+                            <span
+                              title="Ordered quantity"
+                              className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold tabular-nums text-blue-800 ring-1 ring-blue-100"
+                            >
+                              O-{item.ordered}
+                            </span>
+                            <span
+                              title="Remaining quantity"
+                              className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold tabular-nums text-amber-900 ring-1 ring-amber-100"
+                            >
+                              R-{item.remaining}
+                            </span>
+                          </div>
                         </li>
                       ))}
                     </ul>

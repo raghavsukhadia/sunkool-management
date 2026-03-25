@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/sheet"
 import { OrderCardList } from "@/components/orders/OrderCardList"
 import { OrderItemsDropdown } from "@/components/orders/OrderItemsDropdown"
+import { CustomerFilterDropdown } from "@/components/orders/CustomerFilterDropdown"
 import type { OrderLineItemSummary } from "@/app/actions/orders"
 
 interface Order {
@@ -77,6 +78,18 @@ export default function OrdersPage() {
   const [completedOnly, setCompletedOnly] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [filterSheetOpen, setFilterSheetOpen] = useState(false)
+  const [customerFilter, setCustomerFilter] = useState<"all" | string>("all")
+
+  const uniqueCustomers = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const o of orders) {
+      const c = o.customers
+      if (c?.id && c.name) map.set(c.id, c.name)
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+  }, [orders])
 
   useEffect(() => {
     const status = searchParams.get("status")
@@ -196,6 +209,11 @@ export default function OrdersPage() {
     // Payment status filter
     if (paymentFilter !== "all") {
       filtered = filtered.filter(order => order.payment_status === paymentFilter)
+    }
+
+    // Customer filter
+    if (customerFilter !== "all") {
+      filtered = filtered.filter((order) => order.customers?.id === customerFilter)
     }
 
     // Completed filter: default "All Orders" excludes completed; clicking "Completed" shows only completed
@@ -333,7 +351,7 @@ export default function OrdersPage() {
               <SheetHeader>
                 <SheetTitle>Filter & sort</SheetTitle>
                 <SheetDescription className="sr-only">
-                  Filter and sort orders by status, payment, and date.
+                  Filter and sort orders by customer, status, payment, and date.
                 </SheetDescription>
               </SheetHeader>
               <div className="mt-6 space-y-5 pb-8">
@@ -376,6 +394,17 @@ export default function OrdersPage() {
                     <option value="Delivered Unpaid">Delivered Unpaid</option>
                     <option value="Refunded">Refunded</option>
                   </select>
+                </div>
+                <div>
+                  <Label className="text-sm font-semibold text-gray-700">Customer</Label>
+                  <div className="mt-1.5">
+                    <CustomerFilterDropdown
+                      customers={uniqueCustomers}
+                      value={customerFilter}
+                      onChange={setCustomerFilter}
+                      className="min-h-11 h-11"
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -488,7 +517,7 @@ export default function OrdersPage() {
           </div>
           {showSearchPanel && (
             <div className="pt-5 border-t border-gray-200 space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <Label className="text-sm font-semibold mb-3 block text-gray-700">Order Status</Label>
                   <select
@@ -521,6 +550,15 @@ export default function OrdersPage() {
                     <option value="Delivered Unpaid">Delivered Unpaid</option>
                     <option value="Refunded">Refunded</option>
                   </select>
+                </div>
+                <div>
+                  <Label className="text-sm font-semibold mb-3 block text-gray-700">Customer</Label>
+                  <CustomerFilterDropdown
+                    customers={uniqueCustomers}
+                    value={customerFilter}
+                    onChange={setCustomerFilter}
+                    className="h-10"
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-4 pt-3">

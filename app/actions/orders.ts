@@ -152,8 +152,12 @@ export async function getCustomersForOrder() {
   return { success: true, data, error: null }
 }
 
-/** One line on the orders list (name + quantity). */
-export type OrderLineItemSummary = { name: string; quantity: number }
+/** One line on the orders list: display name, ordered qty, remaining (ordered − net dispatched). */
+export type OrderLineItemSummary = {
+  name: string
+  ordered: number
+  remaining: number
+}
 
 type InvItemForLineName = { item_name: string; parent_item_id: string | null }
 
@@ -191,6 +195,15 @@ function lineItemDisplayName(
   return name
 }
 
+function orderedRemainingForLine(
+  orderItemId: string,
+  orderedQty: number,
+  netDispatchedByOrderItemId: Record<string, number>
+): { ordered: number; remaining: number } {
+  const net = netDispatchedByOrderItemId[orderItemId] ?? 0
+  return { ordered: orderedQty, remaining: Math.max(0, orderedQty - net) }
+}
+
 /**
  * Resolves display names for order_items rows (inventory + optional products fallback).
  * Returns line items grouped by order_id, ordered by created_at within each order.
@@ -198,12 +211,14 @@ function lineItemDisplayName(
 async function buildLineItemsByOrderId(
   supabase: Awaited<ReturnType<typeof createClient>>,
   orderItems: Array<{
+    id: string
     order_id: string
     quantity: number
     inventory_item_id?: string | null
     product_id?: string | null
     created_at?: string | null
-  }>
+  }>,
+  netDispatchedByOrderItemId: Record<string, number>
 ): Promise<Record<string, OrderLineItemSummary[]>> {
   if (!orderItems.length) return {}
 
@@ -227,9 +242,15 @@ async function buildLineItemsByOrderId(
       if (!byOrderEmpty[oi.order_id]) byOrderEmpty[oi.order_id] = []
       const i = idxEmpty[oi.order_id] ?? 0
       idxEmpty[oi.order_id] = i + 1
+      const { ordered, remaining } = orderedRemainingForLine(
+        oi.id,
+        oi.quantity,
+        netDispatchedByOrderItemId
+      )
       byOrderEmpty[oi.order_id].push({
         name: `Item ${i + 1}`,
-        quantity: oi.quantity,
+        ordered,
+        remaining,
       })
     }
     return byOrderEmpty
@@ -268,7 +289,12 @@ async function buildLineItemsByOrderId(
     const idx = indexByOrder[oi.order_id] ?? 0
     indexByOrder[oi.order_id] = idx + 1
     const name = lineItemDisplayName(oi, invMap, productNameById, idx)
-    byOrder[oi.order_id].push({ name, quantity: oi.quantity })
+    const { ordered, remaining } = orderedRemainingForLine(
+      oi.id,
+      oi.quantity,
+      netDispatchedByOrderItemId
+    )
+    byOrder[oi.order_id].push({ name, ordered, remaining })
   }
 
   return byOrder
@@ -310,10 +336,28 @@ export async function getAllOrders() {
 
     const { data: orderItems } = await supabase
       .from("order_items")
-      .select("order_id, quantity, inventory_item_id, product_id, created_at")
+      .select("id, order_id, quantity, inventory_item_id, product_id, created_at")
       .in("order_id", orderIds)
 
-    const lineItemsByOrder = await buildLineItemsByOrderId(supabase, orderItems || [])
+    const orderItemIds = (orderItems || []).map((oi) => oi.id)
+    const netDispatchedByOrderItemId: Record<string, number> = {}
+    if (orderItemIds.length > 0) {
+      const { data: dispatchRows } = await supabase
+        .from("dispatch_items")
+        .select("order_item_id, quantity")
+        .in("order_item_id", orderItemIds)
+      for (const row of dispatchRows || []) {
+        const oid = row.order_item_id as string
+        netDispatchedByOrderItemId[oid] =
+          (netDispatchedByOrderItemId[oid] || 0) + Number(row.quantity || 0)
+      }
+    }
+
+    const lineItemsByOrder = await buildLineItemsByOrderId(
+      supabase,
+      orderItems || [],
+      netDispatchedByOrderItemId
+    )
 
     const itemCounts: Record<string, number> = {}
     orderItems?.forEach((item) => {
