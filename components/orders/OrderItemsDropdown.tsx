@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { ChevronDown, Package } from "lucide-react"
 import {
   DropdownMenu,
@@ -8,24 +9,32 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import type { OrderLineItemSummary } from "@/app/actions/orders"
+import { getOrderLineItemsForDropdown } from "@/app/actions/orders"
 
 interface OrderItemsDropdownProps {
-  lineItems: OrderLineItemSummary[]
+  orderId: string
   count: number
   className?: string
 }
 
 export function OrderItemsDropdown({
-  lineItems,
+  orderId,
   count,
   className,
 }: OrderItemsDropdownProps) {
+  const [items, setItems] = useState<OrderLineItemSummary[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [resolvedCount, setResolvedCount] = useState<number | null>(null)
+
+  const effectiveCount = resolvedCount ?? count
+
   const label =
-    count === 0
+    effectiveCount === 0
       ? "No items"
-      : count === 1
+      : effectiveCount === 1
         ? "1 item"
-        : `${count} items`
+        : `${effectiveCount} items`
 
   return (
     <div
@@ -33,7 +42,31 @@ export function OrderItemsDropdown({
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <DropdownMenu>
+      <DropdownMenu
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen)
+
+          if (!nextOpen) return
+          if (items !== null || loading) return
+          if (!orderId) return
+
+          void (async () => {
+            setLoading(true)
+            try {
+              const res = await getOrderLineItemsForDropdown(orderId)
+              setItems(res.items || [])
+              setResolvedCount((res.items || []).length)
+            } catch (err) {
+              console.error("Failed to load order line items:", err)
+              setItems([])
+              setResolvedCount(0)
+            } finally {
+              setLoading(false)
+            }
+          })()
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <button
             type="button"
@@ -60,17 +93,19 @@ export function OrderItemsDropdown({
               Order items
             </p>
             <p className="text-sm font-medium text-slate-900 mt-0.5">
-              {count === 0 ? "Nothing added yet" : `${count} line${count === 1 ? "" : "s"}`}
+              {effectiveCount === 0
+                ? "Nothing added yet"
+                : `${effectiveCount} line${effectiveCount === 1 ? "" : "s"}`}
             </p>
           </div>
           <div className="max-h-[min(18rem,50vh)] overflow-y-auto overscroll-contain p-2">
-            {lineItems.length === 0 ? (
-              <p className="px-2 py-6 text-center text-sm text-slate-500">
-                No items on this order.
-              </p>
-            ) : (
+            {loading ? (
+              <div className="px-2 py-6 text-center text-sm text-slate-500">
+                Loading items…
+              </div>
+            ) : items && items.length > 0 ? (
               <ul className="space-y-1">
-                {lineItems.map((item, i) => (
+                {items.map((item, i) => (
                   <li
                     key={`${item.name}-${i}`}
                     className="flex flex-col gap-1.5 rounded-md px-2 py-2 text-sm hover:bg-slate-50 sm:flex-row sm:items-start sm:gap-2"
@@ -95,6 +130,10 @@ export function OrderItemsDropdown({
                   </li>
                 ))}
               </ul>
+            ) : (
+              <p className="px-2 py-6 text-center text-sm text-slate-500">
+                No items on this order.
+              </p>
             )}
           </div>
         </DropdownMenuContent>

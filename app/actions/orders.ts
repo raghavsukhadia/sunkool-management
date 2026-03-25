@@ -300,6 +300,51 @@ async function buildLineItemsByOrderId(
   return byOrder
 }
 
+/**
+ * Fetch line-items for the Orders list dropdown.
+ * Computes remaining as: ordered - net dispatched (signed by returns).
+ */
+export async function getOrderLineItemsForDropdown(orderId: string): Promise<{
+  items: OrderLineItemSummary[]
+}> {
+  const supabase = await createClient()
+
+  const { data: orderItems, error } = await supabase
+    .from("order_items")
+    .select("id, order_id, quantity, inventory_item_id, product_id, created_at")
+    .eq("order_id", orderId)
+    .order("created_at", { ascending: true })
+
+  if (error || !orderItems || orderItems.length === 0) {
+    return { items: [] }
+  }
+
+  const orderItemIds = orderItems.map((oi) => oi.id)
+  const netDispatchedByOrderItemId: Record<string, number> = {}
+
+  const { data: dispatchRows } =
+    orderItemIds.length > 0
+      ? await supabase
+          .from("dispatch_items")
+          .select("order_item_id, quantity")
+          .in("order_item_id", orderItemIds)
+      : { data: [] as { order_item_id: string; quantity: number | null }[] }
+
+  for (const row of dispatchRows || []) {
+    const oid = row.order_item_id as string
+    netDispatchedByOrderItemId[oid] =
+      (netDispatchedByOrderItemId[oid] || 0) + Number(row.quantity || 0)
+  }
+
+  const lineItemsByOrder = await buildLineItemsByOrderId(
+    supabase,
+    orderItems,
+    netDispatchedByOrderItemId
+  )
+
+  return { items: lineItemsByOrder[orderId] || [] }
+}
+
 // Get all orders for the orders list page
 export async function getAllOrders() {
   const supabase = await createClient()
@@ -336,28 +381,8 @@ export async function getAllOrders() {
 
     const { data: orderItems } = await supabase
       .from("order_items")
-      .select("id, order_id, quantity, inventory_item_id, product_id, created_at")
+      .select("order_id")
       .in("order_id", orderIds)
-
-    const orderItemIds = (orderItems || []).map((oi) => oi.id)
-    const netDispatchedByOrderItemId: Record<string, number> = {}
-    if (orderItemIds.length > 0) {
-      const { data: dispatchRows } = await supabase
-        .from("dispatch_items")
-        .select("order_item_id, quantity")
-        .in("order_item_id", orderItemIds)
-      for (const row of dispatchRows || []) {
-        const oid = row.order_item_id as string
-        netDispatchedByOrderItemId[oid] =
-          (netDispatchedByOrderItemId[oid] || 0) + Number(row.quantity || 0)
-      }
-    }
-
-    const lineItemsByOrder = await buildLineItemsByOrderId(
-      supabase,
-      orderItems || [],
-      netDispatchedByOrderItemId
-    )
 
     const itemCounts: Record<string, number> = {}
     orderItems?.forEach((item) => {
@@ -392,7 +417,6 @@ export async function getAllOrders() {
       return {
         ...order,
         item_count: itemCounts[order.id] || 0,
-        line_items: lineItemsByOrder[order.id] || [],
         payment_status: derivedPaymentStatus
       }
     })

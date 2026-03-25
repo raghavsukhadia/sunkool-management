@@ -1,9 +1,11 @@
 "use client"
 
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { OrderLineItemSummary } from "@/app/actions/orders"
+import { getOrderLineItemsForDropdown } from "@/app/actions/orders"
 
 export interface OrderCardItem {
   id: string
@@ -58,6 +60,134 @@ function OrderCardSkeleton() {
   )
 }
 
+function OrderCard({ order }: { order: OrderCardItem }) {
+  const customerName =
+    order.customer?.name ?? order.customers?.name ?? "—"
+  const statusColor =
+    statusColorMap[order.order_status] ?? "bg-slate-100 text-slate-700"
+  const paymentColor =
+    paymentColorMap[order.payment_status] ?? "bg-slate-100 text-slate-700"
+
+  const initialItems = order.line_items ?? null
+  const [items, setItems] = useState<OrderLineItemSummary[] | null>(
+    initialItems
+  )
+  const [loading, setLoading] = useState(false)
+  const [loadedOnce, setLoadedOnce] = useState(initialItems !== null)
+
+  const nItems = useMemo(() => {
+    if (items) return items.length
+    return order.item_count ?? 0
+  }, [order.item_count, items])
+
+  const loadItems = async () => {
+    if (loading || loadedOnce) return
+    setLoading(true)
+    try {
+      const res = await getOrderLineItemsForDropdown(order.id)
+      setItems(res.items || [])
+    } finally {
+      setLoading(false)
+      setLoadedOnce(true)
+    }
+  }
+
+  const showItems = typeof order.item_count === "number"
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md overflow-hidden">
+      <Link
+        href={`/dashboard/orders/${order.id}`}
+        className="block p-4 active:bg-slate-50 min-h-[44px]"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-slate-900 truncate">
+              {order.internal_order_number ?? order.id.slice(0, 8)}
+            </p>
+            <p className="text-sm text-slate-600 truncate mt-0.5">
+              {customerName}
+            </p>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <span
+                className={cn(
+                  "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium",
+                  statusColor
+                )}
+              >
+                {order.order_status}
+              </span>
+              <span
+                className={cn(
+                  "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium",
+                  paymentColor
+                )}
+              >
+                {order.payment_status}
+              </span>
+            </div>
+            <p className="text-sm font-medium text-slate-900 mt-2">
+              ₹{(order.total_price ?? 0).toLocaleString("en-IN")}
+            </p>
+          </div>
+          <ChevronRight className="h-5 w-5 text-slate-400 shrink-0 mt-1" />
+        </div>
+      </Link>
+
+      {showItems && (
+        <details
+          className="group border-t border-slate-100 bg-slate-50/60"
+          onToggle={(e) => {
+            const el = e.currentTarget as HTMLDetailsElement
+            if (el.open) void loadItems()
+          }}
+        >
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100/80 [&::-webkit-details-marker]:hidden">
+            <span>Items ({nItems})</span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200 group-open:rotate-180" />
+          </summary>
+          <div className="border-t border-slate-100 bg-white px-4 pb-3 pt-1">
+            {loading ? (
+              <p className="py-2 text-sm text-slate-500">Loading items…</p>
+            ) : items && items.length > 0 ? (
+              <ul className="space-y-2 pt-1">
+                {items.map((item, i) => (
+                  <li
+                    key={`${item.name}-${i}`}
+                    className="flex flex-col gap-1 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-2"
+                  >
+                    <span className="min-w-0 flex-1 leading-snug text-slate-800">
+                      {item.name}
+                    </span>
+                    <div className="flex shrink-0 flex-wrap gap-1.5">
+                      <span
+                        title="Ordered quantity"
+                        className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold tabular-nums text-blue-800 ring-1 ring-blue-100"
+                      >
+                        O-{item.ordered}
+                      </span>
+                      <span
+                        title="Remaining quantity"
+                        className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold tabular-nums text-amber-900 ring-1 ring-amber-100"
+                      >
+                        R-{item.remaining}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="py-2 text-sm text-slate-500">
+                No items on this order.
+              </p>
+            )}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
 export function OrderCardList({ data, isLoading = false }: OrderCardListProps) {
   if (isLoading) {
     return (
@@ -80,102 +210,7 @@ export function OrderCardList({ data, isLoading = false }: OrderCardListProps) {
   return (
     <div className="space-y-3">
       {data.map((order) => {
-        const customerName =
-          order.customer?.name ?? order.customers?.name ?? "—"
-        const statusColor =
-          statusColorMap[order.order_status] ?? "bg-slate-100 text-slate-700"
-        const paymentColor =
-          paymentColorMap[order.payment_status] ?? "bg-slate-100 text-slate-700"
-
-        const lines = order.line_items
-        const showItems = lines !== undefined
-        const nItems =
-          order.item_count ?? lines?.length ?? 0
-
-        return (
-          <div
-            key={order.id}
-            className="rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md overflow-hidden"
-          >
-            <Link
-              href={`/dashboard/orders/${order.id}`}
-              className="block p-4 active:bg-slate-50 min-h-[44px]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-slate-900 truncate">
-                    {order.internal_order_number ?? order.id.slice(0, 8)}
-                  </p>
-                  <p className="text-sm text-slate-600 truncate mt-0.5">
-                    {customerName}
-                  </p>
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    <span
-                      className={cn(
-                        "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium",
-                        statusColor
-                      )}
-                    >
-                      {order.order_status}
-                    </span>
-                    <span
-                      className={cn(
-                        "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium",
-                        paymentColor
-                      )}
-                    >
-                      {order.payment_status}
-                    </span>
-                  </div>
-                  <p className="text-sm font-medium text-slate-900 mt-2">
-                    ₹{(order.total_price ?? 0).toLocaleString("en-IN")}
-                  </p>
-                </div>
-                <ChevronRight className="h-5 w-5 text-slate-400 shrink-0 mt-1" />
-              </div>
-            </Link>
-            {showItems && (
-              <details className="group border-t border-slate-100 bg-slate-50/60">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100/80 [&::-webkit-details-marker]:hidden">
-                  <span>Items ({nItems})</span>
-                  <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200 group-open:rotate-180" />
-                </summary>
-                <div className="border-t border-slate-100 bg-white px-4 pb-3 pt-1">
-                  {(lines ?? []).length === 0 ? (
-                    <p className="py-2 text-sm text-slate-500">No items on this order.</p>
-                  ) : (
-                    <ul className="space-y-2 pt-1">
-                      {(lines ?? []).map((item, i) => (
-                        <li
-                          key={`${item.name}-${i}`}
-                          className="flex flex-col gap-1 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-2"
-                        >
-                          <span className="min-w-0 flex-1 leading-snug text-slate-800">
-                            {item.name}
-                          </span>
-                          <div className="flex shrink-0 flex-wrap gap-1.5">
-                            <span
-                              title="Ordered quantity"
-                              className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold tabular-nums text-blue-800 ring-1 ring-blue-100"
-                            >
-                              O-{item.ordered}
-                            </span>
-                            <span
-                              title="Remaining quantity"
-                              className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold tabular-nums text-amber-900 ring-1 ring-amber-100"
-                            >
-                              R-{item.remaining}
-                            </span>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </details>
-            )}
-          </div>
-        )
+        return <OrderCard key={order.id} order={order} />
       })}
     </div>
   )

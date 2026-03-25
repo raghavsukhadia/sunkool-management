@@ -778,7 +778,7 @@ export default function OrdersPage() {
                       </td>
                       <td className="p-4" onClick={(e) => e.stopPropagation()}>
                         <OrderItemsDropdown
-                          lineItems={order.line_items ?? []}
+                          orderId={order.id}
                           count={order.item_count || 0}
                         />
                       </td>
