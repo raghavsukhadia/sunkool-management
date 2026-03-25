@@ -152,6 +152,128 @@ export async function getCustomersForOrder() {
   return { success: true, data, error: null }
 }
 
+/** One line on the orders list (name + quantity). */
+export type OrderLineItemSummary = { name: string; quantity: number }
+
+type InvItemForLineName = { item_name: string; parent_item_id: string | null }
+
+function lineItemDisplayName(
+  oi: {
+    inventory_item_id?: string | null
+    product_id?: string | null
+    quantity: number
+  },
+  invMap: Map<string, InvItemForLineName>,
+  productNameById: Record<string, string>,
+  index: number
+): string {
+  const invId = oi.inventory_item_id ?? undefined
+  const prodId = oi.product_id ?? undefined
+  const inv = invId ? invMap.get(invId) : undefined
+  const prod = prodId ? invMap.get(prodId) : undefined
+
+  let name: string
+  if (inv?.parent_item_id) {
+    const parent = invMap.get(inv.parent_item_id)
+    name = parent ? `${parent.item_name} → ${inv.item_name}` : inv.item_name
+  } else if (prod && prod.parent_item_id === invId && inv) {
+    name = `${inv.item_name} → ${prod.item_name}`
+  } else if (prod && prod.parent_item_id) {
+    const parent = invMap.get(prod.parent_item_id)
+    name = parent ? `${parent.item_name} → ${prod.item_name}` : prod.item_name
+  } else {
+    name =
+      (inv?.item_name || prod?.item_name) ||
+      (prodId ? productNameById[prodId] : "") ||
+      (invId ? productNameById[invId] : "") ||
+      `Item ${index + 1}`
+  }
+  return name
+}
+
+/**
+ * Resolves display names for order_items rows (inventory + optional products fallback).
+ * Returns line items grouped by order_id, ordered by created_at within each order.
+ */
+async function buildLineItemsByOrderId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orderItems: Array<{
+    order_id: string
+    quantity: number
+    inventory_item_id?: string | null
+    product_id?: string | null
+    created_at?: string | null
+  }>
+): Promise<Record<string, OrderLineItemSummary[]>> {
+  if (!orderItems.length) return {}
+
+  const sorted = [...orderItems].sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0
+    return ta - tb
+  })
+
+  const allIds = new Set<string>()
+  for (const oi of sorted) {
+    if (oi.inventory_item_id) allIds.add(oi.inventory_item_id)
+    if (oi.product_id) allIds.add(oi.product_id)
+  }
+
+  const idList = [...allIds]
+  if (idList.length === 0) {
+    const byOrderEmpty: Record<string, OrderLineItemSummary[]> = {}
+    const idxEmpty: Record<string, number> = {}
+    for (const oi of sorted) {
+      if (!byOrderEmpty[oi.order_id]) byOrderEmpty[oi.order_id] = []
+      const i = idxEmpty[oi.order_id] ?? 0
+      idxEmpty[oi.order_id] = i + 1
+      byOrderEmpty[oi.order_id].push({
+        name: `Item ${i + 1}`,
+        quantity: oi.quantity,
+      })
+    }
+    return byOrderEmpty
+  }
+
+  const { data: invRows } = await supabase
+    .from("inventory_items")
+    .select("id, item_name, parent_item_id")
+    .in("id", idList)
+
+  const invMap = new Map<string, InvItemForLineName>()
+  for (const row of invRows || []) {
+    invMap.set(row.id, {
+      item_name: row.item_name ?? "",
+      parent_item_id: row.parent_item_id ?? null,
+    })
+  }
+
+  const missingForProducts = idList.filter((id) => !invMap.has(id))
+  const productNameById: Record<string, string> = {}
+  if (missingForProducts.length > 0) {
+    const { data: prodRows } = await supabase
+      .from("products")
+      .select("id, name")
+      .in("id", missingForProducts)
+    for (const p of prodRows || []) {
+      productNameById[p.id] = p.name ?? ""
+    }
+  }
+
+  const byOrder: Record<string, OrderLineItemSummary[]> = {}
+  const indexByOrder: Record<string, number> = {}
+
+  for (const oi of sorted) {
+    if (!byOrder[oi.order_id]) byOrder[oi.order_id] = []
+    const idx = indexByOrder[oi.order_id] ?? 0
+    indexByOrder[oi.order_id] = idx + 1
+    const name = lineItemDisplayName(oi, invMap, productNameById, idx)
+    byOrder[oi.order_id].push({ name, quantity: oi.quantity })
+  }
+
+  return byOrder
+}
+
 // Get all orders for the orders list page
 export async function getAllOrders() {
   const supabase = await createClient()
@@ -188,11 +310,13 @@ export async function getAllOrders() {
 
     const { data: orderItems } = await supabase
       .from("order_items")
-      .select("order_id")
+      .select("order_id, quantity, inventory_item_id, product_id, created_at")
       .in("order_id", orderIds)
 
+    const lineItemsByOrder = await buildLineItemsByOrderId(supabase, orderItems || [])
+
     const itemCounts: Record<string, number> = {}
-    orderItems?.forEach(item => {
+    orderItems?.forEach((item) => {
       itemCounts[item.order_id] = (itemCounts[item.order_id] || 0) + 1
     })
 
@@ -224,6 +348,7 @@ export async function getAllOrders() {
       return {
         ...order,
         item_count: itemCounts[order.id] || 0,
+        line_items: lineItemsByOrder[order.id] || [],
         payment_status: derivedPaymentStatus
       }
     })

@@ -31,6 +31,8 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { OrderCardList } from "@/components/orders/OrderCardList"
+import { OrderItemsDropdown } from "@/components/orders/OrderItemsDropdown"
+import type { OrderLineItemSummary } from "@/app/actions/orders"
 
 interface Order {
   id: string
@@ -44,6 +46,7 @@ interface Order {
   created_at: string
   updated_at: string
   item_count: number
+  line_items?: OrderLineItemSummary[]
   customers: {
     id: string
     name: string
@@ -154,7 +157,7 @@ export default function OrdersPage() {
         getCompletedOrderIds(),
       ])
       if (ordersResult.success && ordersResult.data) {
-        setOrders(ordersResult.data as any as Order[])
+        setOrders(ordersResult.data as unknown as Order[])
       } else {
         setError(ordersResult.error || "Failed to load orders")
       }
@@ -735,8 +738,11 @@ export default function OrdersPage() {
                           )}
                         </div>
                       </td>
-                      <td className="p-4">
-                        <span className="text-sm text-gray-700">{order.item_count || 0}</span>
+                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                        <OrderItemsDropdown
+                          lineItems={order.line_items ?? []}
+                          count={order.item_count || 0}
+                        />
                       </td>
                       <td className="p-4">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(order.order_status)}`}>
