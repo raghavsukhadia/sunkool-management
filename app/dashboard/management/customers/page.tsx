@@ -252,7 +252,7 @@ export default function CustomersPage() {
               form.reset()
               setError(null)
             }}
-            className="hidden lg:inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+            className="hidden lg:inline-flex items-center gap-2 shadow-sm"
           >
             <Plus className="w-4 h-4" />
             Add Customer
@@ -267,7 +267,7 @@ export default function CustomersPage() {
                   setError(null)
                   setAddFormSheetOpen(true)
                 }}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm min-h-[44px]"
+                className="flex items-center gap-2 shadow-sm min-h-[44px]"
               >
                 <Plus className="w-4 h-4" />
                 Add Customer
@@ -360,7 +360,7 @@ export default function CustomersPage() {
                       )}
                     />
                     <div className="flex gap-2 pt-2">
-                      <Button type="submit" disabled={isSubmitting} className="flex-1 min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white">
+                      <Button type="submit" disabled={isSubmitting} className="flex-1 min-h-[44px]">
                         {isSubmitting ? (editingCustomer ? "Updating..." : "Creating...") : (editingCustomer ? "Update" : "Create")}
                       </Button>
                       <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => { setAddFormSheetOpen(false); setEditingCustomer(null); form.reset() }}>
@@ -530,7 +530,7 @@ export default function CustomersPage() {
               />
 
                 <div className="flex gap-3 pt-2 border-t">
-                  <Button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white px-6">
+                  <Button type="submit" disabled={isSubmitting} className="px-6">
                     {isSubmitting 
                       ? (editingCustomer ? "Updating..." : "Creating...") 
                       : (editingCustomer ? "Update Customer" : "Create Customer")
@@ -663,7 +663,7 @@ export default function CustomersPage() {
               placeholder="Search customers by name, email, phone, contact person, or address..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-10 h-11 text-sm border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+              className="pl-10 pr-10 h-11 text-sm border-gray-300 focus:border-sk-primary focus:ring-sk-primary"
             />
             {searchTerm && (
               <button

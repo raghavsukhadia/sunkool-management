@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -34,11 +34,7 @@ export function ProductPicker({ selectedProducts, onProductsChange, onClose }: P
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    loadProducts()
-  }, [])
-
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     setLoading(true)
     try {
       const result = await getProducts()
@@ -56,7 +52,11 @@ export function ProductPicker({ selectedProducts, onProductsChange, onClose }: P
     } finally {
       setLoading(false)
     }
-  }
+  }, [selectedProducts])
+
+  useEffect(() => {
+    loadProducts()
+  }, [loadProducts])
 
   // Get unique categories
   const categories = useMemo(() => {

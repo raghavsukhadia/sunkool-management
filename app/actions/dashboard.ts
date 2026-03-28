@@ -32,6 +32,8 @@ export interface RecentActivityRow {
   order_number: string
   action: "created" | "updated" | "deleted" | "shipped" | "paid"
   description: string
+  customer_name: string
+  status_label: "In Progress" | "In Transit" | "Delivered" | "Payment due" | "New Order"
   user_name: string
   created_at: string
 }
@@ -139,6 +141,23 @@ function statusToAction(
   return "updated"
 }
 
+function toStatusLabel(
+  newStatus: string | null,
+  newPayment: string | null
+): RecentActivityRow["status_label"] {
+  if (
+    newPayment === "Pending" &&
+    (newStatus === "Delivered" || newStatus === "Partial Delivered")
+  ) {
+    return "Payment due"
+  }
+
+  if (newStatus === "In Progress") return "In Progress"
+  if (newStatus === "In Transit") return "In Transit"
+  if (newStatus === "Delivered" || newStatus === "Partial Delivered") return "Delivered"
+  return "New Order"
+}
+
 export async function getRecentActivity(limit: number): Promise<
   { success: true; data: RecentActivityRow[] } | { success: false; error: string }
 > {
@@ -154,7 +173,7 @@ export async function getRecentActivity(limit: number): Promise<
         new_payment_status,
         old_payment_status,
         created_at,
-        orders!inner ( internal_order_number ),
+        orders!inner ( internal_order_number, customers:customer_id ( name ) ),
         changed_by_user_id ( full_name )
       `
       )
@@ -170,7 +189,16 @@ export async function getRecentActivity(limit: number): Promise<
       new_payment_status: string | null
       old_payment_status: string | null
       created_at: string
-      orders: { internal_order_number: string | null } | { internal_order_number: string | null }[] | null
+      orders:
+        | {
+            internal_order_number: string | null
+            customers: { name: string | null } | { name: string | null }[] | null
+          }
+        | {
+            internal_order_number: string | null
+            customers: { name: string | null } | { name: string | null }[] | null
+          }[]
+        | null
       profiles?: { full_name: string | null } | null
       changed_by_user_id?: { full_name: string | null } | { full_name: string | null }[] | null
     }
@@ -178,12 +206,15 @@ export async function getRecentActivity(limit: number): Promise<
 
     const out: RecentActivityRow[] = list.map((row) => {
       const ordersObj = Array.isArray(row.orders) ? row.orders[0] : row.orders
+      const customerRaw = ordersObj?.customers
+      const customerObj = Array.isArray(customerRaw) ? customerRaw[0] : customerRaw
       const orderNumber = ordersObj?.internal_order_number ?? row.order_id.slice(0, 8)
       const action = statusToAction(
         row.new_status,
         row.new_payment_status,
         row.old_payment_status
       )
+      const statusLabel = toStatusLabel(row.new_status, row.new_payment_status)
       const description =
         action === "paid"
           ? `Order ${orderNumber} payment → Paid`
@@ -196,6 +227,8 @@ export async function getRecentActivity(limit: number): Promise<
         order_number: orderNumber,
         action,
         description,
+        customer_name: customerObj?.name ?? "Unknown customer",
+        status_label: statusLabel,
         user_name: profile?.full_name ?? "System",
         created_at: row.created_at,
       }

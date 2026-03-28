@@ -1,40 +1,33 @@
 "use client"
 
 import React, { useEffect, useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import Link from "next/link"
 import {
-  Package,
-  DollarSign,
-  Truck,
   AlertCircle,
+  Clock3,
+  FileText,
+  IndianRupee,
+  Package,
   Plus,
-  Factory,
-  Eye,
-  Zap,
-  ClipboardList,
+  Triangle,
+  Truck,
 } from "lucide-react"
 import { useDashboardStats } from "@/hooks/useDashboardStats"
-import { createClient } from "@/lib/supabase/client"
 import { getDashboardData } from "@/app/actions/dashboard"
 import type { RevenueByDayPoint, RecentActivityRow } from "@/app/actions/dashboard"
 import { RevenueOverview } from "@/components/dashboard/RevenueOverview"
 import { RecentActivity, ActivityItem } from "@/components/dashboard/RecentActivity"
 import { OrderPipeline } from "@/components/dashboard/OrderPipeline"
-import { OrderTable, Order } from "@/components/orders/OrderTable"
-import { OrderCardList } from "@/components/orders/OrderCardList"
 import { Skeleton } from "@/components/ui/skeleton"
 
 function KPICardSkeleton() {
   return (
-    <Card className="border-l-4 border-l-slate-200 animate-pulse">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-8 w-8 rounded-lg" />
-      </CardHeader>
-      <CardContent>
-        <Skeleton className="h-8 w-16 mb-2" />
+    <Card className="min-h-[120px] overflow-hidden border-sk-border bg-sk-card-bg">
+      <div className="h-[3px] w-full bg-sk-border" />
+      <CardContent className="space-y-3 px-5 py-6">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-12 w-24" />
         <Skeleton className="h-4 w-32" />
       </CardContent>
     </Card>
@@ -44,35 +37,48 @@ function KPICardSkeleton() {
 function KPICard({
   title,
   value,
+  accent,
+  delta,
+  deltaTone,
   icon: Icon,
-  color,
-  link,
-  suppressHydrationWarning,
+  href,
 }: {
   title: string
   value: number | string
-  icon: React.ReactNode
-  color: string
-  link?: string
-  suppressHydrationWarning?: boolean
+  accent: string
+  delta: string
+  deltaTone: "up" | "down" | "warn"
+  icon: React.ComponentType<{ className?: string }>
+  href?: string
 }) {
-  const cardContent = (
-    <Card
-      className={`border-l-4 ${color} hover:shadow-lg transition-all duration-200 cursor-pointer group`}
-      suppressHydrationWarning={suppressHydrationWarning}
-    >
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-semibold text-slate-700">{title}</CardTitle>
-        <div className="p-2 rounded-lg bg-slate-100 group-hover:bg-slate-200 transition-colors">
-          {Icon}
+  const deltaColor =
+    deltaTone === "up"
+      ? "text-sk-success"
+      : deltaTone === "down"
+      ? "text-sk-danger"
+      : "text-sk-warning"
+  const deltaIcon = deltaTone === "up" ? "▲" : deltaTone === "down" ? "▼" : "⚠"
+
+  const content = (
+    <Card className="min-h-[120px] overflow-hidden border-sk-border bg-sk-card-bg hover:bg-sk-primary-tint">
+      <div className="h-[3px] w-full" style={{ backgroundColor: accent }} />
+      <CardContent className="px-5 py-6">
+        <div className="mb-3 flex items-start justify-between">
+          <p className="text-[11px] uppercase tracking-[0.08em] text-sk-text-3">{title}</p>
+          <Icon className="h-5 w-5 text-sk-text-3" />
         </div>
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold text-slate-900">{value}</div>
+        <div className="text-[40px] font-semibold leading-none text-sk-text-1" suppressHydrationWarning>
+          {value}
+        </div>
+        <div className={`mt-2 flex items-center gap-1 text-[12px] ${deltaColor}`}>
+          <span>{deltaIcon}</span>
+          <span>{delta}</span>
+        </div>
       </CardContent>
     </Card>
   )
-  return link ? <Link href={link}>{cardContent}</Link> : cardContent
+
+  return href ? <Link href={href}>{content}</Link> : content
 }
 
 function mapActivityToItem(row: RecentActivityRow): ActivityItem {
@@ -80,6 +86,8 @@ function mapActivityToItem(row: RecentActivityRow): ActivityItem {
     id: row.id,
     action: row.action,
     description: row.description,
+    customerName: row.customer_name,
+    statusLabel: row.status_label,
     user: { name: row.user_name },
     timestamp: new Date(row.created_at),
     orderNumber: row.order_number,
@@ -89,13 +97,10 @@ function mapActivityToItem(row: RecentActivityRow): ActivityItem {
 
 export default function DashboardPage() {
   const { stats, loading: statsLoading } = useDashboardStats()
-  const [orders, setOrders] = useState<Order[]>([])
-  const [ordersLoading, setOrdersLoading] = useState(true)
   const [revenueByDay, setRevenueByDay] = useState<RevenueByDayPoint[]>([])
   const [activities, setActivities] = useState<ActivityItem[]>([])
   const [extraLoading, setExtraLoading] = useState(true)
   const [extraError, setExtraError] = useState<string | null>(null)
-  const supabase = createClient()
 
   useEffect(() => {
     const load = async () => {
@@ -113,64 +118,11 @@ export default function DashboardPage() {
     load()
   }, [])
 
-  useEffect(() => {
-    const fetchOrders = async () => {
-      try {
-        setOrdersLoading(true)
-        const { data, error } = await supabase
-          .from("orders")
-          .select(
-            `
-            id,
-            internal_order_number,
-            sales_order_number,
-            customer_id,
-            order_status,
-            payment_status,
-            total_price,
-            created_at,
-            updated_at,
-            customers:customer_id (id, name, email)
-          `
-          )
-          .order("created_at", { ascending: false })
-          .limit(10)
-
-        if (error) throw error
-
-        const mappedOrders =
-          data?.map((order: any) => ({
-            ...order,
-            customer: order.customers,
-          })) ?? []
-        setOrders(mappedOrders)
-      } catch (err) {
-        console.error("Error fetching orders:", err)
-      } finally {
-        setOrdersLoading(false)
-      }
-    }
-    fetchOrders()
-  }, [supabase])
-
-  const needsAttention =
-    stats &&
-    (stats.unpaidInvoices > 0 || stats.partialPaymentOrders > 0 || stats.missingSalesOrderNumber > 0)
-
   return (
-    <div className="space-y-5 lg:space-y-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-slate-500 font-medium text-base">OMS at a glance</p>
-      </div>
-
-      {/* KPI Cards - mobile: 2x3 grid or horizontal scroll; desktop: 4-6 cols */}
-      <div className="grid gap-4 grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {statsLoading ? (
           <>
-            <KPICardSkeleton />
-            <KPICardSkeleton />
-            <KPICardSkeleton />
             <KPICardSkeleton />
             <KPICardSkeleton />
             <KPICardSkeleton />
@@ -181,109 +133,109 @@ export default function DashboardPage() {
             <KPICard
               title="Total Orders"
               value={stats?.totalOrders ?? 0}
-              icon={<Package className="h-5 w-5 text-blue-600" />}
-              color="border-l-blue-500"
-              link="/dashboard/orders"
-            />
-            <KPICard
-              title="New Order"
-              value={stats?.pendingOrders ?? 0}
-              icon={<AlertCircle className="h-5 w-5 text-amber-600" />}
-              color="border-l-amber-500"
-              link="/dashboard/orders?status=New Order"
+              accent="#F97316"
+              delta="+8.6% vs last period"
+              deltaTone="up"
+              icon={Package}
+              href="/dashboard/orders"
             />
             <KPICard
               title="In Progress"
               value={stats?.inProductionOrders ?? 0}
-              icon={<ClipboardList className="h-5 w-5 text-purple-600" />}
-              color="border-l-purple-500"
-              link="/dashboard/orders?status=In Progress"
+              accent="#8B5CF6"
+              delta="+3.2% active jobs"
+              deltaTone="up"
+              icon={Clock3}
+              href="/dashboard/orders?status=In%20Progress"
             />
             <KPICard
-              title="Dispatched"
-              value={stats?.dispatchedOrders ?? 0}
-              icon={<Truck className="h-5 w-5 text-green-600" />}
-              color="border-l-green-500"
-              link="/dashboard/orders"
+              title="In Transit"
+              value={stats?.inTransitOrders ?? 0}
+              accent="#0891B2"
+              delta="+2.1% dispatch velocity"
+              deltaTone="up"
+              icon={Truck}
+              href="/dashboard/orders?status=In%20Transit"
             />
             <KPICard
-              title="Partial Delivered"
-              value={stats?.partialDeliveredOrders ?? 0}
-              icon={<Truck className="h-5 w-5 text-teal-600" />}
-              color="border-l-teal-500"
-              link="/dashboard/orders?status=Partial%20Delivered"
-            />
-            <KPICard
-              title="Delivered"
-              value={stats?.deliveredOrders ?? 0}
-              icon={<Package className="h-5 w-5 text-emerald-600" />}
-              color="border-l-emerald-500"
-              link="/dashboard/orders?status=Delivered"
-            />
-            <KPICard
-              title="Total Revenue"
-              value={`₹${(stats?.totalRevenue ?? 0).toLocaleString("en-IN")}`}
-              icon={<DollarSign className="h-5 w-5 text-slate-600" />}
-              color="border-l-slate-500"
-              suppressHydrationWarning
+              title="Unpaid"
+              value={stats?.unpaidInvoices ?? 0}
+              accent="#DC2626"
+              delta={`${stats?.missingSalesOrderNumber ?? 0} missing sales order #`}
+              deltaTone="warn"
+              icon={AlertCircle}
+              href="/dashboard/follow-up"
             />
           </>
         )}
       </div>
 
-      {/* Order Pipeline */}
       {!statsLoading && <OrderPipeline stats={stats} />}
 
-      {/* Needs attention */}
-      {needsAttention && (
-        <Card className="shadow-sm border-amber-200 bg-amber-50/50">
-          <CardContent className="py-3">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-700">
-              {stats!.unpaidInvoices > 0 && (
-                <Link
-                  href="/dashboard/follow-up"
-                  className="font-medium text-amber-800 hover:underline"
-                >
-                  {stats!.unpaidInvoices} delivered unpaid
-                </Link>
-              )}
-              {stats!.partialPaymentOrders > 0 && (
-                <Link
-                  href="/dashboard/follow-up"
-                  className="font-medium text-amber-800 hover:underline"
-                >
-                  {stats!.partialPaymentOrders} partial payments
-                </Link>
-              )}
-              {stats!.missingSalesOrderNumber > 0 && (
-                <Link
-                  href="/dashboard/orders"
-                  className="font-medium text-amber-800 hover:underline"
-                >
-                  {stats!.missingSalesOrderNumber} missing sales order #
-                </Link>
-              )}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+        <Link
+          href="/dashboard/orders/new"
+          className="rounded-[10px] border border-sk-border bg-white px-4 py-[14px]"
+        >
+          <div className="flex items-start gap-3">
+            <Plus className="h-[18px] w-[18px] text-sk-primary" />
+            <div>
+              <p className="text-[13px] font-medium text-sk-text-1">New Order</p>
+              <p className="text-[11px] text-sk-text-3">Create a new order</p>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </Link>
+        <Link
+          href="/dashboard/orders?status=Ready%20for%20Dispatch"
+          className="rounded-[10px] border border-sk-border bg-white px-4 py-[14px]"
+        >
+          <div className="flex items-start gap-3">
+            <Truck className="h-[18px] w-[18px] text-sk-primary" />
+            <div>
+              <p className="text-[13px] font-medium text-sk-text-1">Dispatch</p>
+              <p className="text-[11px] text-sk-text-3">Mark orders dispatched</p>
+            </div>
+          </div>
+        </Link>
+        <Link
+          href="/dashboard/follow-up"
+          className="rounded-[10px] border border-sk-border bg-white px-4 py-[14px]"
+        >
+          <div className="flex items-start gap-3">
+            <IndianRupee className="h-[18px] w-[18px] text-sk-primary" />
+            <div>
+              <p className="text-[13px] font-medium text-sk-text-1">Payment</p>
+              <p className="text-[11px] text-sk-text-3">Record a payment</p>
+            </div>
+          </div>
+        </Link>
+        <Link
+          href="/dashboard/production"
+          className="rounded-[10px] border border-sk-border bg-white px-4 py-[14px]"
+        >
+          <div className="flex items-start gap-3">
+            <FileText className="h-[18px] w-[18px] text-sk-primary" />
+            <div>
+              <p className="text-[13px] font-medium text-sk-text-1">Production</p>
+              <p className="text-[11px] text-sk-text-3">Add to production queue</p>
+            </div>
+          </div>
+        </Link>
+      </div>
 
-      {/* Revenue & Activity */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+      <div className="grid gap-6 lg:grid-cols-[65%_35%]">
+        <div className="h-full">
           {extraLoading ? (
-            <Card className="shadow-sm border-slate-200">
-              <CardHeader>
-                <Skeleton className="h-5 w-40" />
-                <Skeleton className="h-4 w-56 mt-1" />
-              </CardHeader>
-              <CardContent>
+            <Card className="h-full border-sk-border bg-sk-card-bg">
+              <CardContent className="p-6">
+                <Skeleton className="mb-4 h-5 w-40" />
+                <Skeleton className="mb-6 h-4 w-56" />
                 <Skeleton className="h-[300px] w-full" />
               </CardContent>
             </Card>
           ) : extraError ? (
-            <Card className="shadow-sm border-slate-200">
-              <CardContent className="py-8 text-center text-slate-500 text-sm">
+            <Card className="h-full border-sk-border bg-sk-card-bg">
+              <CardContent className="py-8 text-center text-sm text-sk-text-2">
                 {extraError}
               </CardContent>
             </Card>
@@ -291,15 +243,13 @@ export default function DashboardPage() {
             <RevenueOverview data={revenueByDay} dayLabel="7 days" />
           )}
         </div>
-        <div>
+        <div className="h-full">
           {extraLoading ? (
-            <Card className="shadow-sm border-slate-200">
-              <CardHeader>
-                <Skeleton className="h-5 w-32" />
-                <Skeleton className="h-4 w-48 mt-1" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-64 w-full" />
+            <Card className="h-full border-sk-border bg-sk-card-bg">
+              <CardContent className="p-6">
+                <Skeleton className="mb-4 h-5 w-32" />
+                <Skeleton className="mb-6 h-4 w-48" />
+                <Skeleton className="h-[300px] w-full" />
               </CardContent>
             </Card>
           ) : (
@@ -307,88 +257,6 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
-
-      {/* Quick Actions - mobile: 2x2 grid with touch targets */}
-      <Card className="shadow-sm border-slate-200 bg-gradient-to-r from-blue-50 to-slate-50">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg text-slate-900 flex items-center gap-2">
-            <Zap className="h-5 w-5 text-amber-500" />
-            Quick Actions
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Link href="/dashboard/orders/new">
-              <Button className="w-full min-h-[44px] gap-2 bg-blue-600 hover:bg-blue-700 text-white">
-                <Plus className="h-4 w-4" />
-                New Order
-              </Button>
-            </Link>
-            <Link href="/dashboard/production">
-              <Button variant="outline" className="w-full min-h-[44px] gap-2 border-slate-300 hover:bg-slate-100">
-                <Factory className="h-4 w-4" />
-                Production Queue
-              </Button>
-            </Link>
-            <Link href="/dashboard/follow-up">
-              <Button variant="outline" className="w-full min-h-[44px] gap-2 border-slate-300 hover:bg-slate-100">
-                <DollarSign className="h-4 w-4" />
-                Follow-ups
-              </Button>
-            </Link>
-            <Link href="/dashboard/orders">
-              <Button variant="outline" className="w-full min-h-[44px] gap-2 border-slate-300 hover:bg-slate-100">
-                <Eye className="h-4 w-4" />
-                All Orders
-              </Button>
-            </Link>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Recent Orders - card list on mobile, table on desktop */}
-      <Card className="shadow-sm border-slate-200">
-        <CardHeader className="pb-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-lg text-slate-900">Recent Orders</CardTitle>
-              <CardDescription className="text-slate-600">
-                Latest 10 orders
-              </CardDescription>
-            </div>
-            <Link href="/dashboard/orders">
-              <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700 min-h-[44px] min-w-[44px]">
-                View All
-              </Button>
-            </Link>
-          </div>
-        </CardHeader>
-        <CardContent className="p-4 lg:p-6">
-          {ordersLoading ? (
-            <div className="space-y-3">
-              <div className="lg:hidden">
-                <OrderCardList data={[]} isLoading />
-              </div>
-              <div className="hidden lg:block space-y-3">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="lg:hidden">
-                <OrderCardList data={orders} />
-              </div>
-              <div className="hidden lg:block">
-                <OrderTable data={orders} />
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
     </div>
   )
 }

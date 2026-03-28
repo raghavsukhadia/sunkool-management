@@ -2,7 +2,6 @@
 
 import React from "react"
 import Link from "next/link"
-import { ChevronRight } from "lucide-react"
 import type { DashboardStats } from "@/app/actions/dashboard"
 
 export interface OrderPipelineProps {
@@ -16,47 +15,46 @@ const stages: {
   color: string
   statusParam: string
 }[] = [
-  { key: "pendingOrders", label: "New Order", color: "bg-yellow-100 text-yellow-800 border-yellow-200", statusParam: "New Order" },
-  { key: "inProductionOrders", label: "In Progress", color: "bg-purple-100 text-purple-800 border-purple-200", statusParam: "In Progress" },
-  { key: "readyForDispatchOrders", label: "Ready for Dispatch", color: "bg-orange-100 text-orange-800 border-orange-200", statusParam: "Ready for Dispatch" },
-  { key: "invoicedOrders", label: "Invoiced", color: "bg-blue-100 text-blue-800 border-blue-200", statusParam: "Invoiced" },
-  { key: "inTransitOrders", label: "In Transit", color: "bg-indigo-100 text-indigo-800 border-indigo-200", statusParam: "In Transit" },
-  { key: "partialDeliveredOrders", label: "Partial Delivered", color: "bg-teal-100 text-teal-800 border-teal-200", statusParam: "Partial Delivered" },
-  { key: "deliveredOrders", label: "Delivered", color: "bg-emerald-100 text-emerald-800 border-emerald-200", statusParam: "Delivered" },
+  { key: "pendingOrders", label: "New Order", color: "bg-[#FEF3C7] text-[#92400E]", statusParam: "New Order" },
+  { key: "inProductionOrders", label: "In Progress", color: "bg-[#EDE9FE] text-[#4C1D95]", statusParam: "In Progress" },
+  { key: "readyForDispatchOrders", label: "Ready", color: "bg-[#DBEAFE] text-[#1e3a8a]", statusParam: "Ready for Dispatch" },
+  { key: "inTransitOrders", label: "In Transit", color: "bg-[#E0F2FE] text-[#0C4A6E]", statusParam: "In Transit" },
+  { key: "deliveredOrders", label: "Delivered", color: "bg-[#DCFCE7] text-[#14532D]", statusParam: "Delivered" },
+  { key: "voidOrders", label: "Void", color: "bg-[#FEE2E2] text-[#7f1d1d]", statusParam: "Void" },
 ]
 
 export function OrderPipeline({ stats, basePath = "/dashboard/orders" }: OrderPipelineProps) {
   if (!stats) return null
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-700">Order pipeline</h3>
-        <Link
-          href={basePath}
-          className="text-xs font-medium text-blue-600 hover:text-blue-700"
-        >
-          View all
-        </Link>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="rounded-xl border border-sk-border bg-sk-card-bg p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         {stages.map((stage, idx) => {
           const count = Number(stats[stage.key] ?? 0)
+
           return (
             <React.Fragment key={stage.key}>
-              {idx > 0 && (
-                <ChevronRight className="h-4 w-4 flex-shrink-0 text-slate-300" aria-hidden />
-              )}
+              {idx > 0 && <span className="text-sk-text-3">&rsaquo;</span>}
               <Link
                 href={`${basePath}?status=${encodeURIComponent(stage.statusParam)}`}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors hover:opacity-90 ${stage.color}`}
+                className={`inline-flex items-center gap-1 rounded-[20px] px-3 py-1 text-xs font-medium ${stage.color}`}
               >
                 <span>{stage.label}</span>
-                <span className="font-bold">{count}</span>
+                <span className="font-semibold">{count}</span>
               </Link>
             </React.Fragment>
           )
         })}
+      </div>
+
+      <div className="rounded-[8px] border border-[#FED7AA] bg-sk-primary-tint px-3 py-2 text-[12px] text-[#92400E]">
+        <Link href="/dashboard/follow-up" className="font-medium hover:underline">
+          {stats.unpaidInvoices} delivered unpaid
+        </Link>
+        <span> &middot; </span>
+        <Link href="/dashboard/orders" className="font-medium hover:underline">
+          {stats.missingSalesOrderNumber} missing sales order #
+        </Link>
       </div>
     </div>
   )

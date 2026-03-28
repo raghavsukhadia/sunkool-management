@@ -56,12 +56,12 @@ export function CustomerFilterDropdown({
           type="button"
           variant="outline"
           className={cn(
-            "h-10 w-full justify-between border-gray-300 bg-white px-3 font-normal text-gray-900 hover:bg-gray-50",
+            "h-10 w-full justify-between border-sk-border bg-white px-3 font-normal text-sk-text-1 hover:bg-sk-page-bg focus-visible:ring-sk-primary",
             className
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
-            <Users className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
+            <Users className="h-4 w-4 shrink-0 text-sk-text-3" aria-hidden />
             <span className="truncate text-left">{selectedLabel}</span>
           </span>
           <ChevronDown className="h-4 w-4 shrink-0 opacity-60" aria-hidden />
@@ -69,24 +69,24 @@ export function CustomerFilterDropdown({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[16rem] max-w-[calc(100vw-2rem)] p-0"
+        className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[16rem] max-w-[calc(100vw-2rem)] border-sk-border p-0"
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <div className="border-b border-gray-100 p-2">
+        <div className="border-b border-sk-border p-2">
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-sk-text-3" />
             <Input
               placeholder="Search customers…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="h-9 pl-8 text-sm"
+              className="h-9 border-sk-border bg-white pl-8 text-sm focus-visible:ring-sk-primary"
               onKeyDown={(e) => e.stopPropagation()}
             />
           </div>
         </div>
         <div className="max-h-[min(280px,50vh)] overflow-y-auto p-1">
           <DropdownMenuItem
-            className="cursor-pointer gap-2"
+            className="cursor-pointer gap-2 rounded-md"
             onSelect={() => {
               onChange("all")
               setQuery("")
@@ -94,16 +94,16 @@ export function CustomerFilterDropdown({
             }}
           >
             <span className="flex-1">All customers</span>
-            {value === "all" && <Check className="h-4 w-4 shrink-0 text-blue-600" />}
+            {value === "all" && <Check className="h-4 w-4 shrink-0 text-sk-primary" />}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {filtered.length === 0 ? (
-            <div className="px-2 py-6 text-center text-sm text-gray-500">No matches</div>
+            <div className="px-2 py-6 text-center text-sm text-sk-text-2">No matches</div>
           ) : (
             filtered.map((c) => (
               <DropdownMenuItem
                 key={c.id}
-                className="cursor-pointer gap-2"
+                className="cursor-pointer gap-2 rounded-md"
                 onSelect={() => {
                   onChange(c.id)
                   setQuery("")
@@ -111,7 +111,7 @@ export function CustomerFilterDropdown({
                 }}
               >
                 <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                {value === c.id && <Check className="h-4 w-4 shrink-0 text-blue-600" />}
+                {value === c.id && <Check className="h-4 w-4 shrink-0 text-sk-primary" />}
               </DropdownMenuItem>
             ))
           )}

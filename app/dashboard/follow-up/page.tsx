@@ -291,13 +291,13 @@ export default function FollowUpPage() {
                             }))}
                             placeholder="Outcome / notes from the follow-up call or action"
                             rows={3}
-                            className="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sk-primary"
                           />
                         </div>
                         <Button
                           onClick={() => handleSaveFollowup(followup.id, form)}
                           disabled={savingFollowupId === followup.id}
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                          className="w-full"
                         >
                           {savingFollowupId === followup.id ? (
                             <>

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Factory, Package, Clock, CheckCircle, ExternalLink, Printer, Activity, Search, Maximize2, Minimize2 } from "lucide-react"
 import Link from "next/link"
+import { cn } from "@/lib/utils"
 import {
   getProductionQueue,
   getProductionItems,
@@ -69,6 +70,7 @@ export default function ProductionPage() {
   const [inventoryHealthLoading, setInventoryHealthLoading] = useState(false)
   const [isNeededFullscreen, setIsNeededFullscreen] = useState(false)
   const [neededLastUpdated, setNeededLastUpdated] = useState<Date | null>(null)
+  const [queueSearch, setQueueSearch] = useState("")
   const neededFullscreenRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -189,84 +191,113 @@ export default function ProductionPage() {
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
   }
 
+  const todayLabel = new Intl.DateTimeFormat("en-IN", {
+    weekday: "long",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date())
+
   return (
-    <div className="space-y-5 lg:space-y-6">
+    <div className="space-y-5 bg-[#F1F5F9] lg:space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl lg:text-3xl font-bold text-slate-900 flex items-center gap-2 lg:gap-3">
-          <Factory className="h-6 w-6 lg:h-8 lg:w-8 text-blue-600" />
-          Production Queue
-        </h1>
-        <p className="text-slate-600 mt-2 text-sm lg:text-base">
-          Track items pending production and manage production records
-        </p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-[22px] font-semibold text-[#0F172A]">Production</h1>
+          <p className="mt-0.5 text-xs text-slate-400">{todayLabel}</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            className="h-9 rounded-lg border-slate-200 bg-white px-4 text-[13px] font-medium text-slate-600 hover:bg-orange-50 hover:text-orange-500"
+          >
+            Export
+          </Button>
+          <Link href="/dashboard/orders/new">
+            <Button className="h-9 rounded-lg bg-orange-500 px-4 text-[13px] font-medium text-white hover:bg-orange-600">
+              + New Order
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card className="border-slate-200 border-l-4 border-l-amber-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-slate-700">Orders in Production</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-600">{queueData?.ordersInProductionCount ?? 0}</div>
-            <p className="text-xs text-slate-500 mt-1">Approved or In Production</p>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="h-[3px] w-full bg-orange-500"></div>
+          <div className="px-5 py-5">
+            <p className="text-[11px] font-medium uppercase tracking-[0.07em] text-slate-400">Orders in Production</p>
+            <div className="mt-2 text-4xl font-semibold text-slate-900">{queueData?.ordersInProductionCount ?? 0}</div>
+            <p className="mt-1 text-xs text-slate-400">Approved or In Production</p>
+          </div>
+        </div>
 
-        <Card className="border-slate-200 border-l-4 border-l-blue-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-slate-700">In Progress</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{inProgressRecords.length}</div>
-            <p className="text-xs text-slate-500 mt-1">Production records</p>
-          </CardContent>
-        </Card>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="h-[3px] w-full bg-violet-500"></div>
+          <div className="px-5 py-5">
+            <p className="text-[11px] font-medium uppercase tracking-[0.07em] text-slate-400">In Progress</p>
+            <div className="mt-2 text-4xl font-semibold text-slate-900">{inProgressRecords.length}</div>
+            <p className="mt-1 text-xs text-slate-400">Production records</p>
+          </div>
+        </div>
 
-        <Card className="border-slate-200 border-l-4 border-l-green-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-slate-700">Completed</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{completedRecords.length}</div>
-            <p className="text-xs text-slate-500 mt-1">Recent completions</p>
-          </CardContent>
-        </Card>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="h-[3px] w-full bg-green-600"></div>
+          <div className="px-5 py-5">
+            <p className="text-[11px] font-medium uppercase tracking-[0.07em] text-slate-400">Completed</p>
+            <div className="mt-2 text-4xl font-semibold text-slate-900">{completedRecords.length}</div>
+            <p className="mt-1 text-xs text-slate-400">Recent completions</p>
+          </div>
+        </div>
 
-        <Card className="border-slate-200 border-l-4 border-l-indigo-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-slate-700">Total Units to Produce</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-indigo-600">{queueData?.totalUnitsRemaining ?? 0}</div>
-            <p className="text-xs text-slate-500 mt-1">Remaining across all items</p>
-          </CardContent>
-        </Card>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="h-[3px] w-full bg-cyan-600"></div>
+          <div className="px-5 py-5">
+            <p className="text-[11px] font-medium uppercase tracking-[0.07em] text-slate-400">Total Units to Produce</p>
+            <div className="mt-2 text-4xl font-semibold text-slate-900">{queueData?.totalUnitsRemaining ?? 0}</div>
+            <p className="mt-1 text-xs text-slate-400">Remaining across all items</p>
+          </div>
+        </div>
       </div>
 
       {/* Filter Buttons - wrap on mobile, min height for touch */}
       <div className="flex flex-wrap gap-2">
         <Button
-          variant={filter === "pending" ? "default" : "outline"}
+          variant="outline"
           onClick={() => setFilter("pending")}
-          className="gap-2 min-h-[44px]"
+          className={cn(
+            "h-9 rounded-lg px-4 text-[13px] font-medium transition-colors",
+            filter === "pending"
+              ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600 hover:text-white"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-orange-50 hover:text-orange-500"
+          )}
         >
           <Clock className="h-4 w-4" />
           Queue – Item-wise ({queueData?.rows?.length ?? 0})
         </Button>
         <Button
-          variant={filter === "needed" ? "default" : "outline"}
+          variant="outline"
           onClick={() => setFilter("needed")}
-          className="gap-2 min-h-[44px]"
+          className={cn(
+            "h-9 rounded-lg px-4 text-[13px] font-medium transition-colors",
+            filter === "needed"
+              ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600 hover:text-white"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-orange-50 hover:text-orange-500"
+          )}
         >
           <Package className="h-4 w-4" />
           Needed ({neededList.length})
         </Button>
         <Button
-          variant={filter === "inventory-health" ? "default" : "outline"}
+          variant="outline"
           onClick={() => setFilter("inventory-health")}
-          className="gap-2 min-h-[44px]"
+          className={cn(
+            "h-9 rounded-lg px-4 text-[13px] font-medium transition-colors",
+            filter === "inventory-health"
+              ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600 hover:text-white"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-orange-50 hover:text-orange-500"
+          )}
         >
           <Activity className="h-4 w-4" />
           Inventory Health
@@ -275,93 +306,143 @@ export default function ProductionPage() {
 
       {/* Content based on filter */}
       {loading ? (
-        <Card>
+        <Card className="rounded-xl border-slate-200">
           <CardContent className="py-8">
             <p className="text-center text-slate-500">Loading production data...</p>
           </CardContent>
         </Card>
       ) : filter === "pending" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Production queue – complete orders, item-wise</CardTitle>
-            <p className="text-sm text-slate-500">Single sheet: all orders in production with item breakdown (Ordered / Produced / Remaining).</p>
+        <Card className="overflow-hidden rounded-xl border-slate-200 bg-white">
+          <CardHeader className="border-b border-slate-200 bg-white px-5 py-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle className="text-sm font-semibold text-slate-900">Production queue – complete orders, item-wise</CardTitle>
+                <p className="mt-1 text-xs text-slate-400">Single sheet: all orders in production with item breakdown (Ordered / Produced / Remaining).</p>
+              </div>
+              <div className="relative w-full lg:w-[220px]">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={queueSearch}
+                  onChange={(e) => setQueueSearch(e.target.value)}
+                  placeholder="Search queue"
+                  className="h-9 rounded-lg border-slate-200 bg-white pl-9 text-sm placeholder:text-slate-400 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                />
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             {!queueData?.rows?.length ? (
               <div className="py-12 text-center">
-                <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-3" />
+                <CheckCircle className="mx-auto mb-3 h-12 w-12 text-green-500" />
                 <p className="text-slate-500">No orders in production</p>
-                <p className="text-sm text-slate-400 mt-1">Orders with status Approved or In Production will appear here with item-wise details.</p>
+                <p className="mt-1 text-sm text-slate-400">Orders with status Approved or In Production will appear here with item-wise details.</p>
               </div>
             ) : (
               <>
                 {/* Mobile: card list */}
-                <div className="lg:hidden space-y-3 p-4">
+                <div className="space-y-3 p-4 lg:hidden">
                   {queueData.rows.map((row) => (
                     <Link
                       key={row.itemId}
                       href={`/dashboard/orders/${row.orderId}`}
-                      className="block rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md active:bg-slate-50"
+                      className="block rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:border-orange-200 hover:bg-orange-50/40 hover:shadow-md active:bg-slate-50"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-slate-900 truncate">{row.orderNumber}</p>
-                          <p className="text-sm text-slate-600 truncate mt-0.5">{row.customerName}</p>
-                          <p className="text-sm font-medium text-slate-800 mt-1">{row.itemName}</p>
-                          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-slate-500">
+                          <p className="truncate text-sm font-semibold text-orange-500">{row.orderNumber}</p>
+                          <p className="mt-0.5 truncate text-sm text-slate-600">{row.customerName}</p>
+                          <p className="mt-1 text-sm font-medium text-slate-800">{row.itemName}</p>
+                          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                             <span>Ordered: {row.ordered}</span>
                             <span>Produced: {row.produced}</span>
-                            <span className={row.remaining > 0 ? "font-semibold text-amber-600" : "font-semibold text-green-600"}>
-                              Remaining: {row.remaining}
-                            </span>
+                            <span className="font-semibold text-slate-700">Remaining:</span>
+                            <span className={cn(
+                              "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+                              row.remaining === 0
+                                ? "px-0 text-slate-300"
+                                : row.remaining <= 10
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-red-100 text-red-600"
+                            )}>{row.remaining === 0 ? "—" : row.remaining}</span>
                           </div>
                         </div>
-                        <ExternalLink className="h-4 w-4 text-slate-400 shrink-0 mt-1" />
+                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition-colors hover:border-orange-500 hover:bg-orange-50 hover:text-orange-500">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </div>
                       </div>
                     </Link>
                   ))}
                 </div>
+
                 {/* Desktop: table */}
-                <div className="hidden lg:block overflow-x-auto">
+                <div className="hidden overflow-x-auto lg:block">
                   <table className="w-full">
-                    <thead className="bg-slate-50 border-b border-slate-200">
+                    <thead className="border-b-2 border-slate-200 bg-slate-50">
                       <tr>
-                        <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Order #</th>
-                        <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Customer</th>
-                        <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Item</th>
-                        <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Ordered</th>
-                        <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Produced</th>
-                        <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Remaining</th>
-                        <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-28">Link</th>
+                        <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Order #</th>
+                        <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Customer</th>
+                        <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Item</th>
+                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Ordered</th>
+                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Produced</th>
+                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Remaining</th>
+                        <th className="h-10 w-20 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Link</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {queueData.rows.map((row) => (
-                        <tr key={row.itemId} className="hover:bg-slate-50/50">
-                          <td className="p-3">
-                            <Link href={`/dashboard/orders/${row.orderId}`} className="font-medium text-blue-600 hover:text-blue-700 inline-flex items-center gap-1">
-                              {row.orderNumber}
-                              <ExternalLink className="h-3 w-3" />
-                            </Link>
-                          </td>
-                          <td className="p-3 text-sm text-slate-700">{row.customerName}</td>
-                          <td className="p-3 text-sm font-medium text-slate-900">{row.itemName}</td>
-                          <td className="p-3 text-center text-sm text-slate-700">{row.ordered}</td>
-                          <td className="p-3 text-center text-sm text-slate-700">{row.produced}</td>
-                          <td className="p-3 text-center">
-                            <span className={`text-sm font-semibold ${row.remaining > 0 ? "text-amber-600" : "text-green-600"}`}>
-                              {row.remaining}
-                            </span>
-                          </td>
-                          <td className="p-3 text-center">
-                            <Link href={`/dashboard/orders/${row.orderId}`} className="text-xs font-medium text-blue-600 hover:text-blue-700">
-                              Open order
-                            </Link>
-                          </td>
-                        </tr>
-                      ))}
+                    <tbody>
+                      {queueData.rows.map((row, index) => {
+                        const isFirstInGroup = index === 0 || queueData.rows[index - 1].orderId !== row.orderId
+
+                        return (
+                          <tr
+                            key={row.itemId}
+                            className={cn(
+                              "h-12 border-b border-slate-100 text-[13px] text-slate-900 transition-colors hover:bg-orange-50",
+                              index % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"
+                            )}
+                          >
+                            <td className={cn(
+                              "px-4 py-0",
+                              isFirstInGroup ? "border-l-[3px] border-l-orange-500" : "border-l-[3px] border-l-orange-200"
+                            )}>
+                              <Link href={`/dashboard/orders/${row.orderId}`} className="inline-flex items-center text-xs font-medium text-orange-500 hover:text-orange-600">
+                                {row.orderNumber}
+                              </Link>
+                            </td>
+                            <td className="max-w-[180px] truncate px-4 py-0 text-[13px] text-slate-600">{row.customerName}</td>
+                            <td className="max-w-[200px] truncate px-4 py-0 text-[13px] font-medium text-slate-900">{row.itemName}</td>
+                            <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.ordered}</td>
+                            <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.produced}</td>
+                            <td className="px-4 py-0 text-center">
+                              {row.remaining === 0 ? (
+                                <span className="text-[13px] font-medium text-slate-300">—</span>
+                              ) : (
+                                <span className={cn(
+                                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+                                  row.remaining <= 10 ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-600"
+                                )}>
+                                  {row.remaining}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-0 text-center">
+                              <Link
+                                href={`/dashboard/orders/${row.orderId}`}
+                                title="Open order"
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition-all hover:border-orange-500 hover:bg-orange-50 hover:text-orange-500"
+                              >
+                                <ExternalLink className="h-[13px] w-[13px]" />
+                              </Link>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
+
+                  <div className="flex items-center justify-between border-t-2 border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-xs text-slate-400">Showing {queueData.rows.length} of {queueData.rows.length} items</p>
+                    <span className="text-xs text-slate-400">All items loaded</span>
+                  </div>
                 </div>
               </>
             )}

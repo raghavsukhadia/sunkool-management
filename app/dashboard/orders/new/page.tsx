@@ -222,7 +222,7 @@ export default function NewOrderPage() {
                           <button
                             type="button"
                             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                            className={`flex h-10 w-full items-center justify-between rounded-md border px-3 py-2 text-sm text-left ring-offset-background placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                            className={`flex h-10 w-full items-center justify-between rounded-md border px-3 py-2 text-sm text-left ring-offset-background placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sk-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
                               form.formState.errors.customer_id 
                                 ? "border-red-300 bg-red-50" 
                                 : "border-gray-300 bg-white"
@@ -260,7 +260,7 @@ export default function NewOrderPage() {
                                         }
                                         e.stopPropagation()
                                       }}
-                                      className="pl-8 pr-8 h-9 text-sm border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                                      className="pl-8 pr-8 h-9 text-sm border-gray-300 focus:border-sk-primary focus:ring-sk-primary"
                                       autoFocus
                                     />
                                     {searchTerm && (
@@ -286,8 +286,8 @@ export default function NewOrderPage() {
                                       {filteredCustomers.map((customer) => (
                                         <div
                                           key={customer.id}
-                                          className={`px-3 py-2.5 text-sm cursor-pointer hover:bg-blue-50 transition-colors ${
-                                            selectedCustomerId === customer.id ? "bg-blue-100" : ""
+                                          className={`cursor-pointer px-3 py-2.5 text-sm transition-colors hover:bg-sk-primary-tint ${
+                                            selectedCustomerId === customer.id ? "bg-sk-primary-tint" : ""
                                           }`}
                                           onClick={() => handleCustomerSelect(customer.id)}
                                         >
@@ -356,7 +356,7 @@ export default function NewOrderPage() {
                         type="checkbox"
                         checked={field.value}
                         onChange={field.onChange}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mt-1"
+                        className="mt-1 h-4 w-4 rounded border-gray-300 text-sk-primary focus:ring-sk-primary"
                       />
                     </FormControl>
                     <div className="space-y-1 leading-none">
@@ -365,7 +365,7 @@ export default function NewOrderPage() {
                       </FormLabel>
                       <FormDescription className="text-xs text-gray-600">
                         {cashDiscount ? (
-                          <span className="text-blue-700 font-medium">
+                          <span className="font-medium text-sk-primary-dk">
                             ✓ This order will appear in &quot;Payment Followup&quot; section. Payment tracking will be required for 14 days until payment is received.
                           </span>
                         ) : (
@@ -382,7 +382,7 @@ export default function NewOrderPage() {
                 <Button
                   type="submit"
                   disabled={isSubmitting || loading}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-6"
+                  className="px-6"
                 >
                   {isSubmitting ? (
                     <>

@@ -4,10 +4,12 @@ import { usePathname } from "next/navigation"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
+import { Button } from "@/components/ui/button"
 import {
   Package,
   ShoppingCart,
   Factory,
+  Truck,
   DollarSign,
   Settings,
   Gift,
@@ -24,6 +26,7 @@ export default function DashboardSidebar({
 }: {
   children: React.ReactNode
 }) {
+  const desktopSidebarWidth = 220
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
@@ -34,34 +37,88 @@ export default function DashboardSidebar({
     router.refresh()
   }
 
-  const navItems = [
+  const mainNavItems = [
     { href: "/dashboard", label: "Dashboard", icon: Home },
     { href: "/dashboard/orders", label: "Orders", icon: ShoppingCart },
+    { href: "/dashboard/tracking", label: "Tracking", icon: Truck },
     { href: "/dashboard/orders/new", label: "New Order", icon: Package },
     { href: "/dashboard/production", label: "Production", icon: Factory },
     { href: "/dashboard/follow-up", label: "Follow Up", icon: DollarSign },
     { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
+  ]
+
+  const settingsNavItems = [
     { href: "/dashboard/management", label: "Management", icon: Settings },
     { href: "/dashboard/rewards", label: "Rewards", icon: Gift },
   ]
 
+  const topbarTitle = (() => {
+    if (pathname === "/dashboard") return "Dashboard"
+    if (pathname.startsWith("/dashboard/orders")) return "Orders"
+    if (pathname.startsWith("/dashboard/tracking")) return "Tracking"
+    if (pathname.startsWith("/dashboard/production")) return "Production"
+    if (pathname.startsWith("/dashboard/follow-up")) return "Follow Up"
+    if (pathname.startsWith("/dashboard/notifications")) return "Notifications"
+    if (pathname.startsWith("/dashboard/management")) return "Management"
+    if (pathname.startsWith("/dashboard/rewards")) return "Rewards"
+    return "Order Management"
+  })()
+
+  const todayLabel = new Intl.DateTimeFormat("en-IN", {
+    weekday: "long",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date())
+
   return (
-    <div className="h-screen bg-gray-50 flex overflow-hidden">
-      {/* Left Sidebar - hidden on mobile (bottom nav instead), visible lg and up */}
+    <div className="min-h-screen bg-sk-page-bg">
       <aside
-        className="fixed inset-y-0 left-0 z-50 w-64 bg-[#0f172a] text-white transform transition-transform duration-300 ease-in-out flex-col h-full hidden lg:flex lg:relative lg:translate-x-0"
+        className="fixed inset-y-0 left-0 z-50 hidden h-full shrink-0 flex-col bg-sk-sidebar lg:flex lg:min-w-[220px] lg:max-w-[220px] lg:basis-[220px]"
+        style={{ width: `${desktopSidebarWidth}px`, minWidth: `${desktopSidebarWidth}px`, maxWidth: `${desktopSidebarWidth}px` }}
       >
-        <div className="flex flex-col h-full w-64">
-          {/* Logo/Header */}
-          <div className="flex items-center justify-between h-20 px-4 border-b border-slate-700/50 bg-[#0f172a]">
-            <Link href="/dashboard" className="flex items-center space-x-3 hover:opacity-90 transition-opacity flex-1">
-              <SunkoolLogo variant="dark" size="lg" />
+        <div className="flex h-full flex-col">
+          <div className="border-b border-[#2d3748] px-4 py-5">
+            <Link href="/dashboard" className="block">
+              <SunkoolLogo size="md" />
+              <p className="mt-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[#4b5563]">
+                Order Management
+              </p>
             </Link>
           </div>
 
-          {/* Navigation */}
-          <nav className="flex-1 px-4 py-8 space-y-2 overflow-y-auto custom-scrollbar">
-            {navItems.map((item) => {
+          <nav className="custom-scrollbar flex-1 overflow-y-auto py-5">
+            <p className="px-4 text-[9px] font-medium uppercase tracking-[0.1em] text-[#4b5563]">Main</p>
+            <div className="mt-2 space-y-1">
+              {mainNavItems.map((item) => {
+                const Icon = item.icon
+                const isActive = pathname === item.href ||
+                  (item.href !== "/dashboard" && pathname.startsWith(item.href))
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "mx-[10px] my-[2px] flex items-center gap-2.5 rounded-[8px] px-4 py-[10px] text-[14px] font-medium",
+                      isActive
+                        ? "bg-sk-primary text-sk-sidebar-act"
+                        : "text-sk-sidebar-text hover:bg-[rgba(249,115,22,0.1)] hover:text-sk-primary"
+                    )}
+                  >
+                    <Icon className="h-[18px] w-[18px]" />
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+
+            <div className="mt-5 border-t border-[#2d3748] pt-4">
+              <p className="px-4 text-[9px] font-medium uppercase tracking-[0.1em] text-[#4b5563]">Settings</p>
+            </div>
+
+            <div className="mt-2 space-y-1">
+              {settingsNavItems.map((item) => {
               const Icon = item.icon
               const isActive = pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href))
@@ -71,68 +128,60 @@ export default function DashboardSidebar({
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
+                    "mx-[10px] my-[2px] flex items-center gap-2.5 rounded-[8px] px-4 py-[10px] text-[14px] font-medium",
                     isActive
-                      ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20"
-                      : "text-slate-400 hover:bg-slate-800/50 hover:text-white"
+                      ? "bg-sk-primary text-sk-sidebar-act"
+                      : "text-sk-sidebar-text hover:bg-[rgba(249,115,22,0.1)] hover:text-sk-primary"
                   )}
                 >
-                  <Icon className={cn("w-5 h-5 mr-3 transition-colors", isActive ? "text-white" : "text-slate-500")} />
+                  <Icon className="h-[18px] w-[18px]" />
                   {item.label}
                 </Link>
               )
-            })}
+              })}
+            </div>
           </nav>
 
-          {/* Footer/Sign Out */}
-          <div className="p-4 border-t border-slate-800 bg-[#070b14]">
+          <div className="border-t border-[#2d3748] px-4 py-4">
             <button
               onClick={handleSignOut}
-              className="group flex items-center w-full px-4 py-3 text-sm font-semibold text-slate-400 rounded-xl hover:bg-red-500/10 hover:text-red-500 transition-all duration-200 border border-transparent hover:border-red-500/20"
+              className="flex w-full items-center gap-2.5 rounded-[8px] px-4 py-[10px] text-[14px] font-medium text-[#64748b] hover:bg-[rgba(249,115,22,0.1)] hover:text-sk-primary"
             >
-              <LogOut className="w-5 h-5 mr-3 text-slate-500 group-hover:text-red-500 transition-colors" />
+              <LogOut className="h-[18px] w-[18px]" />
               Sign Out
             </button>
           </div>
         </div>
       </aside>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        {/* Top Header Bar - compact on mobile, no hamburger (bottom nav used) */}
-        <header className="bg-white border-b border-gray-100 shadow-sm z-30 shrink-0">
-          <div className="flex items-center justify-between h-14 lg:h-20 px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center min-w-0 gap-2 lg:gap-3">
-              <Link href="/dashboard" className="flex-shrink-0">
-                <span className="hidden lg:inline-block">
-                  <SunkoolLogo variant="dark" size="md" />
-                </span>
-                <span className="lg:hidden">
-                  <SunkoolLogo variant="dark" size="sm" />
-                </span>
-              </Link>
-              <div className="flex flex-col min-w-0">
-                <h1 className="text-base lg:text-xl font-bold text-slate-900 tracking-tight truncate">
-                  Order Management System
-                </h1>
-                <p className="text-xs text-slate-500 font-medium hidden sm:block">Sunkool Management &middot; Dashboard</p>
-              </div>
+      <div className="flex min-h-screen min-w-0 flex-col lg:pl-[220px]">
+        <header className="z-30 border-b border-sk-border bg-white">
+          <div className="flex items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+            <div className="min-w-0">
+              <h1 className="truncate text-[20px] font-semibold text-sk-text-1">{topbarTitle}</h1>
+              <p className="text-[12px] font-medium text-sk-text-3">{todayLabel}</p>
             </div>
-            <div className="flex items-center space-x-6">
-              {/* Removed decorative elements */}
+
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" className="h-9 px-4 text-sk-text-2 hover:bg-sk-primary-tint hover:text-sk-primary-dk">
+                Export
+              </Button>
+              <Link href="/dashboard/orders/new">
+                <Button className="h-9 bg-sk-primary px-[18px] text-[13px] font-medium text-white hover:bg-sk-primary-dk">
+                  + New Order
+                </Button>
+              </Link>
             </div>
           </div>
         </header>
 
-        {/* Main Content - pb for mobile bottom nav */}
-        <main className="flex-1 overflow-y-auto bg-slate-50/50 scroll-smooth pb-20 lg:pb-0">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8 animate-in fade-in duration-700">
+        <main className="flex-1 overflow-y-auto bg-sk-page-bg pb-20 lg:pb-0">
+          <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:pl-8 lg:pr-8 lg:py-8">
             {children}
           </div>
         </main>
       </div>
 
-      {/* Mobile bottom navigation - visible only below lg */}
       <MobileBottomNav />
     </div>
   )

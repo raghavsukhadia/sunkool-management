@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -209,7 +209,7 @@ export default function OrderDetailsPage() {
     if (amountDue === 0 && (requested > 0 || totalPaid > 0)) return "complete"
     if (totalPaid > 0) return "partial"
     return "pending"
-  }, [paymentSummary.amountDue, paymentSummary.requested, paymentSummary.totalPaid])
+  }, [paymentSummary])
 
   // Single follow-up after 14 days: only show the one at (first dispatch + 14 days), hide old 14-daily entries
   const paymentFollowupDisplay = useMemo(() => {
@@ -237,14 +237,14 @@ export default function OrderDetailsPage() {
     return { overdueDateStr, isBefore14Days, displayFollowups, daysUntil }
   }, [dispatches, order, paymentFollowups])
 
-  const getNetDispatchedForItem = (orderItemId: string) => {
+  const getNetDispatchedForItem = useCallback((orderItemId: string) => {
     return dispatches.reduce((sum, dispatch) => {
       const dispatchQtyForItem = dispatch.dispatch_items?.reduce((itemSum: number, di: any) => {
         return di.order_items?.id === orderItemId ? itemSum + di.quantity : itemSum
       }, 0) || 0
       return sum + dispatchQtyForItem
     }, 0)
-  }
+  }, [dispatches])
 
   // Tab badges: remaining work counts so users can see at a glance what's left
   const tabRemainingCounts = useMemo(() => {
@@ -278,7 +278,7 @@ export default function OrderDetailsPage() {
     }
   }, [order?.items, productionRecords, dispatches, paymentSummary.amountDue])
 
-  const fetchAllOrderData = async () => {
+  const fetchAllOrderData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -303,13 +303,13 @@ export default function OrderDetailsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [orderId])
 
   useEffect(() => {
     if (orderId) {
       fetchAllOrderData()
     }
-  }, [orderId])
+  }, [orderId, fetchAllOrderData])
 
   // Predicate used across the payment UI to determine whether payments can be recorded.
   // An order is eligible for payment recording if its status indicates dispatch OR if
@@ -353,6 +353,17 @@ export default function OrderDetailsPage() {
     }
   }
 
+  const loadPaymentFollowups = useCallback(async () => {
+    try {
+      const result = await getOrderPaymentFollowups(orderId)
+      if (result.success && result.data) {
+        setPaymentFollowups(result.data)
+      }
+    } catch (err: any) {
+      console.error("Failed to load payment followups:", err)
+    }
+  }, [orderId])
+
   useEffect(() => {
     if (order) {
       setInvoiceNumber(order.invoice_number || "")
@@ -384,14 +395,14 @@ export default function OrderDetailsPage() {
         loadPaymentFollowups()
       }
     }
-  }, [order])
+  }, [order, loadPaymentFollowups])
 
   // When Payment or Followup tab is active and order has amount due, ensure single 14-day followup exists and reload followups
   useEffect(() => {
     if ((activeTab === "payment" || activeTab === "followup") && order?.id && paymentSummary.amountDue > 0) {
       ensurePaymentFollowupForOrder(orderId).then(() => loadPaymentFollowups())
     }
-  }, [activeTab, order?.id, orderId, paymentSummary.amountDue])
+  }, [activeTab, order?.id, orderId, paymentSummary.amountDue, loadPaymentFollowups])
 
   const loadOrderDetails = async () => {
     try {
@@ -425,17 +436,6 @@ export default function OrderDetailsPage() {
       }
     } catch (err: any) {
       console.error("Failed to load dispatches:", err)
-    }
-  }
-
-  const loadPaymentFollowups = async () => {
-    try {
-      const result = await getOrderPaymentFollowups(orderId)
-      if (result.success && result.data) {
-        setPaymentFollowups(result.data)
-      }
-    } catch (err: any) {
-      console.error("Failed to load payment followups:", err)
     }
   }
 
@@ -675,26 +675,30 @@ export default function OrderDetailsPage() {
   // Initialize production quantities when switching to partial or when order changes
   useEffect(() => {
     if (order && productionType === "partial") {
-      const initialQuantities: Record<string, number> = {}
-      order.items.forEach(item => {
-        // Calculate produced quantity up to now for this item
-        const producedQty = productionRecords.reduce((sum, record) => {
-          if (record.selected_quantities && record.selected_quantities[item.id]) {
-            return sum + (record.selected_quantities[item.id] as number)
+      setProductionQuantities((prev) => {
+        const next = { ...prev }
+        let changed = false
+
+        order.items.forEach((item) => {
+          // Calculate produced quantity up to now for this item
+          const producedQty = productionRecords.reduce((sum, record) => {
+            if (record.selected_quantities && record.selected_quantities[item.id]) {
+              return sum + (record.selected_quantities[item.id] as number)
+            }
+            if (record.production_type === "full") return item.quantity
+            return sum
+          }, 0)
+
+          const remainingQty = Math.max(0, item.quantity - producedQty)
+
+          if (next[item.id] == null) {
+            next[item.id] = remainingQty
+            changed = true
           }
-          if (record.production_type === "full") return item.quantity
-          return sum
-        }, 0)
+        })
 
-        const remainingQty = Math.max(0, item.quantity - producedQty)
-
-        if (!productionQuantities[item.id]) {
-          initialQuantities[item.id] = remainingQty // Default to remaining quantity
-        }
+        return changed ? next : prev
       })
-      if (Object.keys(initialQuantities).length > 0) {
-        setProductionQuantities(prev => ({ ...prev, ...initialQuantities }))
-      }
     }
   }, [order, productionType, productionRecords])
 
@@ -802,7 +806,7 @@ export default function OrderDetailsPage() {
       })
       setDispatchQuantities(initialQuantities)
     }
-  }, [showDispatchModal, dispatchType, order?.items, dispatches])
+  }, [showDispatchModal, dispatchType, order?.items, getNetDispatchedForItem])
 
   const handleDownloadLatestTrackingSlip = async () => {
     if (!order) return
@@ -1295,46 +1299,66 @@ export default function OrderDetailsPage() {
   return (
     <div className="space-y-6 pb-8">
       {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
+      <div className="pb-0 border-b-0">
+        {/* Header Top: Back link + Order # + Date */}
+        <div className="flex items-baseline gap-4 mb-3">
+          <button
+            onClick={() => router.back()}
+            className="text-sm text-slate-400 hover:text-orange-500 transition-colors cursor-pointer font-medium flex items-center gap-1.5"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Back to Orders
+          </button>
+        </div>
+        
+        {/* Order Title + Date */}
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex-1">
+            <h1 className="text-2xl font-semibold text-slate-900">
+              Order #{order.internal_order_number || order.sales_order_number || order.id.slice(0, 8)}
+            </h1>
+            <p className="text-xs text-slate-400 mt-1">
+              {new Date(order.created_at).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}
+            </p>
+          </div>
+
+          {/* Header Buttons Group */}
+          <div className="flex items-center gap-2">
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+              onClick={handleDownloadLatestTrackingSlip}
+              disabled={generatingTrackingSlip !== null}
+              className="h-9 px-3 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2"
             >
-              <ArrowLeft className="w-4 h-4" />
-              Back
+              {generatingTrackingSlip !== null ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileDown className="w-4 h-4" />
+              )}
+              <span className="hidden sm:inline text-sm">Tracking Slip</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowEditModal(true)}
+              className="h-9 px-3 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2"
+            >
+              <Edit2 className="w-4 h-4" />
+              <span className="hidden sm:inline text-sm">Edit</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="h-9 px-3 border border-red-200 bg-white hover:bg-red-50 text-red-600 hover:text-red-700 flex items-center gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="hidden sm:inline text-sm">Delete</span>
             </Button>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Order Details</h1>
-          <p className="text-gray-600 mt-1.5 text-sm">
-            Order #{order.internal_order_number || order.sales_order_number || order.id.slice(0, 8)}
-            {order.sales_order_number && order.internal_order_number && (
-              <span className="text-gray-500 ml-2">(Sales Order: {order.sales_order_number})</span>
-            )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowEditModal(true)}
-            className="flex items-center gap-2"
-          >
-            <Edit className="w-4 h-4" />
-            Edit
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowDeleteConfirm(true)}
-            className="flex items-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
-          >
-            <Trash className="w-4 h-4" />
-            Delete
-          </Button>
         </div>
       </div>
 
@@ -1363,114 +1387,150 @@ export default function OrderDetailsPage() {
       )}
 
       {/* Customer Information - Always visible */}
-      <Card className="shadow-sm">
-        <CardHeader className="bg-gray-50 border-b">
-          <div className="flex items-center justify-between gap-4 w-full">
-            <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
-              <div className="p-1.5 bg-blue-100 rounded-md">
-                <User className="w-4 h-4 text-blue-600" />
-              </div>
-              Customer Information
-            </CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-2 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700 shadow-sm transition-all"
-              onClick={handleDownloadLatestTrackingSlip}
-              disabled={generatingTrackingSlip !== null}
-            >
-              {generatingTrackingSlip !== null ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <FileDown className="w-3.5 h-3.5" />
-              )}
-              <span className="hidden sm:inline">Tracking Slip</span>
-            </Button>
+      <Card className="bg-white border border-slate-200 border-l-4 border-l-orange-500 rounded-none md:rounded-lg shadow-none">
+        <div className="pl-0">
+          <div className="px-6 py-4 border-b border-slate-100">
+            <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide">Customer Information</h2>
           </div>
-        </CardHeader>
-        <CardContent className="pt-6">
-          <div className="space-y-3">
-            <div>
-              <Label className="text-xs font-semibold text-gray-500 uppercase">Customer Name</Label>
-              <p className="text-sm font-medium text-gray-900 mt-1">{order.customers?.name || "-"}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className="text-xs font-semibold text-gray-500 uppercase">Email</Label>
-                <p className="text-sm text-gray-600 mt-1">{order.customers?.email || "-"}</p>
+          <div className="px-6 py-5 space-y-5">
+            {/* Customer Name Row with Initials */}
+            <div className="flex items-start gap-4">
+              <div className="w-11 h-11 rounded-full bg-orange-50 text-orange-700 font-semibold text-base flex items-center justify-center flex-shrink-0">
+                {order.customers?.name?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || "?"}
               </div>
-              <div>
-                <Label className="text-xs font-semibold text-gray-500 uppercase">Phone</Label>
-                <p className="text-sm text-gray-600 mt-1">{order.customers?.phone || "-"}</p>
-              </div>
-            </div>
-            {order.customers?.address && (
-              <div>
-                <Label className="text-xs font-semibold text-gray-500 uppercase">Address</Label>
-                <p className="text-sm text-gray-600 mt-1">{order.customers.address}</p>
-              </div>
-            )}
-            <div className="pt-3 border-t">
-              <div className="flex items-center gap-4">
-                <div>
-                  <Label className="text-xs font-semibold text-gray-500 uppercase">Order Status</Label>
-                  <p className="text-sm font-medium text-gray-900 mt-1">{order.order_status}</p>
-                </div>
-                <div>
-                  <Label className="text-xs font-semibold text-gray-500 uppercase">Payment Status</Label>
-                  <p className={`text-sm font-medium mt-1 ${derivedPaymentStatus === "complete" ? "text-green-700" : derivedPaymentStatus === "partial" ? "text-blue-700" : "text-amber-700"}`}>
-                    {derivedPaymentStatus === "complete" ? "Paid" : derivedPaymentStatus === "partial" ? "Partial" : "Pending"}
+              <div className="flex-1">
+                <p className="text-lg font-semibold text-slate-900">{order.customers?.name || "-"}</p>
+                {order.customers?.phone && (
+                  <p className="text-sm text-slate-600 mt-0.5 flex items-center gap-2">
+                    {order.customers.phone}
                   </p>
-                </div>
-                {order.cash_discount && (
-                  <div className="ml-auto">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                      Cash Discount Applied
-                    </span>
-                  </div>
                 )}
               </div>
             </div>
+
+            {/* Email and Phone Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Email</p>
+                <p className="text-sm text-slate-900">{order.customers?.email || "-"}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Phone</p>
+                <p className="text-sm text-slate-900">{order.customers?.phone || "-"}</p>
+              </div>
+            </div>
+
+            {/* Address */}
+            {order.customers?.address && (
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Address</p>
+                <p className="text-sm text-slate-600 leading-relaxed">{order.customers.address}</p>
+              </div>
+            )}
+
+            {/* Status Badges */}
+            <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-3">
+              {/* Order Status Badge */}
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Order Status</p>
+                <span 
+                  className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${
+                    order.order_status === 'Delivered' ? 'bg-green-100 text-green-700' :
+                    order.order_status === 'In Transit' ? 'bg-blue-100 text-blue-700' :
+                    order.order_status === 'Ready for Dispatch' ? 'bg-purple-100 text-purple-700' :
+                    order.order_status === 'Partial Delivered' ? 'bg-amber-100 text-amber-700' :
+                    'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  {order.order_status}
+                </span>
+              </div>
+
+              {/* Payment Status Badge */}
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Payment Status</p>
+                <span 
+                  className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${
+                    derivedPaymentStatus === 'complete' ? 'bg-green-100 text-green-700' :
+                    derivedPaymentStatus === 'partial' ? 'bg-blue-100 text-blue-700' :
+                    'bg-amber-100 text-amber-700'
+                  }`}
+                >
+                  {derivedPaymentStatus === 'complete' ? 'Paid' : 
+                   derivedPaymentStatus === 'partial' ? 'Partial' : 
+                   'Pending'}
+                </span>
+              </div>
+
+              {/* Cash Discount Badge */}
+              {order.cash_discount && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Discount</p>
+                  <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">
+                    Cash Discount
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
-        </CardContent>
+        </div>
       </Card>
 
       {/* Tabs Section - horizontal scroll on mobile, grid on desktop */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="flex flex-nowrap overflow-x-auto gap-1 w-full pb-1 lg:grid lg:overflow-visible lg:pb-1" style={{ gridTemplateColumns: order.cash_discount ? 'repeat(5, 1fr)' : 'repeat(4, 1fr)' }}>
-          <TabsTrigger value="items" className="flex-shrink-0">
-            <Package className="w-4 h-4 mr-2" />
+        <TabsList className="flex flex-nowrap overflow-x-auto lg:overflow-visible gap-0 w-full border-b border-slate-200 bg-transparent p-0">
+          <TabsTrigger 
+            value="items" 
+            className="relative flex-shrink-0 rounded-none border-b-2 border-transparent px-5 py-3 font-medium text-sm text-slate-400 hover:text-orange-500 hover:bg-orange-50 transition-none data-[state=active]:border-b-2 data-[state=active]:border-orange-500 data-[state=active]:text-orange-500 data-[state=active]:bg-transparent"
+          >
+            <Package className="w-4 h-4 mr-2 inline" />
             Items
           </TabsTrigger>
-          <TabsTrigger value="production" className="relative flex-shrink-0">
+
+          <TabsTrigger 
+            value="production" 
+            className="relative flex-shrink-0 rounded-none border-b-2 border-transparent px-5 py-3 font-medium text-sm text-slate-400 hover:text-orange-500 hover:bg-orange-50 transition-none data-[state=active]:border-b-2 data-[state=active]:border-orange-500 data-[state=active]:text-orange-500 data-[state=active]:bg-transparent flex items-center"
+          >
             <Factory className="w-4 h-4 mr-2" />
             Production
             {tabRemainingCounts.productionRemaining > 0 && (
-              <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800" title={`${tabRemainingCounts.productionRemaining} item(s) remaining to produce`}>
+              <span className="ml-2 inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold bg-orange-500 text-white" title={`${tabRemainingCounts.productionRemaining} item(s) remaining to produce`}>
                 {tabRemainingCounts.productionRemaining}
               </span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="shipment" className="relative flex-shrink-0">
+
+          <TabsTrigger 
+            value="shipment" 
+            className="relative flex-shrink-0 rounded-none border-b-2 border-transparent px-5 py-3 font-medium text-sm text-slate-400 hover:text-orange-500 hover:bg-orange-50 transition-none data-[state=active]:border-b-2 data-[state=active]:border-orange-500 data-[state=active]:text-orange-500 data-[state=active]:bg-transparent flex items-center"
+          >
             <Truck className="w-4 h-4 mr-2" />
             Shipment
             {tabRemainingCounts.shipmentRemaining > 0 && (
-              <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800" title="Items remaining to dispatch or dispatch(es) not yet delivered">
+              <span className="ml-2 inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold bg-orange-500 text-white" title="Items remaining to dispatch or dispatch(es) not yet delivered">
                 {tabRemainingCounts.shipmentRemaining}
               </span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="payment" className="relative flex-shrink-0">
+
+          <TabsTrigger 
+            value="payment" 
+            className="relative flex-shrink-0 rounded-none border-b-2 border-transparent px-5 py-3 font-medium text-sm text-slate-400 hover:text-orange-500 hover:bg-orange-50 transition-none data-[state=active]:border-b-2 data-[state=active]:border-orange-500 data-[state=active]:text-orange-500 data-[state=active]:bg-transparent flex items-center"
+          >
             <DollarSign className="w-4 h-4 mr-2" />
             Payment
             {tabRemainingCounts.paymentDue && (
-              <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800" title={`₹${paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })} due`}>
+              <span className="ml-2 inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold bg-orange-500 text-white" title={`₹${paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })} due`}>
                 Due
               </span>
             )}
           </TabsTrigger>
+
           {(order.cash_discount || paymentFollowups.length > 0 || paymentSummary.amountDue > 0) && (
-            <TabsTrigger value="followup" className="flex-shrink-0">
+            <TabsTrigger 
+              value="followup" 
+              className="relative flex-shrink-0 rounded-none border-b-2 border-transparent px-5 py-3 font-medium text-sm text-slate-400 hover:text-orange-500 hover:bg-orange-50 transition-none data-[state=active]:border-b-2 data-[state=active]:border-orange-500 data-[state=active]:text-orange-500 data-[state=active]:bg-transparent"
+            >
               <Calendar className="w-4 h-4 mr-2" />
               Payment Followup
             </TabsTrigger>
@@ -1482,33 +1542,31 @@ export default function OrderDetailsPage() {
           <div className="grid gap-6 md:grid-cols-2">
             <div className="space-y-6">
               {/* Add Items Section */}
-              <Card className="border-2 border-blue-100 shadow-md">
-                <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
-                  <CardTitle className="text-xl font-semibold text-gray-900 flex items-center">
-                    <Plus className="w-5 h-5 mr-2" />
+              <div className="bg-white border border-slate-200 rounded-lg shadow-none">
+                <div className="px-6 py-5 border-b border-slate-100">
+                  <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide flex items-center gap-2">
+                    <Plus className="w-4 h-4 text-orange-500" />
                     Add Items to Order
-                  </CardTitle>
-                  <CardDescription className="mt-1">
-                    Select items from inventory and specify quantities
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-6">
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-2">Select items from inventory and specify quantities</p>
+                </div>
+                <div className="p-6">
                   <div className="space-y-4">
                     <div className="grid gap-4 md:grid-cols-3">
                       <div className="md:col-span-2 relative">
-                        <Label htmlFor="item-select" className="text-sm font-semibold text-gray-700 mb-2 block">
+                        <Label htmlFor="item-select" className="text-sm font-semibold text-slate-700 mb-2 block">
                           Select Item <span className="text-red-500">*</span>
                         </Label>
                         <div className="relative">
                           <button
                             type="button"
                             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                            className="flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-left ring-offset-background placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex h-10 w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-orange-500 focus:ring-3 focus:ring-orange-500 focus:ring-opacity-10 transition-all"
                           >
-                            <span className={selectedItem ? "text-gray-900" : "text-gray-500"}>
+                            <span className={selectedItem ? "text-slate-900" : "text-slate-400"}>
                               {getSelectedItemName()}
                             </span>
-                            <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
+                            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
                           </button>
 
                           {isDropdownOpen && (
@@ -1517,11 +1575,11 @@ export default function OrderDetailsPage() {
                                 className="fixed inset-0 z-10"
                                 onClick={() => setIsDropdownOpen(false)}
                               />
-                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-80 overflow-hidden flex flex-col">
+                              <div className="absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-80 overflow-hidden flex flex-col">
                                 {/* Search Input */}
-                                <div className="p-2 border-b border-gray-200 bg-gray-50 sticky top-0">
+                                <div className="p-2 border-b border-slate-200 bg-slate-50 sticky top-0">
                                   <div className="relative">
-                                    <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                                    <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
                                     <Input
                                       type="text"
                                       placeholder="Type to search items..."
@@ -1533,13 +1591,13 @@ export default function OrderDetailsPage() {
                                         }
                                         e.stopPropagation()
                                       }}
-                                      className="pl-8 pr-8 h-9 text-sm border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                                      className="pl-8 pr-8 h-9 text-sm border-slate-200 focus:border-orange-500 focus:ring-orange-500"
                                       autoFocus
                                     />
                                     {searchTerm && (
                                       <button
                                         onClick={() => setSearchTerm("")}
-                                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-200"
+                                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-1 rounded hover:bg-slate-200"
                                         title="Clear search"
                                       >
                                         <X className="w-3.5 h-3.5" />
@@ -1551,7 +1609,7 @@ export default function OrderDetailsPage() {
                                 {/* Items List */}
                                 <div className="overflow-y-auto flex-1">
                                   {filteredItems.length === 0 ? (
-                                    <div className="px-3 py-4 text-sm text-gray-500 text-center">
+                                    <div className="px-3 py-4 text-sm text-slate-500 text-center">
                                       No items found matching &quot;{searchTerm}&quot;
                                     </div>
                                   ) : (
@@ -1575,12 +1633,12 @@ export default function OrderDetailsPage() {
                                           <div key={item.id}>
                                             {/* Parent Item */}
                                             <div
-                                              className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 transition-colors ${selectedItem === item.id ? "bg-blue-100" : ""
+                                              className={`px-3 py-2 text-sm cursor-pointer hover:bg-orange-50 transition-colors ${selectedItem === item.id ? "bg-orange-100" : ""
                                                 }`}
                                               onClick={() => handleItemSelect(item.id)}
                                             >
                                               <div className="flex items-center justify-between">
-                                                <span className="font-medium text-gray-900">
+                                                <span className="font-medium text-slate-900">
                                                   #{item.sr_no} - {item.item_name}
                                                 </span>
                                                 {item.sub_items && item.sub_items.length > 0 && (
@@ -1590,12 +1648,12 @@ export default function OrderDetailsPage() {
                                                       e.stopPropagation()
                                                       toggleItemExpansion(item.id)
                                                     }}
-                                                    className="p-1 hover:bg-blue-200 rounded transition-colors"
+                                                    className="p-1 hover:bg-orange-200 rounded transition-colors"
                                                   >
                                                     {expandedItems.has(item.id) ? (
-                                                      <ChevronDown className="w-4 h-4 text-gray-600" />
+                                                      <ChevronDown className="w-4 h-4 text-slate-600" />
                                                     ) : (
-                                                      <ChevronRight className="w-4 h-4 text-gray-600" />
+                                                      <ChevronRight className="w-4 h-4 text-slate-600" />
                                                     )}
                                                   </button>
                                                 )}
@@ -1604,21 +1662,21 @@ export default function OrderDetailsPage() {
 
                                             {/* Sub-items */}
                                             {item.sub_items && item.sub_items.length > 0 && expandedItems.has(item.id) && (
-                                              <div className="bg-gray-50 border-l-2 border-blue-300">
+                                              <div className="bg-slate-50 border-l-2 border-orange-300">
                                                 {filteredSubItems && filteredSubItems.length > 0 ? (
                                                   filteredSubItems.map((subItem) => (
                                                     <div
                                                       key={subItem.id}
-                                                      className={`px-6 py-2 text-sm cursor-pointer hover:bg-blue-50 transition-colors ${selectedItem === subItem.id ? "bg-blue-100" : ""
+                                                      className={`px-6 py-2 text-sm cursor-pointer hover:bg-orange-50 transition-colors ${selectedItem === subItem.id ? "bg-orange-100" : ""
                                                         }`}
                                                       onClick={() => handleItemSelect(subItem.id)}
                                                     >
                                                       <div className="flex items-center gap-2">
-                                                        <span className="text-gray-400">└─</span>
-                                                        <span className="text-gray-700">
+                                                        <span className="text-slate-400">└─</span>
+                                                        <span className="text-slate-700">
                                                           {subItem.item_name}
                                                         </span>
-                                                        <span className="text-xs text-gray-500 ml-auto">
+                                                        <span className="text-xs text-slate-500 ml-auto">
                                                           Sub Item
                                                         </span>
                                                       </div>
@@ -1626,7 +1684,7 @@ export default function OrderDetailsPage() {
                                                   ))
                                                 ) : (
                                                   searchTerm && (
-                                                    <div className="px-6 py-2 text-xs text-gray-400">
+                                                    <div className="px-6 py-2 text-xs text-slate-400">
                                                       No sub-items match your search
                                                     </div>
                                                   )
@@ -1645,7 +1703,7 @@ export default function OrderDetailsPage() {
                         </div>
                       </div>
                       <div>
-                        <Label htmlFor="quantity" className="text-sm font-semibold text-gray-700 mb-2 block">
+                        <Label htmlFor="quantity" className="text-sm font-semibold text-slate-700 mb-2 block">
                           Quantity <span className="text-red-500">*</span>
                         </Label>
                         <Input
@@ -1658,7 +1716,7 @@ export default function OrderDetailsPage() {
                             const num = raw === "" ? 1 : Math.max(1, parseInt(raw, 10))
                             setQuantity(num)
                           }}
-                          className="h-10"
+                          className="h-10 border border-slate-200 rounded-lg focus:border-orange-500 focus:ring-orange-500 focus:ring-opacity-10"
                           placeholder="e.g. 1, 10, 100"
                         />
                       </div>
@@ -1666,11 +1724,11 @@ export default function OrderDetailsPage() {
                     <Button
                       onClick={handleAddItem}
                       disabled={addingItem || !selectedItem || quantity <= 0}
-                      className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white"
+                      className="w-full bg-orange-500 hover:bg-orange-600 text-white h-10 rounded-lg font-medium transition-colors"
                     >
                       {addingItem ? (
                         <>
-                          <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
                           Adding...
                         </>
                       ) : (
@@ -1681,41 +1739,36 @@ export default function OrderDetailsPage() {
                       )}
                     </Button>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             </div>
 
             {/* Right Column - Order Items */}
             <div className="space-y-6">
-              <Card className="shadow-sm">
-                <CardHeader className="bg-gray-50 border-b">
-                  <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
-                    <div className="p-1.5 bg-blue-100 rounded-md">
-                      <Package className="w-4 h-4 text-blue-600" />
-                    </div>
+              <div className="bg-white border border-slate-200 rounded-lg shadow-none overflow-hidden">
+                <div className="px-6 py-5 border-b border-slate-100">
+                  <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide flex items-center gap-2">
                     Order Items
-                    <span className="text-sm font-normal text-gray-500 ml-1">
+                    <span className="text-xs font-normal text-slate-400 ml-1">
                       ({order.items?.length || 0})
                     </span>
-                  </CardTitle>
-                  <CardDescription className="mt-1.5">Items added to this order</CardDescription>
-                </CardHeader>
-                <CardContent className="p-0">
+                  </h2>
+                </div>
+                <div className="p-0">
                   {!order.items || order.items.length === 0 ? (
                     <div className="text-center py-12">
-                      <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-500 font-medium">No items added yet</p>
-                      <p className="text-sm text-gray-400 mt-1">Add items using the form above</p>
+                      <Package className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                      <p className="text-slate-500 font-medium">No items added yet</p>
+                      <p className="text-sm text-slate-400 mt-1">Add items using the form on the left</p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full border-collapse">
                         <thead>
-                          <tr className="border-b bg-gray-50/50">
-                            <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Sr No</th>
-                            <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Item Name</th>
-                            <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Quantity</th>
-                            <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Actions</th>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            <th className="text-left px-4 py-3 font-semibold text-xs text-slate-600 uppercase tracking-wider">Item</th>
+                            <th className="text-left px-4 py-3 font-semibold text-xs text-slate-600 uppercase tracking-wider">Qty</th>
+                            <th className="text-left px-4 py-3 font-semibold text-xs text-slate-600 uppercase tracking-wider">Action</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1746,29 +1799,14 @@ export default function OrderDetailsPage() {
                               ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
                               : inventoryItem?.item_name || `Item ${index + 1}`
 
-                            // For sub-items, show parent's serial number; for parent items, show their serial number
-                            const displaySrNo = subItem
-                              ? inventoryItem?.sr_no || null
-                              : inventoryItem?.sr_no || index + 1
-
                             return (
-                              <tr key={item.id} className="border-b hover:bg-blue-50/30 transition-colors">
-                                <td className="p-4">
-                                  <span className="text-sm font-medium text-gray-900">
-                                    {displaySrNo || "-"}
+                              <tr key={item.id} className="border-b border-slate-100 hover:bg-orange-50 transition-colors h-12">
+                                <td className="px-4 py-3">
+                                  <span className="text-sm font-medium text-slate-900">
+                                    {displayName}
                                   </span>
                                 </td>
-                                <td className="p-4">
-                                  <div className="flex flex-col">
-                                    <span className="text-sm font-medium text-gray-900">
-                                      {displayName}
-                                    </span>
-                                    {subItem && (
-                                      <span className="text-xs text-gray-500 mt-0.5">Sub Item</span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="p-4">
+                                <td className="px-4 py-3">
                                   <div className="flex items-center gap-2">
                                     <Input
                                       type="number"
@@ -1778,20 +1816,18 @@ export default function OrderDetailsPage() {
                                         const newQty = parseInt(e.target.value) || 1
                                         handleUpdateQuantity(item.id, newQty)
                                       }}
-                                      className="w-20 h-8 text-sm"
+                                      className="w-16 h-8 text-sm border border-slate-200 rounded-lg focus:border-orange-500 focus:ring-orange-500"
                                     />
                                   </div>
                                 </td>
-                                <td className="p-4">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
+                                <td className="px-4 py-3">
+                                  <button
                                     onClick={() => handleRemoveItem(item.id)}
-                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 transition-colors"
+                                    className="w-7 h-7 flex items-center justify-center rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors"
                                     title="Remove item"
                                   >
                                     <Trash2 className="w-4 h-4" />
-                                  </Button>
+                                  </button>
                                 </td>
                               </tr>
                             )
@@ -1800,8 +1836,8 @@ export default function OrderDetailsPage() {
                       </table>
                     </div>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             </div>
           </div>
         </TabsContent>
@@ -1809,21 +1845,18 @@ export default function OrderDetailsPage() {
         {/* Production Tab */}
         <TabsContent value="production" className="space-y-6 mt-6">
           {/* Production Management Card */}
-          <Card className="shadow-sm">
-            <CardHeader className="bg-gray-50 border-b flex flex-col md:flex-row md:items-center justify-between gap-4 py-4">
+          <div className="bg-white border border-slate-200 rounded-lg shadow-none">
+            <div className="px-6 py-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
-                  <Factory className="w-5 h-5 text-blue-600" />
+                <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide flex items-center gap-2">
+                  <Factory className="w-4 h-4" />
                   Production Management
-                </CardTitle>
-                <CardDescription className="mt-1">
-                  Manage items ready for production and generate checklists
-                </CardDescription>
+                </h2>
               </div>
 
               {/* Order Type Toggle - Hidden if Full Order already exists */}
               {!(productionRecords.length > 0 && productionRecords[0]?.production_type === "full") && (
-                <div className="flex bg-white p-1 rounded-lg border border-gray-200 self-start md:self-center shadow-sm">
+                <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 self-start md:self-center">
                   <button
                     type="button"
                     onClick={() => {
@@ -1831,9 +1864,9 @@ export default function OrderDetailsPage() {
                       setProductionQuantities({})
                     }}
                     disabled={productionRecords.length > 0}
-                    className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${productionType === "full"
-                      ? "bg-blue-600 text-white shadow-md"
-                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-transparent"
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${productionType === "full"
+                      ? "bg-orange-500 text-white"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent"
                       }`}
                   >
                     Full Order
@@ -1841,34 +1874,34 @@ export default function OrderDetailsPage() {
                   <button
                     type="button"
                     onClick={() => setProductionType("partial")}
-                    className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${productionType === "partial"
-                      ? "bg-blue-600 text-white shadow-md"
-                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${productionType === "partial"
+                      ? "bg-orange-500 text-white"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-white"
                       }`}
                   >
                     Partial Order
                   </button>
                 </div>
               )}
-            </CardHeader>
+            </div>
 
-            <CardContent className="p-0">
+            <div className="p-0">
               <div className="overflow-x-auto">
                 <table className="w-full">
-                  <thead className="bg-gray-50 border-b">
+                  <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Item Details</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Ordered</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Produced</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Remaining</th>
-                      <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">To Produce</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Item Details</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Ordered</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Produced</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Remaining</th>
+                      <th className="px-6 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider w-32">To Produce</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-slate-100">
                     {!order?.items || order.items.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
-                          <Package className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+                        <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
+                          <Package className="w-12 h-12 text-slate-200 mx-auto mb-3" />
                           No items added to this order yet.
                         </td>
                       </tr>
@@ -1919,29 +1952,28 @@ export default function OrderDetailsPage() {
                         const displayToProduce = productionType === "full" ? remainingQty : (productionQuantities[item.id] || 0)
 
                         return (
-                          <tr key={item.id} className="hover:bg-blue-50/20 transition-colors">
+                          <tr key={item.id} className="hover:bg-orange-50 transition-colors h-13">
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-3">
                                 {srNo && (
-                                  <span className="text-xs font-bold text-gray-400 bg-gray-100 w-6 h-6 rounded flex items-center justify-center flex-shrink-0">
+                                  <span className="text-xs font-semibold text-slate-300 w-6 h-6 rounded flex items-center justify-center flex-shrink-0">
                                     {srNo}
                                   </span>
                                 )}
                                 <div className="flex flex-col">
-                                  <span className="text-sm font-medium text-gray-900">{displayName}</span>
-                                  {subItem && <span className="text-[10px] text-blue-600 font-semibold uppercase tracking-tight">Sub-Item</span>}
+                                  <span className="text-sm font-medium text-slate-900">{displayName}</span>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-4 text-sm text-center font-medium text-gray-600">{item.quantity}</td>
-                            <td className="px-4 py-4 text-sm text-center font-medium text-gray-600">{producedQty}</td>
+                            <td className="px-4 py-4 text-sm text-center font-medium text-slate-600">{item.quantity}</td>
+                            <td className="px-4 py-4 text-sm text-center font-medium text-slate-600">{producedQty}</td>
                             <td className="px-4 py-4 text-center">
                               {isComplete ? (
-                                <span className="inline-flex items-center gap-1 text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-full border border-green-100">
-                                  <Check className="w-3 h-3" /> Complete
+                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border-0">
+                                  <Check className="w-3.5 h-3.5" /> Complete
                                 </span>
                               ) : (
-                                <span className="text-sm font-bold text-orange-600">{remainingQty}</span>
+                                <span className="text-sm font-semibold text-orange-600">{remainingQty}</span>
                               )}
                             </td>
                             <td className="px-6 py-4 text-center">
@@ -1959,9 +1991,9 @@ export default function OrderDetailsPage() {
                                   // Switch to partial mode if user edits manually
                                   if (productionType === "full") setProductionType("partial")
                                 }}
-                                className={`w-24 h-9 text-center font-semibold mx-auto transition-all ${productionType === "full"
-                                  ? "bg-blue-50/50 border-blue-200 text-blue-700"
-                                  : "bg-white border-gray-200"
+                                className={`w-16 h-8 text-center font-semibold mx-auto border border-slate-200 rounded-lg transition-all ${productionType === "full"
+                                  ? "bg-slate-50 text-slate-600"
+                                  : "bg-white"
                                   }`}
                                 disabled={isComplete || (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")}
                               />
@@ -1975,147 +2007,113 @@ export default function OrderDetailsPage() {
               </div>
 
               {/* Production Action Bar */}
-              <div className="p-4 bg-gray-50 border-t flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="flex items-center gap-2 text-xs text-gray-500 italic">
-                  {productionRecords.length > 0 && (
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-md border shadow-sm">
-                      <AlertCircle className="w-3.5 h-3.5 text-blue-500" />
-                      <span>
-                        Order Type fixed to <strong>{productionRecords[0].production_type === "full" ? "Full" : "Partial"}</strong> due to existing records.
-                      </span>
-                    </div>
-                  )}
-                </div>
+              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                {productionRecords.length > 0 && (
+                  <div className="flex items-start gap-2 text-xs text-slate-700 bg-blue-50 border border-blue-200 rounded-lg p-3 flex-1">
+                    <AlertCircle className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                    <span>
+                      Order Type fixed to <strong>{productionRecords[0].production_type === "full" ? "Full" : "Partial"}</strong> due to existing records.
+                    </span>
+                  </div>
+                )}
 
-                <div className="flex gap-3">
-                  <Button
-                    onClick={handleCreateProductionRecord}
-                    disabled={
-                      !order?.items ||
-                      order.items.length === 0 ||
-                      order.order_status === "Void" ||
-                      creatingRecord ||
-                      (productionType === "partial" && Object.values(productionQuantities).every(qty => qty === 0)) ||
-                      (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")
-                    }
-                    className="bg-blue-600 hover:bg-blue-700 text-white min-w-[180px] shadow-sm"
-                  >
-                    {creatingRecord ? (
-                      <>
-                        <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
-                        Generating PDF...
-                      </>
-                    ) : (
-                      <>
-                        <FileText className="w-4 h-4 mr-2" />
-                        Create Production Record
-                      </>
-                    )}
-                  </Button>
-                </div>
+                <Button
+                  onClick={handleCreateProductionRecord}
+                  disabled={
+                    !order?.items ||
+                    order.items.length === 0 ||
+                    order.order_status === "Void" ||
+                    creatingRecord ||
+                    (productionType === "partial" && Object.values(productionQuantities).every(qty => qty === 0)) ||
+                    (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")
+                  }
+                  className="bg-orange-500 hover:bg-orange-600 text-white h-9 px-4 rounded-lg font-medium transition-colors whitespace-nowrap"
+                >
+                  {creatingRecord ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin inline" />
+                      Generating PDF...
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="w-4 h-4 mr-2 inline" />
+                      Create Production Record
+                    </>
+                  )}
+                </Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Existing Production Records History */}
           {productionRecords.length > 0 && (
-            <Card className="shadow-sm border-gray-200 overflow-hidden">
-              <CardHeader className="bg-white border-b py-4">
-                <CardTitle className="text-md font-semibold text-gray-800 flex items-center gap-2">
-                  <File className="w-4 h-4 text-gray-400" />
+            <div className="bg-white border border-slate-200 rounded-lg shadow-none overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-100">
+                <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide flex items-center gap-2">
+                  <File className="w-4 h-4" />
                   Production History
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
+                </h2>
+              </div>
+              <div className="p-0">
                 <div className="overflow-x-auto">
                   <table className="w-full">
-                    <thead className="bg-gray-50/50 border-b">
+                    <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
-                        <th className="px-6 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-widest">ID</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">Type</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">Status</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">Created</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">Document</th>
-                        <th className="px-6 py-3 text-right text-[10px] font-bold text-gray-400 uppercase tracking-widest w-40">Actions</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Record</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Type</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Status</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Date</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">PDF</th>
+                        <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-slate-100">
                       {productionRecords.slice().reverse().map((record) => (
-                        <tr key={record.id} className="hover:bg-gray-50/50 transition-colors group">
+                        <tr key={record.id} className="hover:bg-orange-50 transition-colors">
                           <td className="px-6 py-4">
-                            <div className="flex flex-col">
-                              <span className="text-sm font-bold text-gray-900">{record.production_number}</span>
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {record.selected_quantities && Object.entries(record.selected_quantities).map(([itemId, qty]) => {
-                                  const item = order?.items.find(i => i.id === itemId)
-                                  if (!item || (qty as number) <= 0) return null
-
-                                  // Find display name
-                                  let invItem = inventoryItems.find(inv => inv.id === item.inventory_item_id || inv.id === item.product_id)
-                                  let subI: SubItem | undefined
-                                  if (!invItem) {
-                                    for (const p of inventoryItems) {
-                                      subI = p.sub_items?.find(s => s.id === item.inventory_item_id || s.id === item.product_id)
-                                      if (subI) { invItem = p; break; }
-                                    }
-                                  }
-                                  const name = subI ? subI.item_name : (invItem?.item_name || "Item")
-
-                                  return (
-                                    <span key={itemId} className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">
-                                      {name}: <span className="font-bold">{qty as number}</span>
-                                    </span>
-                                  )
-                                })}
-                                {record.production_type === "full" && (
-                                  <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100 italic">
-                                    All items produced
-                                  </span>
-                                )}
-                              </div>
+                            <div className="flex flex-col gap-1.5">
+                              <span className="text-sm font-semibold text-slate-900">{record.production_number}</span>
+                              <span className="text-xs text-slate-500">All items produced</span>
                             </div>
                           </td>
                           <td className="px-4 py-4 text-center">
-                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${record.production_type === "full"
-                              ? "bg-indigo-50 text-indigo-700"
-                              : "bg-orange-50 text-orange-700"
+                            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${record.production_type === "full"
+                              ? "bg-purple-100 text-purple-700"
+                              : "bg-orange-100 text-orange-700"
                               }`}>
-                              {record.production_type}
+                              {record.production_type.charAt(0).toUpperCase() + record.production_type.slice(1)}
                             </span>
                           </td>
                           <td className="px-4 py-4 text-center">
-                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${record.status === "completed"
+                            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${record.status === "completed"
                               ? "bg-green-100 text-green-700"
                               : record.status === "in_production"
-                                ? "bg-amber-100 text-amber-700 animate-pulse"
-                                : "bg-gray-100 text-gray-600"
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-slate-100 text-slate-600"
                               }`}>
-                              {record.status.replace('_', ' ')}
+                              {record.status === "completed" ? "✓ Complete" : record.status.replace('_', ' ').charAt(0).toUpperCase() + record.status.slice(1).replace('_', ' ')}
                             </span>
                           </td>
-                          <td className="px-4 py-4 text-center text-xs text-gray-500">
-                            {new Date(record.created_at).toLocaleDateString()}
+                          <td className="px-4 py-4 text-center text-xs text-slate-600">
+                            {new Date(record.created_at).toLocaleDateString('en-IN')}
                           </td>
                           <td className="px-4 py-4 text-center">
                             {record.pdf_file_url ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
+                              <button
                                 onClick={() => window.open(record.pdf_file_url, '_blank')}
-                                className="h-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-3 transition-all"
+                                className="text-orange-500 hover:text-orange-600 font-medium text-xs transition-colors"
                               >
-                                <FileDown className="w-3.5 h-3.5 mr-1.5" />
+                                <FileDown className="w-4 h-4 inline mr-1" />
                                 View PDF
-                              </Button>
+                              </button>
                             ) : (
-                              <span className="text-xs text-gray-300">No PDF</span>
+                              <span className="text-xs text-slate-300">No PDF</span>
                             )}
                           </td>
                           <td className="px-6 py-4">
                             <div className="flex items-center justify-end gap-2">
                               {record.status === "pending" && (
                                 <Button
-                                  variant="outline"
                                   size="sm"
                                   onClick={async () => {
                                     const result = await updateProductionRecordStatus(record.id, "in_production")
@@ -2127,14 +2125,13 @@ export default function OrderDetailsPage() {
                                       setError(result.error || "Failed")
                                     }
                                   }}
-                                  className="h-7 text-[10px] font-bold border-blue-200 text-blue-600 hover:bg-blue-50 uppercase"
+                                  className="h-7 text-xs font-semibold bg-orange-500 hover:bg-orange-600 text-white rounded-lg px-3"
                                 >
-                                  Start
+                                  START
                                 </Button>
                               )}
                               {record.status === "in_production" && (
                                 <Button
-                                  variant="outline"
                                   size="sm"
                                   onClick={async () => {
                                     const result = await updateProductionRecordStatus(record.id, "completed")
@@ -2146,15 +2143,13 @@ export default function OrderDetailsPage() {
                                       setError(result.error || "Failed")
                                     }
                                   }}
-                                  className="h-7 text-[10px] font-bold border-green-200 text-green-700 bg-green-50 hover:bg-green-100 uppercase"
+                                  className="h-7 text-xs font-semibold bg-green-600 hover:bg-green-700 text-white rounded-lg px-3"
                                 >
-                                  Done
+                                  DONE
                                 </Button>
                               )}
                               {(record.status === "pending" || record.status === "in_production") && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
+                                <button
                                   onClick={async () => {
                                     if (confirm("Delete this record?")) {
                                       const result = await deleteProductionRecord(record.id)
@@ -2167,10 +2162,10 @@ export default function OrderDetailsPage() {
                                       }
                                     }
                                   }}
-                                  className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full"
+                                  className="w-7 h-7 flex items-center justify-center rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </Button>
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
                               )}
                             </div>
                           </td>
@@ -2179,8 +2174,8 @@ export default function OrderDetailsPage() {
                     </tbody>
                   </table>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           )}
         </TabsContent>
 
@@ -2365,7 +2360,7 @@ export default function OrderDetailsPage() {
                                     ...prev,
                                     [dispatch.id]: !prev[dispatch.id]
                                   }))}
-                                  className="h-8 py-0 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 gap-1.5"
+                                  className="h-8 py-0 px-2 text-blue-600 hover:text-blue-800 hover:bg-orange-50 gap-1.5"
                                 >
                                   {expandedShipments[dispatch.id] ? (
                                     <>
@@ -2393,7 +2388,7 @@ export default function OrderDetailsPage() {
                                     setError(result.error || "Failed to update status")
                                   }
                                 }}
-                                className={`w-full h-10 px-4 border-2 rounded-lg font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all ${shipmentStatus === 'ready' ? 'border-yellow-300 bg-yellow-50 text-yellow-800' :
+                                className={`w-full h-10 px-4 border-2 rounded-lg font-medium text-sm focus:outline-none focus:ring-2 focus:ring-sk-primary focus:border-sk-primary transition-all ${shipmentStatus === 'ready' ? 'border-yellow-300 bg-yellow-50 text-yellow-800' :
                                   shipmentStatus === 'picked_up' ? 'border-blue-300 bg-blue-50 text-blue-800' :
                                     'border-green-300 bg-green-50 text-green-800'
                                   }`}
@@ -2648,7 +2643,7 @@ export default function OrderDetailsPage() {
                       value={selectedCourierCompany}
                       onChange={(e) => setSelectedCourierCompany(e.target.value)}
                       disabled={creatingDispatch}
-                      className="w-full h-10 px-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full h-10 px-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-sk-primary"
                       required
                     >
                       <option value="">Select courier company...</option>
@@ -2699,7 +2694,7 @@ export default function OrderDetailsPage() {
                       onChange={(e) => setDispatchNotes(e.target.value)}
                       disabled={creatingDispatch}
                       placeholder="Add any notes about this dispatch..."
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
+                      className="w-full min-h-[80px] rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sk-primary"
                     />
                   </div>
 
@@ -2802,131 +2797,110 @@ export default function OrderDetailsPage() {
 
         {/* Payment Tab */}
         <TabsContent value="payment" className="mt-6">
-          <div className="max-w-[1200px] mx-auto px-6 space-y-6">
-            {/* Payment Overview - uses paymentSummary (requested, total paid, remaining) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card className="shadow-sm border border-gray-200">
-                <CardContent className="p-4">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Requested / Order Total</p>
-                  <p className="text-xl font-bold text-gray-900">₹{paymentSummary.requested.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                </CardContent>
-              </Card>
-              <Card className="shadow-sm border border-gray-200">
-                <CardContent className="p-4">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Total Paid</p>
-                  <p className="text-xl font-bold text-green-600">
-                    ₹{paymentSummary.totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card className="shadow-sm border border-gray-200">
-                <CardContent className="p-4">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Amount Due</p>
-                  <p className="text-xl font-bold text-orange-600">
-                    ₹{paymentSummary.amountDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card className="shadow-sm border border-gray-200">
-                <CardContent className="p-4">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Payment Status</p>
-                  <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${derivedPaymentStatus === "complete"
-                    ? "bg-green-100 text-green-700"
-                    : derivedPaymentStatus === "partial"
-                      ? "bg-blue-100 text-blue-700"
-                      : "bg-amber-100 text-amber-700"
-                    }`}>
-                    {derivedPaymentStatus === "complete" ? "Paid" : derivedPaymentStatus === "partial" ? "Partial" : "Pending"}
-                  </span>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Pending amount alert - when payment not collected in full */}
-            {paymentSummary.amountDue > 0 && (
-              <div
-                role="alert"
-                className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3"
-                aria-live="polite"
-              >
-                <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" aria-hidden />
-                <p className="text-sm text-amber-800">
-                  <span className="font-semibold">Pending amount: ₹{paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-                  {" "}— Record payments below or follow up if overdue.
+          <div className="max-w-[1200px] mx-auto px-6 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              <div className="rounded-xl border border-slate-200 bg-white px-5 py-4">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-400">Invoiced Total</p>
+                <p className="text-2xl font-semibold text-slate-900">
+                  ₹{paymentSummary.requested.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                 </p>
               </div>
-            )}
+              <div className="rounded-xl border border-slate-200 bg-white px-5 py-4">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-400">Total Paid</p>
+                <p className="text-2xl font-semibold text-green-600">
+                  ₹{paymentSummary.totalPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white px-5 py-4">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-400">Amount Due</p>
+                <p className={`text-2xl font-semibold ${paymentSummary.amountDue > 0 ? "text-red-600" : "text-slate-900"}`}>
+                  ₹{paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white px-5 py-4">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-400">Payment Status</p>
+                <div>
+                  <span
+                    className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${derivedPaymentStatus === "complete"
+                      ? "bg-green-100 text-green-800"
+                      : derivedPaymentStatus === "partial"
+                        ? "bg-yellow-100 text-yellow-800"
+                        : "bg-amber-100 text-amber-800"
+                      }`}
+                  >
+                    {derivedPaymentStatus === "complete" ? "Paid" : derivedPaymentStatus === "partial" ? "Partial" : "Pending"}
+                  </span>
+                </div>
+              </div>
+            </div>
 
-            {/* Dispatch Required Alert - show only when order has no dispatch records */}
-            {!canRecordPayment && (
-              <Card className="shadow-sm border-2 border-red-200 bg-red-50">
-                <CardContent className="p-4">
+            <div className="space-y-3">
+              {paymentSummary.amountDue > 0 && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"
+                  aria-live="polite"
+                >
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" aria-hidden />
+                  <p className="text-sm text-amber-800">
+                    <span className="font-semibold">Pending amount: ₹{paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    {" "}— Record payments below or follow up if overdue.
+                  </p>
+                </div>
+              )}
+
+              {!canRecordPayment && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
                   <div className="flex items-start gap-3">
-                    <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
                     <div>
-                      <h3 className="text-sm font-semibold text-red-900 mb-1">Payment Recording Not Available</h3>
+                      <h3 className="mb-1 text-sm font-semibold text-red-900">Payment Recording Not Available</h3>
                       <p className="text-sm text-red-800">
-                        Orders must be dispatched before adding payment records. Current order status: <strong>{order?.order_status || 'New Order'}</strong>. Complete production and create a dispatch in the <strong>Shipment</strong> tab first.
+                        Orders must be dispatched before adding payment records. Current order status: <strong>{order?.order_status || "New Order"}</strong>. Complete production and create a dispatch in the <strong>Shipment</strong> tab first.
                       </p>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            )}
+                </div>
+              )}
 
-            {/* Cash Discount Alert */}
-            {order.cash_discount && (
-              <Card className="shadow-sm border border-amber-200 bg-amber-50">
-                <CardContent className="p-4">
+              {order.cash_discount && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
                   <div className="flex items-start gap-3">
-                    <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
                     <div className="flex-1">
-                      <h3 className="text-sm font-semibold text-amber-900 mb-1">
-                        Cash Discount Applied
-                      </h3>
+                      <h3 className="mb-1 text-sm font-semibold text-amber-900">Cash Discount Applied</h3>
                       <p className="text-sm text-amber-800">
                         If payment is not received within 14 days of dispatch, a single payment follow-up will appear in the <strong>Payment Followup</strong> tab.
                       </p>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            )}
+                </div>
+              )}
+            </div>
 
-            {/* Invoice + Payment Flow */}
-            <Card className="shadow-sm border border-gray-200">
-              <CardHeader className="bg-gray-50 border-b border-gray-200 pb-4">
-                <CardTitle className="flex items-center gap-2.5 text-xl font-semibold text-gray-900 mb-2">
-                  <FileText className="w-5 h-5 text-blue-600" />
-                  Payment
-                </CardTitle>
-                <CardDescription className="text-sm text-gray-600">
-                  Step-by-step flow: Invoice Number → Attachments → Payment Record
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-6">
-                <div className="space-y-6">
-                  {/* Requested Payment – manual amount for payment flow */}
-                  <div>
-                    <div className="flex items-center justify-between gap-3 mb-2">
-                      <Label className="text-sm font-semibold text-gray-700">
-                        Requested Payment
-                      </Label>
-                      <span className="text-xs text-gray-500">Total amount for this order (used for payment tracking)</span>
+            <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.6fr_1fr]">
+              <div className="flex flex-col gap-3">
+                <div className="rounded-xl border border-slate-200 bg-white p-5">
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-slate-900">Requested Payment</h3>
+                    <p className="mt-1 text-xs text-slate-400">Total amount for this order (used for payment tracking)</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">₹</span>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={requestedPaymentAmount}
+                        onChange={(e) => setRequestedPaymentAmount(e.target.value)}
+                        placeholder="Enter amount"
+                        className="h-10 rounded-lg border-slate-200 pl-7 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                      />
                     </div>
-                    <div className="flex gap-3 items-start">
-                      <div className="relative flex-1">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">₹</span>
-                        <Input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={requestedPaymentAmount}
-                          onChange={(e) => setRequestedPaymentAmount(e.target.value)}
-                          placeholder="Enter amount"
-                          className="pl-7 h-10"
-                        />
-                      </div>
+
+                    <div className="flex justify-end">
                       <Button
                         type="button"
                         onClick={async () => {
@@ -2951,508 +2925,300 @@ export default function OrderDetailsPage() {
                           }
                         }}
                         disabled={savingRequestedPayment}
-                        className="h-10 bg-blue-600 hover:bg-blue-700 text-white"
+                        className="h-9 w-20 rounded-lg bg-orange-500 text-white hover:bg-orange-600"
                       >
                         {savingRequestedPayment ? (
-                          <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-1.5" />
+                          <span className="inline-block h-4 w-4 animate-spin rounded-full border-b-2 border-white" />
                         ) : (
-                          <Check className="w-4 h-4 mr-1.5" />
+                          "Save"
                         )}
-                        Save
                       </Button>
                     </div>
                   </div>
+                </div>
 
-                  {/* Divider */}
-                  <div className="h-px bg-gray-200"></div>
-
-                  {/* Step 1: Invoice Number */}
-                  <div>
-                    <div className="flex items-center justify-between gap-3 mb-2">
-                      <Label className="text-sm font-semibold text-gray-700">
-                        1) Invoice Number
-                      </Label>
-                      <span className="text-xs text-gray-500">Required before recording payment</span>
-                    </div>
-                    <div className="flex gap-3 items-start">
-                      <Input
-                        type="text"
-                        value={invoiceNumber}
-                        onChange={(e) => setInvoiceNumber(e.target.value)}
-                        placeholder="Enter invoice number or generate from dispatch"
-                        className="flex-1 h-10"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          const baseOrderNumber = order?.internal_order_number || 'ORD'
-                          const generatedInvoice = `INV-${baseOrderNumber}`
-                          setInvoiceNumber(generatedInvoice)
-                        }}
-                        className="h-10 whitespace-nowrap"
-                      >
-                        <Plus className="w-4 h-4 mr-1.5" />
-                        Regenerate
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={async () => {
-                          // Save invoice number only (no payment status update)
-                          const result = await updateOrderPayment(orderId, invoiceNumber || undefined)
-                          if (result.success) {
-                            setSuccess("Invoice number saved!")
-                            await loadOrderDetails()
-                            setTimeout(() => setSuccess(null), 2000)
-                          } else {
-                            setError(result.error || "Failed to save invoice number")
-                          }
-                        }}
-                        disabled={!invoiceNumber}
-                        className="h-10 bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                        <Check className="w-4 h-4 mr-1.5" />
-                        Save
-                      </Button>
-                    </div>
-                    {!invoiceNumber && (
-                      <p className="text-xs text-gray-500 mt-2">
-                        Invoice number will be generated automatically once production is completed.
-                      </p>
-                    )}
+                <div className="rounded-xl border border-slate-200 bg-white p-5">
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-slate-900">Invoice Number</h3>
+                    <p className="mt-1 text-xs text-slate-400">Required before adding invoice attachments</p>
                   </div>
 
-                  {/* Divider */}
-                  <div className="h-px bg-gray-200"></div>
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start">
+                    <Input
+                      type="text"
+                      value={invoiceNumber}
+                      onChange={(e) => setInvoiceNumber(e.target.value)}
+                      placeholder="Enter invoice number or generate from dispatch"
+                      className="h-10 flex-1 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        const baseOrderNumber = order?.internal_order_number || "ORD"
+                        const generatedInvoice = `INV-${baseOrderNumber}`
+                        setInvoiceNumber(generatedInvoice)
+                      }}
+                      className="h-10 whitespace-nowrap rounded-lg border-slate-200 px-3.5 text-xs text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      <Plus className="mr-1.5 h-4 w-4" />
+                      Regenerate
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={async () => {
+                        const result = await updateOrderPayment(orderId, invoiceNumber || undefined)
+                        if (result.success) {
+                          setSuccess("Invoice number saved!")
+                          await loadOrderDetails()
+                          setTimeout(() => setSuccess(null), 2000)
+                        } else {
+                          setError(result.error || "Failed to save invoice number")
+                        }
+                      }}
+                      disabled={!invoiceNumber}
+                      className="h-10 w-16 rounded-lg bg-orange-500 text-white hover:bg-orange-600"
+                    >
+                      Save
+                    </Button>
+                  </div>
 
-                  {/* Production Records - Collapsible */}
-                  {productionRecords && productionRecords.length > 0 && (
-                    <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => setPaymentProductionRecordsOpen((prev) => !prev)}
-                        className="w-full flex items-center justify-between gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          {paymentProductionRecordsOpen ? (
-                            <ChevronDown className="h-4 w-4 text-gray-500 shrink-0" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4 text-gray-500 shrink-0" />
-                          )}
-                          <Label className="text-sm font-semibold text-gray-700 cursor-pointer">
-                            Production Records
-                          </Label>
-                          <span className="text-xs text-gray-500">({productionRecords.length})</span>
-                        </div>
-                      </button>
-                      {paymentProductionRecordsOpen && (
-                        <div className="p-3 pt-0 space-y-2 border-t border-gray-200 bg-white">
-                          {productionRecords.map((record: any) => (
-                            <div key={record.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <span className="text-sm font-semibold text-gray-900">{record.production_number}</span>
-                                  <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                                    {record.production_type === "full" ? "Full" : "Partial"}
-                                  </span>
-                                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${record.status === "completed"
-                                    ? "bg-green-100 text-green-700"
-                                    : record.status === "in_production"
-                                      ? "bg-yellow-100 text-yellow-700"
-                                      : "bg-gray-100 text-gray-700"
-                                    }`}>
-                                    {record.status === "completed" ? "Completed" : record.status === "in_production" ? "In Production" : "Pending"}
-                                  </span>
-                                </div>
-                                {record.pdf_file_url && (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => window.open(record.pdf_file_url, '_blank')}
-                                    className="h-8 text-xs"
-                                  >
-                                    <File className="w-3 h-3 mr-1" />
-                                    View PDF
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                  {!invoiceNumber && (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Invoice number will be generated automatically once production is completed.
+                    </p>
                   )}
+                </div>
 
-                  {/* Dispatch Records - Collapsible */}
-                  {dispatches && dispatches.length > 0 && (
-                    <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => setPaymentDispatchRecordsOpen((prev) => !prev)}
-                        className="w-full flex items-center justify-between gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          {paymentDispatchRecordsOpen ? (
-                            <ChevronDown className="h-4 w-4 text-gray-500 shrink-0" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4 text-gray-500 shrink-0" />
-                          )}
-                          <Label className="text-sm font-semibold text-gray-700 cursor-pointer">
-                            Dispatch Records
-                          </Label>
-                          <span className="text-xs text-gray-500">({dispatches.length})</span>
-                        </div>
-                      </button>
-                      {paymentDispatchRecordsOpen && (
-                        <div className="p-3 pt-0 space-y-2 border-t border-gray-200 bg-white">
-                          {dispatches.map((dispatch: any) => (
-                            <div key={dispatch.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-3">
-                                  <span className="text-sm font-medium text-gray-900">
-                                    {dispatch.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
-                                  </span>
-                                  <span className="text-xs text-gray-500">
-                                    {new Date(dispatch.dispatch_date).toLocaleDateString('en-US', {
-                                      month: 'short',
-                                      day: 'numeric',
-                                      year: 'numeric'
-                                    })}
-                                  </span>
-                                  {dispatch.production_records && (
-                                    <span className="text-xs text-gray-600">
-                                      Prod: {dispatch.production_records.production_number}
-                                    </span>
-                                  )}
-                                </div>
-                                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${dispatch.shipment_status === 'delivered'
-                                  ? (dispatch.dispatch_type === 'partial' ? "bg-teal-100 text-teal-700" : "bg-green-100 text-green-700")
-                                  : dispatch.shipment_status === 'picked_up'
-                                    ? "bg-blue-100 text-blue-700"
-                                    : "bg-yellow-100 text-yellow-700"
+                {productionRecords && productionRecords.length > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentProductionRecordsOpen((prev) => !prev)}
+                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left transition-colors hover:bg-orange-50"
+                    >
+                      <div className="flex items-center gap-2 text-slate-900">
+                        <Factory className="h-4 w-4 text-slate-500" />
+                        <span className="text-[13px] font-medium">Production Records</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                          {productionRecords.length}
+                        </span>
+                        <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${paymentProductionRecordsOpen ? "rotate-180" : ""}`} />
+                      </div>
+                    </button>
+
+                    {paymentProductionRecordsOpen && (
+                      <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+                        {productionRecords.map((record: any) => (
+                          <div key={record.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-semibold text-slate-900">{record.production_number}</span>
+                                <span className="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-700">
+                                  {record.production_type === "full" ? "Full" : "Partial"}
+                                </span>
+                                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${record.status === "completed"
+                                  ? "bg-green-100 text-green-700"
+                                  : record.status === "in_production"
+                                    ? "bg-yellow-100 text-yellow-700"
+                                    : "bg-slate-200 text-slate-700"
                                   }`}>
-                                  {dispatch.shipment_status === 'delivered'
-                                    ? (dispatch.dispatch_type === 'partial' ? 'Partial Delivered' : 'Delivered')
-                                    : dispatch.shipment_status === 'picked_up' ? 'Picked Up' : 'Ready'}
+                                  {record.status === "completed" ? "Completed" : record.status === "in_production" ? "In Production" : "Pending"}
                                 </span>
                               </div>
-                              {dispatch.courier_companies && (
-                                <div className="text-xs text-gray-600">
-                                  Courier: {dispatch.courier_companies.name}
-                                  {dispatch.tracking_id && ` • Tracking: ${dispatch.tracking_id}`}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Divider */}
-                  {(productionRecords && productionRecords.length > 0) || (dispatches && dispatches.length > 0) ? (
-                    <div className="h-px bg-gray-200"></div>
-                  ) : null}
-
-                  {/* Step 2: Invoice Attachments */}
-                  <div>
-                    <div className="flex items-center justify-between gap-3 mb-3">
-                      <Label className="text-sm font-semibold text-gray-700">
-                        2) Invoice Attachments
-                      </Label>
-                      <span className="text-xs text-gray-500">Upload invoice PDF/JPG/PNG</span>
-                    </div>
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <input
-                          id="invoice-attachment-input"
-                          type="file"
-                          accept="application/pdf,image/*"
-                          className="hidden"
-                          onChange={(event) => {
-                            const file = event.target.files?.[0]
-                            if (file) {
-                              handleInvoiceAttachmentUpload(file)
-                            }
-                            event.target.value = ""
-                          }}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            const input = document.getElementById("invoice-attachment-input") as HTMLInputElement | null
-                            input?.click()
-                          }}
-                          disabled={uploadingInvoiceAttachment}
-                          className="h-10"
-                        >
-                          {uploadingInvoiceAttachment ? (
-                            <>
-                              <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></span>
-                              Uploading...
-                            </>
-                          ) : (
-                            <>
-                              <Upload className="w-4 h-4 mr-2" />
-                              Upload Attachment
-                            </>
-                          )}
-                        </Button>
-                        <p className="text-xs text-gray-500">Accepted: PDF, JPG, PNG</p>
-                      </div>
-
-                      {invoiceAttachments.length === 0 ? (
-                        <div className="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-lg p-4">
-                          No attachments uploaded yet.
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {invoiceAttachments.map((attachment) => (
-                            <div
-                              key={attachment.id}
-                              className="flex flex-wrap items-center justify-between gap-3 p-3 border border-gray-200 rounded-lg bg-white"
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-md bg-blue-50 text-blue-600">
-                                  <File className="w-4 h-4" />
-                                </div>
-                                <div>
-                                  <p className="text-sm font-medium text-gray-900">{attachment.file_name}</p>
-                                  <p className="text-xs text-gray-500">
-                                    {(attachment.file_size ? (attachment.file_size / 1024).toFixed(1) : "-")}
-                                    {attachment.file_size ? " KB" : ""}
-                                    {attachment.created_at
-                                      ? ` • ${new Date(attachment.created_at).toLocaleDateString()}`
-                                      : ""}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
+                              {record.pdf_file_url && (
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => window.open(attachment.file_url, '_blank')}
-                                  className="h-8 text-xs"
+                                  onClick={() => window.open(record.pdf_file_url, "_blank")}
+                                  className="h-8 rounded-lg border-slate-200 text-xs text-slate-700 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
                                 >
-                                  <Download className="w-3 h-3 mr-1" />
-                                  Download
+                                  <File className="mr-1 h-3 w-3" />
+                                  View PDF
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={async () => {
-                                    if (confirm("Delete this attachment?")) {
-                                      const result = await deleteInvoiceAttachment(attachment.id)
-                                      if (result.success) {
-                                        await loadInvoiceAttachments()
-                                        setSuccess("Attachment deleted!")
-                                        setTimeout(() => setSuccess(null), 2000)
-                                      } else {
-                                        setError(result.error || "Failed to delete attachment")
-                                      }
-                                    }
-                                  }}
-                                  className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              </div>
+                              )}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
+                )}
 
-                  {/* Step 3: Add Payment Record */}
-                  <div>
-                    <div className="flex items-center justify-between gap-3 mb-2">
-                      <Label className="text-sm font-semibold text-gray-700">
-                        3) Add Payment in Record
-                      </Label>
-                      <span className="text-xs text-gray-500">Adds an entry to payment history</span>
-                    </div>
-
-                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                          <Label className="text-xs font-semibold text-gray-600">Amount (₹) *</Label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max={paymentSummary.hasRequestedPayment ? paymentSummary.amountDue : undefined}
-                            value={paymentAmount}
-                            onChange={(e) => setPaymentAmount(e.target.value)}
-                            placeholder="e.g. 25000"
-                            className="h-10"
-                            disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
-                            aria-describedby="payment-remaining-hint"
-                          />
-                          <p id="payment-remaining-hint" className="text-xs text-gray-500 mt-1.5">
-                            {paymentSummary.hasRequestedPayment
-                              ? `Remaining: ₹${paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
-                              : "Set Requested Payment above to record payments."}
-                          </p>
-                        </div>
-                        <div>
-                          <Label className="text-xs font-semibold text-gray-600">Payment Date</Label>
-                          <Input
-                            type="date"
-                            value={paymentDate || new Date().toISOString().split('T')[0]}
-                            onChange={(e) => setPaymentDate(e.target.value)}
-                            className="h-10"
-                            disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs font-semibold text-gray-600">Method</Label>
-                          <Select
-                            value={paymentMethod || "cash"}
-                            onValueChange={setPaymentMethod}
-                            disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
-                          >
-                            <SelectTrigger className="h-10">
-                              <SelectValue placeholder="Select method" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="cash">Cash</SelectItem>
-                              <SelectItem value="upi">UPI</SelectItem>
-                              <SelectItem value="neft">NEFT</SelectItem>
-                              <SelectItem value="cheque">Cheque</SelectItem>
-                              <SelectItem value="rtgs">RTGS</SelectItem>
-                              <SelectItem value="card">Card</SelectItem>
-                              <SelectItem value="other">Other</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                {dispatches && dispatches.length > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentDispatchRecordsOpen((prev) => !prev)}
+                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left transition-colors hover:bg-orange-50"
+                    >
+                      <div className="flex items-center gap-2 text-slate-900">
+                        <Truck className="h-4 w-4 text-slate-500" />
+                        <span className="text-[13px] font-medium">Dispatch Records</span>
                       </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <Label className="text-xs font-semibold text-gray-600">Reference</Label>
-                          <Input
-                            type="text"
-                            value={paymentReference}
-                            onChange={(e) => setPaymentReference(e.target.value)}
-                            placeholder="Txn / Cheque / Ref no."
-                            className="h-10"
-                            disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs font-semibold text-gray-600">Notes</Label>
-                          <Input
-                            type="text"
-                            value={paymentNotes}
-                            onChange={(e) => setPaymentNotes(e.target.value)}
-                            placeholder="Any notes"
-                            className="h-10"
-                            disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
-                          />
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                          {dispatches.length}
+                        </span>
+                        <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${paymentDispatchRecordsOpen ? "rotate-180" : ""}`} />
                       </div>
+                    </button>
 
-                      {!invoiceNumber && (
-                        <p className="text-xs text-amber-700">
-                          Please set an invoice number first.
-                        </p>
-                      )}
-                      {invoiceNumber && !paymentSummary.hasRequestedPayment && (
-                        <p className="text-xs text-amber-700">
-                          Please set Requested Payment above before adding payment records.
-                        </p>
-                      )}
-
-                      <div className="flex justify-end">
-                        <Button
-                          type="button"
-                          onClick={handleAddPaymentRecord}
-                          disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
-                          className="bg-green-600 hover:bg-green-700 text-white h-10 px-6"
-                        >
-                          {addingPayment ? (
-                            <>
-                              <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
-                              Adding...
-                            </>
-                          ) : (
-                            <>
-                              <DollarSign className="w-4 h-4 mr-2" />
-                              Add Payment
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Payment History */}
-                  <div>
-                    <div className="flex items-center justify-between gap-3 mb-3">
-                      <Label className="text-sm font-semibold text-gray-700">Payment History</Label>
-                      {loadingPayments ? (
-                        <span className="text-xs text-gray-500">Loading...</span>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={loadOrderPayments}
-                          disabled={loadingPayments}
-                          className="h-8 text-xs"
-                        >
-                          <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loadingPayments ? 'animate-spin' : ''}`} />
-                          Refresh
-                        </Button>
-                      )}
-                    </div>
-
-                    {orderPayments.length === 0 ? (
-                      <div className="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-lg p-4">
-                        No payments recorded yet.
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {orderPayments.map((p) => (
-                          <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50/50">
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-2">
-                                <span className="text-base font-semibold text-gray-900">₹{Number(p.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                                <span className="text-xs text-gray-500">• {p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '-'}</span>
-                                {p.payment_method && (
-                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100 font-semibold uppercase tracking-wide">
-                                    {p.payment_method}
+                    {paymentDispatchRecordsOpen && (
+                      <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+                        {dispatches.map((dispatch: any) => (
+                          <div key={dispatch.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex flex-wrap items-center gap-2.5">
+                                <span className="text-sm font-medium text-slate-900">
+                                  {dispatch.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
+                                </span>
+                                <span className="text-xs text-slate-500">
+                                  {new Date(dispatch.dispatch_date).toLocaleDateString("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  })}
+                                </span>
+                                {dispatch.production_records && (
+                                  <span className="text-xs text-slate-600">
+                                    Prod: {dispatch.production_records.production_number}
                                   </span>
                                 )}
                               </div>
-                              <div className="text-xs text-gray-600">
-                                {p.reference ? `Ref: ${p.reference}` : ""}
-                                {p.reference && p.notes ? " • " : ""}
-                                {p.notes || ""}
+                              <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${dispatch.shipment_status === "delivered"
+                                ? (dispatch.dispatch_type === "partial" ? "bg-teal-100 text-teal-700" : "bg-green-100 text-green-700")
+                                : dispatch.shipment_status === "picked_up"
+                                  ? "bg-orange-100 text-orange-700"
+                                  : "bg-yellow-100 text-yellow-700"
+                                }`}>
+                                {dispatch.shipment_status === "delivered"
+                                  ? (dispatch.dispatch_type === "partial" ? "Partial Delivered" : "Delivered")
+                                  : dispatch.shipment_status === "picked_up"
+                                    ? "Picked Up"
+                                    : "Ready"}
+                              </span>
+                            </div>
+                            {dispatch.courier_companies && (
+                              <div className="text-xs text-slate-600">
+                                Courier: {dispatch.courier_companies.name}
+                                {dispatch.tracking_id && ` • Tracking: ${dispatch.tracking_id}`}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {(!productionRecords || productionRecords.length === 0) && (!dispatches || dispatches.length === 0) && (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                    No production or dispatch records found. Create production records and dispatches to generate invoice.
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-slate-200 bg-white p-5">
+                  <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <h3 className="text-sm font-semibold text-slate-900">Invoice Attachments</h3>
+                    <p className="text-xs text-slate-400">Upload invoice PDF (optional)</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <input
+                      id="invoice-attachment-input"
+                      type="file"
+                      accept="application/pdf,image/*"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0]
+                        if (file) {
+                          handleInvoiceAttachmentUpload(file)
+                        }
+                        event.target.value = ""
+                      }}
+                    />
+
+                    <div className="rounded-[10px] border-2 border-dashed border-slate-200 px-5 py-7 text-center transition-colors hover:border-orange-500 hover:bg-orange-50">
+                      <Upload className="mx-auto h-7 w-7 text-slate-300" />
+                      <p className="mt-3 text-[13px] font-medium text-slate-600">Upload Attachment</p>
+                      <p className="mt-1 text-[11px] text-slate-400">Accepts PDF, JPG, PNG</p>
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          const input = document.getElementById("invoice-attachment-input") as HTMLInputElement | null
+                          input?.click()
+                        }}
+                        disabled={uploadingInvoiceAttachment}
+                        className="mt-3 h-8 rounded-md bg-orange-500 px-4 text-white hover:bg-orange-600"
+                      >
+                        {uploadingInvoiceAttachment ? (
+                          <>
+                            <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-b-2 border-white"></span>
+                            Uploading...
+                          </>
+                        ) : (
+                          "Browse"
+                        )}
+                      </Button>
+                    </div>
+
+                    {invoiceAttachments.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                        No attachments uploaded yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {invoiceAttachments.map((attachment) => (
+                          <div
+                            key={attachment.id}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="rounded-full bg-slate-100 p-2 text-slate-500">
+                                <File className="h-4 w-4" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-slate-900">{attachment.file_name}</p>
+                                <p className="text-xs text-slate-500">
+                                  {(attachment.file_size ? (attachment.file_size / 1024).toFixed(1) : "-")}
+                                  {attachment.file_size ? " KB" : ""}
+                                  {attachment.created_at
+                                    ? ` • ${new Date(attachment.created_at).toLocaleDateString()}`
+                                    : ""}
+                                </p>
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
                               <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.open(attachment.file_url, "_blank")}
+                                className="h-8 rounded-lg border-slate-200 text-xs text-slate-700 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
+                              >
+                                <Download className="mr-1 h-3 w-3" />
+                                Download
+                              </Button>
+                              <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={async () => {
-                                  if (confirm("Delete this payment record?")) {
-                                    const result = await deleteOrderPayment(p.id)
+                                  if (confirm("Delete this attachment?")) {
+                                    const result = await deleteInvoiceAttachment(attachment.id)
                                     if (result.success) {
-                                      await loadOrderPayments()
-                                      setSuccess("Payment record deleted!")
+                                      await loadInvoiceAttachments()
+                                      setSuccess("Attachment deleted!")
                                       setTimeout(() => setSuccess(null), 2000)
                                     } else {
-                                      setError(result.error || "Failed to delete payment")
+                                      setError(result.error || "Failed to delete attachment")
                                     }
                                   }
                                 }}
-                                className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
-                                title="Delete payment"
+                                className="h-8 w-8 rounded-full p-0 text-red-500 hover:bg-red-50 hover:text-red-600"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
                           </div>
@@ -3460,120 +3226,320 @@ export default function OrderDetailsPage() {
                       </div>
                     )}
                   </div>
-
-                  {(!productionRecords || productionRecords.length === 0) && (!dispatches || dispatches.length === 0) && (
-                    <div className="text-center py-8 text-gray-500 text-sm">
-                      No production or dispatch records found. Create production records and dispatches to generate invoice.
-                    </div>
-                  )}
-
-                  {/* Optional: keep existing status updater as “Summary” */}
-                  {invoiceNumber && paymentSummary.amountDue === 0 && (
-                    <>
-                      <div className="h-px bg-gray-200"></div>
-                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                        <div className="text-xs text-gray-500">
-                          Optional: Update overall order payment status (Pending / Partial / Paid).
-                        </div>
-                        <Button
-                          onClick={handleUpdatePayment}
-                          className="bg-blue-600 hover:bg-blue-700 text-white h-10 px-6"
-                        >
-                          <Check className="w-4 h-4 mr-2" />
-                          Update Order Payment Status
-                        </Button>
-                      </div>
-                    </>
-                  )}
                 </div>
-              </CardContent>
-            </Card>
 
-            {/* Payment Summary - Always visible */}
-            <Card className="shadow-sm border border-gray-200">
-              <CardHeader className="bg-gray-50 border-b border-gray-200 pb-4">
-                <CardTitle className="flex items-center gap-2.5 text-xl font-semibold text-gray-900 mb-2">
-                  <DollarSign className="w-5 h-5 text-blue-600" />
-                  Payment Summary
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-6">
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
-                        Invoice Number
-                      </Label>
-                      <p className="text-base font-semibold text-gray-900">{invoiceNumber || '—'}</p>
-                    </div>
-                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
-                        Payment Status
-                      </Label>
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${derivedPaymentStatus === "complete"
-                        ? "bg-green-100 text-green-700"
-                        : derivedPaymentStatus === "partial"
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-yellow-100 text-yellow-700"
-                        }`}>
-                        {derivedPaymentStatus === "complete" ? "Paid" : derivedPaymentStatus === "partial" ? "Partial" : "Pending"}
-                      </span>
-                    </div>
-                    {paymentSummary.amountDue > 0 && (
-                      <div className="p-4 bg-gray-50 rounded-lg border border-orange-200">
-                        <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
-                          Amount due
-                        </Label>
-                        <p className="text-base font-semibold text-orange-600">
-                          ₹{paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                <div className="rounded-xl border border-slate-200 bg-white p-5">
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-slate-900">Add Payment to Record</h3>
+                    <p className="mt-1 text-xs text-slate-400">Save as entry to payment history</p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {!invoiceNumber && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-100/70 px-3.5 py-2.5 text-xs text-amber-800">
+                        Please add invoice number before adding payment records.
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <div>
+                        <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Amount (₹)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max={paymentSummary.hasRequestedPayment ? paymentSummary.amountDue : undefined}
+                          value={paymentAmount}
+                          onChange={(e) => setPaymentAmount(e.target.value)}
+                          placeholder="e.g. 25000"
+                          className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                          disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
+                          aria-describedby="payment-remaining-hint"
+                        />
+                        <p id="payment-remaining-hint" className="mt-1.5 text-xs text-slate-500">
+                          {paymentSummary.hasRequestedPayment
+                            ? `Remaining: ₹${paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
+                            : "Set Requested Payment above to record payments."}
                         </p>
                       </div>
+
+                      <div>
+                        <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Pay Record Date</Label>
+                        <Input
+                          type="date"
+                          value={paymentDate || new Date().toISOString().split("T")[0]}
+                          onChange={(e) => setPaymentDate(e.target.value)}
+                          className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                          disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Method</Label>
+                        <Select
+                          value={paymentMethod || "cash"}
+                          onValueChange={setPaymentMethod}
+                          disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
+                        >
+                          <SelectTrigger className="h-10 rounded-lg border-slate-200 focus:ring-[3px] focus:ring-orange-500/15 focus:ring-offset-0">
+                            <SelectValue placeholder="Select method" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="cash">Cash</SelectItem>
+                            <SelectItem value="upi">UPI</SelectItem>
+                            <SelectItem value="neft">NEFT</SelectItem>
+                            <SelectItem value="cheque">Cheque</SelectItem>
+                            <SelectItem value="rtgs">RTGS</SelectItem>
+                            <SelectItem value="card">Card</SelectItem>
+                            <SelectItem value="other">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div>
+                        <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Reference</Label>
+                        <Input
+                          type="text"
+                          value={paymentReference}
+                          onChange={(e) => setPaymentReference(e.target.value)}
+                          placeholder="Reference / UTR number"
+                          className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                          disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Notes</Label>
+                        <Input
+                          type="text"
+                          value={paymentNotes}
+                          onChange={(e) => setPaymentNotes(e.target.value)}
+                          placeholder="Notes (optional)"
+                          className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                          disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
+                        />
+                      </div>
+                    </div>
+
+                    {invoiceNumber && !paymentSummary.hasRequestedPayment && (
+                      <p className="text-xs text-amber-700">
+                        Please set Requested Payment above before adding payment records.
+                      </p>
                     )}
+
+                    <Button
+                      type="button"
+                      onClick={handleAddPaymentRecord}
+                      disabled={!invoiceNumber || !canRecordPayment || !paymentSummary.hasRequestedPayment || addingPayment}
+                      className="h-10 w-full rounded-lg bg-orange-500 text-[13px] font-medium text-white hover:bg-orange-600"
+                    >
+                      {addingPayment ? (
+                        <>
+                          <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-b-2 border-white"></span>
+                          Adding...
+                        </>
+                      ) : (
+                        <>
+                          <DollarSign className="mr-2 h-4 w-4" />
+                          Add Payment
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 lg:sticky lg:top-5">
+                <div className="rounded-xl border border-slate-200 bg-white p-5">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-slate-900">Payment History</h3>
+                    {loadingPayments ? (
+                      <span className="text-xs text-slate-500">Loading...</span>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={loadOrderPayments}
+                        disabled={loadingPayments}
+                        className="h-7 w-7 rounded-full border border-transparent p-0 text-slate-500 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-500"
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${loadingPayments ? "animate-spin" : ""}`} />
+                      </Button>
+                    )}
+                  </div>
+
+                  {orderPayments.length === 0 ? (
+                    <div className="flex min-h-[140px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 text-center">
+                      <Receipt className="h-8 w-8 text-slate-200" />
+                      <p className="mt-3 text-[13px] text-slate-400">No payments recorded yet</p>
+                      <p className="mt-1 text-[11px] text-slate-300">Add a payment using the form on the left</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {orderPayments.map((p) => (
+                        <div
+                          key={p.id}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-transparent px-3 py-3 transition-colors hover:bg-slate-50"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                              <span>{p.payment_date ? new Date(p.payment_date).toLocaleDateString() : "-"}</span>
+                              {p.payment_method && (
+                                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
+                                  {p.payment_method}
+                                </span>
+                              )}
+                            </div>
+                            {(p.reference || p.notes) && (
+                              <div className="mt-1 truncate text-xs text-slate-600">
+                                {p.reference ? `Ref: ${p.reference}` : ""}
+                                {p.reference && p.notes ? " • " : ""}
+                                {p.notes || ""}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-green-600">
+                              ₹{Number(p.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async () => {
+                                if (confirm("Delete this payment record?")) {
+                                  const result = await deleteOrderPayment(p.id)
+                                  if (result.success) {
+                                    await loadOrderPayments()
+                                    setSuccess("Payment record deleted!")
+                                    setTimeout(() => setSuccess(null), 2000)
+                                  } else {
+                                    setError(result.error || "Failed to delete payment")
+                                  }
+                                }
+                              }}
+                              className="h-8 w-8 rounded-full p-0 text-red-500 hover:bg-red-50 hover:text-red-600"
+                              title="Delete payment"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-5">
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-semibold text-slate-900">Payment Summary</h3>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-600">Invoice Number</span>
+                        <span className="rounded bg-slate-50 px-2 py-1 font-mono text-xs text-slate-800">
+                          {invoiceNumber || "—"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-600">Payment Status</span>
+                        <span
+                          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${derivedPaymentStatus === "complete"
+                            ? "bg-green-100 text-green-800"
+                            : derivedPaymentStatus === "partial"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-amber-100 text-amber-800"
+                            }`}
+                        >
+                          {derivedPaymentStatus === "complete" ? "Paid" : derivedPaymentStatus === "partial" ? "Partial" : "Pending"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-600">Total Paid</span>
+                        <span className="text-sm font-semibold text-green-600">
+                          ₹{paymentSummary.totalPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-600">Amount Due</span>
+                        <span className={`text-sm font-semibold ${paymentSummary.amountDue > 0 ? "text-red-600" : "text-slate-900"}`}>
+                          ₹{paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="h-px bg-slate-100"></div>
+
                     {derivedPaymentStatus === "partial" && (
-                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                        <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <Label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                           Partial Payment Details
                         </Label>
-                        <div className="grid grid-cols-2 gap-4 mt-2">
+                        <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <p className="text-xs text-gray-600">Amount Paid</p>
-                            <p className="text-base font-semibold text-gray-900">₹{paymentSummary.totalPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+                            <p className="text-xs text-slate-600">Amount Paid</p>
+                            <p className="text-base font-semibold text-slate-900">
+                              ₹{paymentSummary.totalPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </p>
                           </div>
                           <div>
-                            <p className="text-xs text-gray-600">Remaining</p>
-                            <p className="text-base font-semibold text-orange-600">₹{paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+                            <p className="text-xs text-slate-600">Remaining</p>
+                            <p className="text-base font-semibold text-red-600">
+                              ₹{paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </p>
                           </div>
                         </div>
                       </div>
                     )}
+
                     {(derivedPaymentStatus === "complete" || derivedPaymentStatus === "partial") && paymentDate && (
-                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                        <Label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <Label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                           Payment Date
                         </Label>
-                        <p className="text-base font-semibold text-gray-900">
-                          {new Date(paymentDate).toLocaleDateString('en-US', {
-                            month: 'long',
-                            day: 'numeric',
-                            year: 'numeric'
+                        <p className="text-base font-semibold text-slate-900">
+                          {new Date(paymentDate).toLocaleDateString("en-US", {
+                            month: "long",
+                            day: "numeric",
+                            year: "numeric",
                           })}
                         </p>
                       </div>
                     )}
+
+                    {zohoBillingDetails && (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <Label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          ZOHO Billing Details
+                        </Label>
+                        <pre className="whitespace-pre-wrap break-words text-xs font-mono text-slate-700">
+                          {typeof zohoBillingDetails === "string" ? zohoBillingDetails : JSON.stringify(zohoBillingDetails, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+
+                    {invoiceNumber && paymentSummary.amountDue === 0 && (
+                      <div className="space-y-2 pt-1">
+                        <Button
+                          onClick={handleUpdatePayment}
+                          className="h-10 w-full rounded-lg bg-orange-500 text-[13px] font-medium text-white hover:bg-orange-600"
+                        >
+                          <Check className="mr-2 h-4 w-4" />
+                          Update Order Payment Status
+                        </Button>
+                        <p className="text-center text-[11px] text-slate-400">Updates status in Zoho Billing</p>
+                      </div>
+                    )}
                   </div>
-                  {zohoBillingDetails && (
-                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">
-                        ZOHO Billing Details
-                      </Label>
-                      <pre className="text-xs font-mono text-gray-700 whitespace-pre-wrap break-words">
-                        {typeof zohoBillingDetails === 'string' ? zohoBillingDetails : JSON.stringify(zohoBillingDetails, null, 2)}
-                      </pre>
-                    </div>
-                  )}
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </div>
         </TabsContent>
 
@@ -3688,7 +3654,7 @@ export default function OrderDetailsPage() {
                                 }))}
                                 placeholder="Outcome / notes from the follow-up call or action"
                                 rows={3}
-                                className="mt-1.5 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className="mt-1.5 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sk-primary"
                               />
                             </div>
                             <Button
@@ -3708,7 +3674,6 @@ export default function OrderDetailsPage() {
                                 })
                               }}
                               disabled={savingFollowupId === followup.id}
-                              className="bg-blue-600 hover:bg-blue-700 text-white"
                             >
                               {savingFollowupId === followup.id ? (
                                 <>
@@ -3885,7 +3850,7 @@ export default function OrderDetailsPage() {
                           value={selectedCourierCompany}
                           onChange={(e) => setSelectedCourierCompany(e.target.value)}
                           disabled={dispatching}
-                          className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sk-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <option value="">Select a courier company...</option>
                           {courierCompanies.map((company) => (
@@ -3962,7 +3927,6 @@ export default function OrderDetailsPage() {
                 <Button
                   onClick={handleCreateDispatch}
                   disabled={dispatching || Object.values(dispatchQuantities).every(qty => qty === 0)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
                 >
                   {dispatching ? (
                     <>
@@ -4052,7 +4016,6 @@ export default function OrderDetailsPage() {
                           setError(result.error || "Failed to update order")
                         }
                       }}
-                      className="bg-blue-600 hover:bg-blue-700 text-white"
                     >
                       <Check className="w-4 h-4 mr-2" />
                       Save Changes

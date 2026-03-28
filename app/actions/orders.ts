@@ -1287,6 +1287,110 @@ export async function getOrderDispatches(orderId: string) {
   return { success: true, data: dispatches || [], error: null }
 }
 
+export type TrackingLookupResult = {
+  dispatch_id: string
+  order_id: string
+  order_number: string
+  sales_order_number: string | null
+  customer_name: string
+  order_status: string
+  dispatch_type: string
+  shipment_status: string
+  dispatch_date: string | null
+  tracking_id: string
+  courier_name: string
+  tracking_url: string | null
+}
+
+function buildCourierTrackingUrl(template: string | null, trackingId: string): string | null {
+  if (!template) return null
+  const tracking = encodeURIComponent(trackingId)
+  if (template.includes("{tracking_number}")) {
+    return template.replaceAll("{tracking_number}", tracking)
+  }
+  if (template.includes("{tracking_id}")) {
+    return template.replaceAll("{tracking_id}", tracking)
+  }
+  if (template.includes("%s")) {
+    return template.replace("%s", tracking)
+  }
+  return template
+}
+
+// Exact tracking-id lookup used by the dashboard Tracking tab.
+export async function getOrderTrackingById(trackingId: string): Promise<{
+  success: boolean
+  data: TrackingLookupResult[] | null
+  error: string | null
+}> {
+  const supabase = await createClient()
+  const normalized = trackingId.trim()
+
+  if (!normalized) {
+    return { success: false, data: null, error: "Please enter a tracking ID." }
+  }
+
+  if (normalized.length > 120) {
+    return { success: false, data: null, error: "Tracking ID is too long." }
+  }
+
+  const { data, error } = await supabase
+    .from("dispatches")
+    .select(`
+      id,
+      order_id,
+      dispatch_type,
+      dispatch_date,
+      shipment_status,
+      tracking_id,
+      orders (
+        internal_order_number,
+        sales_order_number,
+        order_status,
+        customers:customer_id ( name )
+      ),
+      courier_companies (
+        name,
+        tracking_url
+      )
+    `)
+    .neq("dispatch_type", "return")
+    .ilike("tracking_id", normalized)
+    .order("dispatch_date", { ascending: false })
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    return { success: false, data: null, error: error.message }
+  }
+
+  const rows = (data || []).map((row: any) => {
+    const order = Array.isArray(row.orders) ? row.orders[0] : row.orders
+    const customerRaw = order?.customers
+    const customer = Array.isArray(customerRaw) ? customerRaw[0] : customerRaw
+    const courierRaw = row.courier_companies
+    const courier = Array.isArray(courierRaw) ? courierRaw[0] : courierRaw
+    const resolvedTrackingId = String(row.tracking_id || "").trim()
+
+    return {
+      dispatch_id: row.id,
+      order_id: row.order_id,
+      order_number:
+        order?.internal_order_number || order?.sales_order_number || row.order_id.slice(0, 8),
+      sales_order_number: order?.sales_order_number ?? null,
+      customer_name: customer?.name ?? "Unknown customer",
+      order_status: order?.order_status ?? "Unknown",
+      dispatch_type: row.dispatch_type,
+      shipment_status: row.shipment_status,
+      dispatch_date: row.dispatch_date ?? null,
+      tracking_id: resolvedTrackingId,
+      courier_name: courier?.name ?? "Unknown courier",
+      tracking_url: buildCourierTrackingUrl(courier?.tracking_url ?? null, resolvedTrackingId),
+    } satisfies TrackingLookupResult
+  })
+
+  return { success: true, data: rows, error: null }
+}
+
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
 
 /** Recompute order_status from delivered quantities vs order lines (non-return dispatches only). */

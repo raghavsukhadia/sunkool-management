@@ -223,7 +223,7 @@ export default function CourierPage() {
               form.reset()
               setError(null)
             }}
-            className="hidden lg:inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+            className="hidden lg:inline-flex items-center gap-2 shadow-sm"
           >
             <Plus className="w-4 h-4" />
             Add Courier Company
@@ -237,7 +237,7 @@ export default function CourierPage() {
                   setError(null)
                   setAddFormSheetOpen(true)
                 }}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm min-h-[44px]"
+                className="flex items-center gap-2 shadow-sm min-h-[44px]"
               >
                 <Plus className="w-4 h-4" />
                 Add Courier Company
@@ -343,7 +343,7 @@ export default function CourierPage() {
                       )}
                     />
                     <div className="flex gap-2 pt-2">
-                      <Button type="submit" disabled={isSubmitting} className="flex-1 min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white">
+                      <Button type="submit" disabled={isSubmitting} className="flex-1 min-h-[44px]">
                         {isSubmitting ? "Creating..." : "Create"}
                       </Button>
                       <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => { setAddFormSheetOpen(false); form.reset() }}>
@@ -520,7 +520,7 @@ export default function CourierPage() {
               />
 
                 <div className="flex gap-3 pt-2 border-t">
-                  <Button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white px-6">
+                  <Button type="submit" disabled={isSubmitting} className="px-6">
                     {isSubmitting ? "Creating..." : "Create Courier Company"}
                   </Button>
                   <Button
@@ -649,7 +649,7 @@ export default function CourierPage() {
               placeholder="Search courier companies by name, email, phone, or contact person..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-10 h-11 text-sm border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+              className="pl-10 pr-10 h-11 text-sm border-gray-300 focus:border-sk-primary focus:ring-sk-primary"
             />
             {searchTerm && (
               <button

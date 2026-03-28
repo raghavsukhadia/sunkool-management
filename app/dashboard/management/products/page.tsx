@@ -335,7 +335,7 @@ export default function ProductsPage() {
               setEditingItem(null)
               setInventoryForm({ item_name: "", date: new Date().toISOString().split('T')[0] })
             }}
-            className="hidden lg:inline-flex flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+            className="hidden lg:inline-flex flex items-center gap-2 shadow-sm"
           >
             <Plus className="w-4 h-4" />
             Add Item
@@ -343,7 +343,7 @@ export default function ProductsPage() {
           <Sheet open={addFormSheetOpen} onOpenChange={(o) => { setAddFormSheetOpen(o); if (!o) { setShowAddForm(false); setEditingItem(null) } }}>
             <SheetTrigger asChild className="lg:hidden">
               <Button
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm min-h-[44px]"
+                className="flex items-center gap-2 shadow-sm min-h-[44px]"
                 onClick={() => openAddForm()}
               >
                 <Plus className="w-4 h-4" />
@@ -379,7 +379,7 @@ export default function ProductsPage() {
                     />
                   </div>
                   <div className="flex gap-2 pt-2">
-                    <Button type="submit" className="flex-1 min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white">
+                    <Button type="submit" className="flex-1 min-h-[44px]">
                       {editingItem ? "Update" : "Add Item"}
                     </Button>
                     <Button type="button" variant="outline" onClick={closeAddForm} className="min-h-[44px]">
@@ -473,7 +473,7 @@ export default function ProductsPage() {
               <div className="flex gap-3 pt-2 border-t">
                 <Button 
                   type="submit"
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-6"
+                  className="px-6"
                 >
                   {editingItem ? "Update Item" : "Add Item"}
                 </Button>
@@ -598,7 +598,7 @@ export default function ProductsPage() {
               placeholder="Search items and sub-items by name, serial number, or date..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-10 h-11 text-sm border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+              className="pl-10 pr-10 h-11 text-sm border-gray-300 focus:border-sk-primary focus:ring-sk-primary"
             />
             {searchTerm && (
               <button

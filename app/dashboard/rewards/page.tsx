@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -43,11 +43,7 @@ export default function RewardsPage() {
   const [showAddForm, setShowAddForm] = useState(false)
   const supabase = createClient()
 
-  useEffect(() => {
-    fetchRewardsData()
-  }, [])
-
-  const fetchRewardsData = async () => {
+  const fetchRewardsData = useCallback(async () => {
     try {
       // Fetch all rewards
       const { data: rewardsData, error: rewardsError } = await supabase
@@ -87,7 +83,11 @@ export default function RewardsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [supabase])
+
+  useEffect(() => {
+    fetchRewardsData()
+  }, [fetchRewardsData])
 
   const totalPoints = rewards.reduce((sum, r) => sum + r.points, 0)
   const totalDistributors = distributorPoints.length
