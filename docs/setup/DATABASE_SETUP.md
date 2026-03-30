@@ -16,7 +16,6 @@ The complete database schema has been created in `supabase-schema.sql`.
    - `products` - Product catalog
    - `orders` - Main order table
    - `order_items` - Order line items
-   - `rewards` - Distributor reward points
    - `order_log` - Audit trail for all status changes
 
 3. **Automatic Features:**

@@ -30,6 +30,7 @@ Recommended order:
 22. **Order status stages (run in two separate steps):**
     - 22a. `database/migrations/order-status-stages-part1-enum.sql` — adds new enum values (New Order, In Progress, Ready for Dispatch, Invoiced, In Transit, Void). **Run and commit/finish this step first.**
     - 22b. `database/migrations/order-status-stages-part2-data.sql` — migrates existing order statuses and sets default. **Run only after part 1 has been applied** (Postgres requires new enum values to be committed before use).
+23. `database/migrations/remove-rewards-system.sql` — removes rewards policies/indexes/table when decommissioning Rewards.
 
 Notes:
 - Run these on a staging Supabase instance first and verify application behavior before running on production.

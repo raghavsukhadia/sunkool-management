@@ -9,7 +9,6 @@ A professional, single-user Order Management System built with Next.js 14, TypeS
 - **Production Queue**: Track items that need manufacturing
 - **Payment Follow-ups**: Manage invoices requiring attention
 - **Management**: Manage distributors and products
-- **Rewards System**: Track distributor reward points
 - **Audit Trail**: Complete order status change logging
 
 ## Tech Stack
@@ -75,8 +74,7 @@ A professional, single-user Order Management System built with Next.js 14, TypeS
 │   │   ├── orders/        # Order management pages
 │   │   ├── production/    # Production queue
 │   │   ├── follow-up/     # Payment follow-ups
-│   │   ├── management/    # Management pages (distributors, products)
-│   │   └── rewards/       # Rewards management
+│   │   └── management/    # Management pages (distributors, products)
 │   ├── login/             # Login page (public)
 │   ├── layout.tsx         # Root layout
 │   └── globals.css        # Global styles
@@ -99,14 +97,13 @@ A professional, single-user Order Management System built with Next.js 14, TypeS
 - `/dashboard/follow-up` - Payment follow-ups
 - `/dashboard/management/distributors` - Manage distributors
 - `/dashboard/management/products` - Manage products
-- `/dashboard/rewards` - Rewards management
 
 ## Database Schema
 
 The database includes:
 
 - **Enums**: `order_status_enum`, `payment_status_enum`
-- **Tables**: `profiles`, `distributors`, `products`, `orders`, `order_items`, `rewards`, `order_log`
+- **Tables**: `profiles`, `distributors`, `products`, `orders`, `order_items`, `order_log`
 - **Features**: Automatic status logging, order total calculation, RLS policies
 
 See `supabase-schema.sql` for complete schema details.

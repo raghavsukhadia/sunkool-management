@@ -81,8 +81,6 @@ sunkool-mangment/
 │   │   │   │   └── page.tsx   # Distributors table (placeholder)
 │   │   │   └── products/
 │   │   │       └── page.tsx   # Products table (placeholder)
-│   │   └── rewards/
-│   │       └── page.tsx        # Rewards (placeholder)
 │   ├── login/
 │   │   └── page.tsx            # Login page ✅
 │   ├── layout.tsx              # Root layout

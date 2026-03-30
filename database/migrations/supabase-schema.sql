@@ -99,18 +99,6 @@ CREATE TABLE order_items (
   UNIQUE(order_id, product_id)
 );
 
--- Rewards Table
--- Tracks distributor reward points
-CREATE TABLE rewards (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  distributor_id UUID NOT NULL REFERENCES distributors(id) ON DELETE CASCADE,
-  points INTEGER NOT NULL DEFAULT 0,
-  reason TEXT,
-  order_id UUID REFERENCES orders(id) ON DELETE SET NULL,
-  created_by UUID NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
 -- Order Log Table
 -- Critical: Logs every status change for audit trail
 CREATE TABLE order_log (
@@ -139,10 +127,6 @@ CREATE INDEX idx_orders_created_at ON orders(created_at DESC);
 -- Order items indexes
 CREATE INDEX idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX idx_order_items_product_id ON order_items(product_id);
-
--- Rewards indexes
-CREATE INDEX idx_rewards_distributor_id ON rewards(distributor_id);
-CREATE INDEX idx_rewards_order_id ON rewards(order_id);
 
 -- Order log indexes
 CREATE INDEX idx_order_log_order_id ON order_log(order_id);
@@ -279,7 +263,6 @@ ALTER TABLE distributors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE rewards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE order_log ENABLE ROW LEVEL SECURITY;
 
 -- ============================================
@@ -382,23 +365,6 @@ CREATE POLICY "Admins can update order items"
 
 CREATE POLICY "Admins can delete order items"
   ON order_items FOR DELETE
-  USING (is_admin());
-
--- Rewards policies
-CREATE POLICY "Admins can view all rewards"
-  ON rewards FOR SELECT
-  USING (is_admin());
-
-CREATE POLICY "Admins can insert rewards"
-  ON rewards FOR INSERT
-  WITH CHECK (is_admin());
-
-CREATE POLICY "Admins can update rewards"
-  ON rewards FOR UPDATE
-  USING (is_admin());
-
-CREATE POLICY "Admins can delete rewards"
-  ON rewards FOR DELETE
   USING (is_admin());
 
 -- Order log policies

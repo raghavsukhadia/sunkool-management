@@ -3,6 +3,19 @@
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 
+async function getAuthorizedClient() {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    return { supabase, authorized: false as const }
+  }
+
+  return { supabase, authorized: true as const }
+}
+
 // Products Actions
 export async function createProduct(formData: {
   name: string
@@ -13,7 +26,8 @@ export async function createProduct(formData: {
   parent_product_id?: string
   display_order?: number
 }) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   const { data, error } = await supabase
     .from("products")
@@ -51,7 +65,8 @@ export async function updateProduct(
     is_active?: boolean
   }
 ) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   const { data, error } = await supabase
     .from("products")
@@ -87,7 +102,8 @@ export async function createCourierCompany(formData: {
   tracking_url?: string
   notes?: string
 }) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   const { data, error } = await supabase
     .from("courier_companies")
@@ -125,7 +141,8 @@ export async function updateCourierCompany(
     is_active?: boolean
   }
 ) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   const { data, error } = await supabase
     .from("courier_companies")
@@ -160,7 +177,8 @@ export async function createCustomer(formData: {
   contact_person?: string
   notes?: string
 }) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   const { data, error } = await supabase
     .from("customers")
@@ -196,7 +214,8 @@ export async function updateCustomer(
     is_active?: boolean
   }
 ) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   const { data, error } = await supabase
     .from("customers")
@@ -300,7 +319,8 @@ export async function getCustomers() {
 
 // Delete courier company
 export async function deleteCourierCompany(id: string) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   const { error } = await supabase
     .from("courier_companies")
@@ -317,7 +337,8 @@ export async function deleteCourierCompany(id: string) {
 
 // Delete customer
 export async function deleteCustomer(id: string) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   const { error } = await supabase
     .from("customers")
@@ -334,7 +355,8 @@ export async function deleteCustomer(id: string) {
 
 // Delete product
 export async function deleteProduct(id: string) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   const { error } = await supabase
     .from("products")
@@ -398,7 +420,8 @@ export async function updateInventoryItem(
     date?: string
   }
 ) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   const { data, error } = await supabase
     .from("inventory_items")
@@ -441,7 +464,8 @@ export async function createInventoryItem(formData: {
     date?: string
   }
 }) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   try {
     // Auto-generate serial number only for parent items (not sub-items)
@@ -560,7 +584,8 @@ export async function createInventoryItem(formData: {
 }
 
 export async function deleteInventoryItem(id: string) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   // Get the item to check if it's a parent item with serial number
   const { data: item } = await supabase
@@ -627,7 +652,8 @@ export async function deleteInventoryItem(id: string) {
 
 // Excel Import Action
 export async function importInventoryFromExcel(base64Data: string) {
-  const supabase = await createClient()
+  const { supabase, authorized } = await getAuthorizedClient()
+  if (!authorized) return { success: false, error: "Unauthorized" }
   
   try {
     // Convert base64 string back to ArrayBuffer using Buffer (Node.js)

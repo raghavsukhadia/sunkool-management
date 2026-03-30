@@ -41,15 +41,8 @@
 ### 👥 Customer & Distributor Management
 - Customer database with contact information
 - Address management with copy-to-clipboard
-- Distributor tracking and rewards system
-- Distributor point system
+- Distributor tracking and management
 - Performance metrics
-
-### 🎯 Rewards & Loyalty
-- Distributor rewards program
-- Points tracking and management
-- Reward history visualization
-- Performance analytics
 
 ### 🔐 Security & Data Integrity
 - Supabase authentication with Row-Level Security
@@ -398,7 +391,6 @@ chore: Maintenance
 - [x] Customer management
 - [x] Courier management
 - [x] Distributor management
-- [x] Rewards system
 - [x] Return dispatch functionality
 - [x] Data integrity features
 - [x] Authentication & authorization

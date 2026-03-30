@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { reportError } from '@/lib/monitoring'
 
 export async function middleware(request: NextRequest) {
   try {
@@ -89,10 +90,10 @@ export async function middleware(request: NextRequest) {
 
     return response
   } catch (error) {
-    // If middleware fails, allow the request through
-    // The app will handle auth errors on the client
-    console.error('Middleware error:', error)
-    return NextResponse.next()
+    reportError(error, { area: 'middleware.auth' })
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
   }
 }
 

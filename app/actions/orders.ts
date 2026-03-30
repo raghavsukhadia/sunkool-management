@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import { sendProductionRecordCreatedNotification } from "@/app/actions/notifications"
 import { getCourierCompanies } from "@/app/actions/management"
+import { checkRateLimit } from "@/lib/server/rate-limit"
+import { reportError } from "@/lib/monitoring"
 
 // Generate next internal order number in sequence (SK01, SK02, SK03...)
 async function generateNextOrderNumber(): Promise<string> {
@@ -18,7 +20,7 @@ async function generateNextOrderNumber(): Promise<string> {
     .order("internal_order_number", { ascending: false })
 
   if (error) {
-    console.error("Error fetching order numbers:", error)
+    reportError(error, { area: "orders.generateNextOrderNumber" })
     // Fallback: return SK01 if there's an error
     return "SK01"
   }
@@ -92,6 +94,11 @@ export async function createOrder(formData: {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
     return { success: false, error: "User not authenticated" }
+  }
+
+  const orderRate = checkRateLimit(`order:create:${user.id}`, 20, 60_000)
+  if (!orderRate.ok) {
+    return { success: false, error: "Too many create order requests. Please wait a minute and try again." }
   }
 
   // Get user profile
@@ -378,16 +385,33 @@ export async function getAllOrders() {
   // Get item counts and payment totals per order
   if (orders && orders.length > 0) {
     const orderIds = orders.map(o => o.id)
-
-    const { data: orderItems } = await supabase
-      .from("order_items")
-      .select("order_id")
-      .in("order_id", orderIds)
-
     const itemCounts: Record<string, number> = {}
-    orderItems?.forEach((item) => {
-      itemCounts[item.order_id] = (itemCounts[item.order_id] || 0) + 1
-    })
+
+    const CHUNK_SIZE = 150
+    for (let i = 0; i < orderIds.length; i += CHUNK_SIZE) {
+      const batchIds = orderIds.slice(i, i + CHUNK_SIZE)
+      const { data: orderItemsBatch, error: orderItemsBatchError } = await supabase
+        .from("order_items")
+        .select("order_id")
+        .in("order_id", batchIds)
+
+      if (orderItemsBatchError) {
+        // Fallback to per-order exact counts when batched IN query fails.
+        for (const orderId of batchIds) {
+          const { count } = await supabase
+            .from("order_items")
+            .select("id", { count: "exact", head: true })
+            .eq("order_id", orderId)
+
+          itemCounts[orderId] = count || 0
+        }
+        continue
+      }
+
+      orderItemsBatch?.forEach((item) => {
+        itemCounts[item.order_id] = (itemCounts[item.order_id] || 0) + 1
+      })
+    }
 
     const { data: payments } = await supabase
       .from("order_payments")
@@ -990,6 +1014,11 @@ export async function createDispatch(
     return { success: false, error: "User not authenticated" }
   }
 
+  const dispatchRate = checkRateLimit(`dispatch:create:${user.id}`, 30, 60_000)
+  if (!dispatchRate.ok) {
+    return { success: false, error: "Too many dispatch requests. Please wait and try again." }
+  }
+
   // Get user profile
   const { data: profile } = await supabase
     .from("profiles")
@@ -1125,7 +1154,7 @@ export async function createDispatch(
       await supabase.from("dispatch_items").delete().eq("dispatch_id", dispatch.id)
       await supabase.from("dispatches").delete().eq("id", dispatch.id)
     } catch (rbErr) {
-      console.error("Failed to rollback dispatch after order status update failure:", rbErr)
+      reportError(rbErr, { area: "orders.createDispatch.rollback", dispatchId: dispatch.id })
     }
     return { success: false, error: `Failed to update order status: ${updateError.message}` }
   }
@@ -1148,6 +1177,16 @@ export async function createReturnDispatch(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
     return { success: false, error: "User not authenticated" }
+  }
+
+  const productionListRate = checkRateLimit(`production:list:${user.id}`, 20, 60_000)
+  if (!productionListRate.ok) {
+    return { success: false, error: "Too many production list requests. Please wait and try again." }
+  }
+
+  const returnDispatchRate = checkRateLimit(`dispatch:return:${user.id}`, 20, 60_000)
+  if (!returnDispatchRate.ok) {
+    return { success: false, error: "Too many return dispatch requests. Please wait and try again." }
   }
 
   // Get user profile
@@ -1472,6 +1511,11 @@ export async function updateDispatchStatus(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
     return { success: false, error: "User not authenticated" }
+  }
+
+  const invoiceRate = checkRateLimit(`invoice:upload:${user.id}`, 15, 60_000)
+  if (!invoiceRate.ok) {
+    return { success: false, error: "Too many file uploads. Please wait and try again." }
   }
 
   // Update dispatch status
@@ -1987,6 +2031,11 @@ export async function uploadProductionPDF(
     return { success: false, error: "User not authenticated" }
   }
 
+  const paymentRate = checkRateLimit(`payment:add:${user.id}`, 25, 60_000)
+  if (!paymentRate.ok) {
+    return { success: false, error: "Too many payment requests. Please wait and try again." }
+  }
+
   // Get user profile
   const { data: profile } = await supabase
     .from("profiles")
@@ -2108,7 +2157,7 @@ export async function createProductionList(
     if (uploadError) {
       // If bucket doesn't exist, create it or use public URL
       // For now, we'll use a data URL approach or handle the error
-      console.error("Storage upload error:", uploadError)
+      reportError(uploadError, { area: "orders.createProductionList.storageUpload", orderId })
       // Fallback: we'll store the PDF data in the database or use a different approach
       return { success: false, error: `Failed to upload PDF: ${uploadError.message}` }
     }
@@ -2274,6 +2323,11 @@ export async function createProductionRecord(
     return { success: false, error: "User not authenticated" }
   }
 
+  const productionRate = checkRateLimit(`production:record:${user.id}`, 20, 60_000)
+  if (!productionRate.ok) {
+    return { success: false, error: "Too many production record requests. Please wait and try again." }
+  }
+
   // Get user profile
   const { data: profile } = await supabase
     .from("profiles")
@@ -2329,7 +2383,7 @@ export async function createProductionRecord(
       })
 
     if (uploadError) {
-      console.error("Storage upload error:", uploadError)
+      reportError(uploadError, { area: "orders.createProductionRecord.storageUpload", orderId })
       return { success: false, error: `Failed to upload PDF: ${uploadError.message}` }
     }
 
@@ -2463,7 +2517,7 @@ export async function createProductionRecord(
         order_id: orderId,
       })
     } catch (err) {
-      console.error("[createProductionRecord] notification failed:", err)
+      reportError(err, { area: "orders.createProductionRecord.notification", orderId })
     }
   })()
 

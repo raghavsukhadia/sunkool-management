@@ -80,7 +80,6 @@ import {
   CreditCard,
   Receipt,
 } from "lucide-react"
-import { generateProductionPDF, generateTrackingSlipPDF } from "@/lib/pdf-generator"
 
 interface SubItem {
   id: string
@@ -536,6 +535,7 @@ export default function OrderDetailsPage() {
     try {
       // Fetch logo data URL
       const logoDataUrl = await fetchLogoDataUrl()
+      const { generateProductionPDF } = await import("@/lib/pdf-generator")
 
       // Generate PDF
       const { blob, filename } = generateProductionPDF(
@@ -607,6 +607,7 @@ export default function OrderDetailsPage() {
     try {
       // Fetch logo data URL
       const logoDataUrl = await fetchLogoDataUrl()
+      const { generateProductionPDF } = await import("@/lib/pdf-generator")
 
       // Generate PDF first (without production record number, will be added after creation)
       const { blob, filename } = generateProductionPDF(
@@ -903,6 +904,7 @@ export default function OrderDetailsPage() {
       }
 
       const logoDataUrl = await fetchLogoDataUrl()
+    const { generateTrackingSlipPDF } = await import("@/lib/pdf-generator")
       const { blob, filename } = generateTrackingSlipPDF(order, dispatchData, { logoDataUrl })
 
       const url = URL.createObjectURL(blob)
@@ -1315,8 +1317,13 @@ export default function OrderDetailsPage() {
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
             <h1 className="text-2xl font-semibold text-slate-900">
-              Order #{order.internal_order_number || order.sales_order_number || order.id.slice(0, 8)}
+              Order #{order.internal_order_number || order.id.slice(0, 8)}
             </h1>
+            {order.sales_order_number && (
+              <p className="mt-1 text-sm font-medium text-slate-600">
+                Sales Order #: {order.sales_order_number}
+              </p>
+            )}
             <p className="text-xs text-slate-400 mt-1">
               {new Date(order.created_at).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}
             </p>

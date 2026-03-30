@@ -47,7 +47,7 @@ const features = [
   },
   {
     title: 'Management',
-    description: 'Customers, inventory and products, courier companies. Rewards and distributor points for performance.',
+    description: 'Customers, inventory and products, and courier companies in one place.',
     icon: Users,
     accent: 'slate',
   },

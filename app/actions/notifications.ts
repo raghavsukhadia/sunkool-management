@@ -3,6 +3,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import * as notificationService from "@/lib/notificationService"
+import { checkRateLimit } from "@/lib/server/rate-limit"
+import { reportError } from "@/lib/monitoring"
 
 const NOTIFICATIONS_PATH = "/dashboard/notifications"
 
@@ -156,9 +158,14 @@ export async function upsertNotificationTemplate(params: {
 // ---- Queue (for messenger auto sender) ----
 export async function enqueueNotification(event_type: string, payload: Record<string, unknown>) {
   const supabase = await createClient()
+  const queueRate = checkRateLimit(`notifications:queue:${event_type}`, 120, 60_000)
+  if (!queueRate.ok) {
+    return { success: false, error: "Notification queue rate limit reached. Please retry shortly." }
+  }
+
   const { error } = await supabase.from("notification_queue").insert({ event_type, payload })
   if (error) {
-    console.error("[notifications] enqueueNotification failed:", error.message)
+    reportError(error, { area: "notifications.enqueueNotification", eventType: event_type })
     return { success: false, error: error.message }
   }
   return { success: true, error: null }
@@ -190,6 +197,11 @@ export async function sendOrderCreatedNotification(payload: {
   customer_name: string
   sales_order_number: string
 }) {
+  const sendRate = checkRateLimit("notifications:send:order_created", 60, 60_000)
+  if (!sendRate.ok) {
+    return
+  }
+
   const [configRes, recipientsRes, templateRes] = await Promise.all([
     getWhatsAppConfig(),
     getNotificationRecipients(),
@@ -215,19 +227,23 @@ export async function sendOrderCreatedNotification(payload: {
   const phones = recipients.map((r) => r.phone?.trim()).filter(Boolean) as string[]
 
   const templateBody = template?.template_body?.trim()
-  if (templateBody) {
-    const message = resolveTemplate(templateBody, {
-      order_number: payload.order_number,
-      customer_name: payload.customer_name,
-      sales_order_number: payload.sales_order_number,
-    })
-    await notificationService.sendMessageToRecipients(config, phones, message)
-  } else {
-    await notificationService.sendOrderCreated(config, phones, {
-      orderNumber: payload.order_number,
-      customerName: payload.customer_name,
-      salesOrderNumber: payload.sales_order_number || undefined,
-    })
+  try {
+    if (templateBody) {
+      const message = resolveTemplate(templateBody, {
+        order_number: payload.order_number,
+        customer_name: payload.customer_name,
+        sales_order_number: payload.sales_order_number,
+      })
+      await notificationService.sendMessageToRecipients(config, phones, message)
+    } else {
+      await notificationService.sendOrderCreated(config, phones, {
+        orderNumber: payload.order_number,
+        customerName: payload.customer_name,
+        salesOrderNumber: payload.sales_order_number || undefined,
+      })
+    }
+  } catch (error) {
+    reportError(error, { area: "notifications.sendOrderCreated" })
   }
 }
 
@@ -238,6 +254,11 @@ export async function sendProductionRecordCreatedNotification(payload: {
   items: { name: string; quantity: number }[]
   order_id: string
 }) {
+  const sendRate = checkRateLimit("notifications:send:production_created", 60, 60_000)
+  if (!sendRate.ok) {
+    return
+  }
+
   const [configRes, recipientsRes] = await Promise.all([
     getWhatsAppConfig(),
     getNotificationRecipients(),
@@ -261,11 +282,15 @@ export async function sendProductionRecordCreatedNotification(payload: {
   const phones = recipients.map((r) => r.phone?.trim()).filter(Boolean) as string[]
   const orderSystemBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://sunkool-management.vercel.app").replace(/\/$/, "")
 
-  await notificationService.sendProductionRecordCreated(config, phones, {
-    orderNumber: payload.order_number,
-    customerName: payload.customer_name,
-    items: payload.items,
-    orderSystemBaseUrl,
-    orderId: payload.order_id,
-  })
+  try {
+    await notificationService.sendProductionRecordCreated(config, phones, {
+      orderNumber: payload.order_number,
+      customerName: payload.customer_name,
+      items: payload.items,
+      orderSystemBaseUrl,
+      orderId: payload.order_id,
+    })
+  } catch (error) {
+    reportError(error, { area: "notifications.sendProductionRecordCreated" })
+  }
 }

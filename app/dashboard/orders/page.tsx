@@ -21,7 +21,6 @@ import {
   ArrowUpDown,
   Download,
 } from "lucide-react"
-import * as XLSX from "xlsx"
 import {
   Sheet,
   SheetContent,
@@ -112,6 +111,7 @@ export default function OrdersPage() {
     setExporting(true)
     setError(null)
     try {
+      const XLSX = await import("xlsx")
       const res = await getOrdersExportData(ids)
       if (!res.success || !res.data) {
         setError(res.error || "Export failed")

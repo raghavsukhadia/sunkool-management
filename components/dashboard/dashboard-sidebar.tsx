@@ -12,10 +12,10 @@ import {
   Truck,
   DollarSign,
   Settings,
-  Gift,
   LogOut,
   Home,
-  Bell
+  Bell,
+  Users
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import SunkoolLogo from "@/components/brand/SunkoolLogo"
@@ -40,27 +40,30 @@ export default function DashboardSidebar({
   const mainNavItems = [
     { href: "/dashboard", label: "Dashboard", icon: Home },
     { href: "/dashboard/orders", label: "Orders", icon: ShoppingCart },
-    { href: "/dashboard/tracking", label: "Tracking", icon: Truck },
-    { href: "/dashboard/orders/new", label: "New Order", icon: Package },
+    { href: "/dashboard/orders/new", label: "New Orders", icon: Package },
     { href: "/dashboard/production", label: "Production", icon: Factory },
-    { href: "/dashboard/follow-up", label: "Follow Up", icon: DollarSign },
-    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
   ]
 
   const settingsNavItems = [
     { href: "/dashboard/management", label: "Management", icon: Settings },
-    { href: "/dashboard/rewards", label: "Rewards", icon: Gift },
+    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
+  ]
+
+  const additionalNavItems = [
+    { href: "/dashboard/follow-up", label: "Follow Up", icon: DollarSign },
+    { href: "/dashboard/tracking", label: "Tracking", icon: Truck },
+    { href: "/dashboard/customers", label: "Customers", icon: Users },
   ]
 
   const topbarTitle = (() => {
     if (pathname === "/dashboard") return "Dashboard"
     if (pathname.startsWith("/dashboard/orders")) return "Orders"
+    if (pathname.startsWith("/dashboard/customers")) return "Customers"
     if (pathname.startsWith("/dashboard/tracking")) return "Tracking"
     if (pathname.startsWith("/dashboard/production")) return "Production"
     if (pathname.startsWith("/dashboard/follow-up")) return "Follow Up"
     if (pathname.startsWith("/dashboard/notifications")) return "Notifications"
     if (pathname.startsWith("/dashboard/management")) return "Management"
-    if (pathname.startsWith("/dashboard/rewards")) return "Rewards"
     return "Order Management"
   })()
 
@@ -119,6 +122,34 @@ export default function DashboardSidebar({
 
             <div className="mt-2 space-y-1">
               {settingsNavItems.map((item) => {
+              const Icon = item.icon
+              const isActive = pathname === item.href ||
+                (item.href !== "/dashboard" && pathname.startsWith(item.href))
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "mx-[10px] my-[2px] flex items-center gap-2.5 rounded-[8px] px-4 py-[10px] text-[14px] font-medium",
+                    isActive
+                      ? "bg-sk-primary text-sk-sidebar-act"
+                      : "text-sk-sidebar-text hover:bg-[rgba(249,115,22,0.1)] hover:text-sk-primary"
+                  )}
+                >
+                  <Icon className="h-[18px] w-[18px]" />
+                  {item.label}
+                </Link>
+              )
+              })}
+            </div>
+
+            <div className="mt-5 border-t border-[#2d3748] pt-4">
+              <p className="px-4 text-[9px] font-medium uppercase tracking-[0.1em] text-[#4b5563]">Additional</p>
+            </div>
+
+            <div className="mt-2 space-y-1">
+              {additionalNavItems.map((item) => {
               const Icon = item.icon
               const isActive = pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href))
