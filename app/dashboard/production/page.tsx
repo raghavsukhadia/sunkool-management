@@ -5,13 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Factory, Package, Clock, CheckCircle, ExternalLink, Printer, Activity, Search, Maximize2, Minimize2 } from "lucide-react"
+import { Package, Clock, CheckCircle, ExternalLink, Printer, Activity, Search, Maximize2, Minimize2, ChevronRight, X } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import {
   getProductionQueue,
   getProductionItems,
   getProductionRecordsList,
+  type ProductionQueueRow,
   type ProductionQueueResult,
 } from "@/app/actions/production"
 import {
@@ -22,6 +23,7 @@ import {
   type FastSlowRow,
   type DeadStockRow,
 } from "@/app/actions/inventory-health"
+import { OrderJourneySheet } from "@/components/production/OrderJourneySheet"
 
 interface ProductionItem {
   id: string
@@ -55,6 +57,8 @@ interface ProductionRecord {
   }[]
 }
 
+type QueueStatusFilter = "All" | "Pending" | "In Progress" | "Completed"
+
 export default function ProductionPage() {
   const [productionItems, setProductionItems] = useState<ProductionItem[]>([])
   const [productionRecords, setProductionRecords] = useState<ProductionRecord[]>([])
@@ -71,6 +75,12 @@ export default function ProductionPage() {
   const [isNeededFullscreen, setIsNeededFullscreen] = useState(false)
   const [neededLastUpdated, setNeededLastUpdated] = useState<Date | null>(null)
   const [queueSearch, setQueueSearch] = useState("")
+  const [queueStatusFilter, setQueueStatusFilter] = useState<QueueStatusFilter>("All")
+  const [queueCustomerFilter, setQueueCustomerFilter] = useState("")
+  const [queueItemFilter, setQueueItemFilter] = useState("")
+  const [useDefaultOpenOnlyFilter, setUseDefaultOpenOnlyFilter] = useState(true)
+  const [selectedRow, setSelectedRow] = useState<ProductionQueueRow | null>(null)
+  const [journeyOpen, setJourneyOpen] = useState(false)
   const neededFullscreenRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -123,12 +133,45 @@ export default function ProductionPage() {
     loadHealth()
   }, [filter, inventoryHealthDays])
 
-  const pendingItems = productionItems.filter(
-    item => item.quantity > (item.dispatched_quantity || 0)
-  )
-
   const inProgressRecords = productionRecords.filter(r => r.status === "in_production" || r.status === "In Progress")
   const completedRecords = productionRecords.filter(r => r.status === "completed" || r.status === "Completed")
+
+  const uniqueQueueCustomers = Array.from(new Set((queueData?.rows ?? []).map((row) => row.customerName))).sort((a, b) => a.localeCompare(b))
+  const uniqueQueueItems = Array.from(new Set((queueData?.rows ?? []).map((row) => row.itemName))).sort((a, b) => a.localeCompare(b))
+
+  const getQueueRowStatus = (row: ProductionQueueRow): QueueStatusFilter => {
+    if (row.remaining <= 0) return "Completed"
+    return row.produced > 0 ? "In Progress" : "Pending"
+  }
+
+  const filteredQueueRows = (queueData?.rows ?? []).filter((row) => {
+    const search = queueSearch.trim().toLowerCase()
+    if (search) {
+      const matchesSearch = [row.orderNumber, row.customerName, row.itemName].some((value) =>
+        value.toLowerCase().includes(search)
+      )
+      if (!matchesSearch) return false
+    }
+
+    if (queueCustomerFilter && row.customerName !== queueCustomerFilter) return false
+    if (queueItemFilter && row.itemName !== queueItemFilter) return false
+
+    const rowStatus = getQueueRowStatus(row)
+    if (queueStatusFilter === "All") {
+      if (useDefaultOpenOnlyFilter && rowStatus === "Completed") return false
+    } else if (rowStatus !== queueStatusFilter) {
+      return false
+    }
+
+    return true
+  })
+
+  const hasActiveQueueFilters =
+    queueSearch.trim().length > 0 ||
+    queueCustomerFilter.length > 0 ||
+    queueItemFilter.length > 0 ||
+    queueStatusFilter !== "All" ||
+    !useDefaultOpenOnlyFilter
 
   // Needed: aggregate by item name, sum remaining (only rows with remaining > 0)
   const neededList = (() => {
@@ -184,6 +227,34 @@ export default function ProductionPage() {
     printWindow.focus()
     printWindow.print()
     printWindow.close()
+  }
+
+  const handleRowClick = (row: ProductionQueueRow) => {
+    setSelectedRow(row)
+    setJourneyOpen(true)
+  }
+
+  const handleNeededItemClick = (itemName: string) => {
+    setFilter("pending")
+    setQueueSearch(itemName)
+  }
+
+  const handleQueueStatusChange = (value: QueueStatusFilter) => {
+    setQueueStatusFilter(value)
+    setUseDefaultOpenOnlyFilter(false)
+  }
+
+  const handleClearQueueFilters = () => {
+    setQueueSearch("")
+    setQueueStatusFilter("All")
+    setQueueCustomerFilter("")
+    setQueueItemFilter("")
+    setUseDefaultOpenOnlyFilter(true)
+  }
+
+  const getProgressPercent = (row: ProductionQueueRow) => {
+    if (row.ordered <= 0) return 0
+    return Math.min(100, Math.round((row.produced / row.ordered) * 100))
   }
 
   function escapeHtml(s: string) {
@@ -274,7 +345,7 @@ export default function ProductionPage() {
           )}
         >
           <Clock className="h-4 w-4" />
-          Queue – Item-wise ({queueData?.rows?.length ?? 0})
+          Queue – Item-wise ({filteredQueueRows.length})
         </Button>
         <Button
           variant="outline"
@@ -314,38 +385,89 @@ export default function ProductionPage() {
       ) : filter === "pending" ? (
         <Card className="overflow-hidden rounded-xl border-slate-200 bg-white">
           <CardHeader className="border-b border-slate-200 bg-white px-5 py-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col gap-3 lg:gap-4">
               <div>
                 <CardTitle className="text-sm font-semibold text-slate-900">Production queue – complete orders, item-wise</CardTitle>
                 <p className="mt-1 text-xs text-slate-400">Single sheet: all orders in production with item breakdown (Ordered / Produced / Remaining).</p>
               </div>
-              <div className="relative w-full lg:w-[220px]">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input
-                  value={queueSearch}
-                  onChange={(e) => setQueueSearch(e.target.value)}
-                  placeholder="Search queue"
-                  className="h-9 rounded-lg border-slate-200 bg-white pl-9 text-sm placeholder:text-slate-400 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                />
+
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                <div className="relative flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    value={queueSearch}
+                    onChange={(e) => setQueueSearch(e.target.value)}
+                    placeholder="Search by order, customer, or item"
+                    className="h-9 rounded-lg border-slate-200 bg-white pl-9 text-sm placeholder:text-slate-400 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                  />
+                </div>
+
+                <select
+                  value={queueStatusFilter}
+                  onChange={(e) => handleQueueStatusChange(e.target.value as QueueStatusFilter)}
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-orange-500 focus:outline-none focus:ring-[3px] focus:ring-orange-500/15 lg:w-[150px]"
+                >
+                  <option value="All">All</option>
+                  <option value="Pending">Pending</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Completed">Completed</option>
+                </select>
+
+                <select
+                  value={queueCustomerFilter}
+                  onChange={(e) => setQueueCustomerFilter(e.target.value)}
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-orange-500 focus:outline-none focus:ring-[3px] focus:ring-orange-500/15 lg:w-[190px]"
+                >
+                  <option value="">All customers</option>
+                  {uniqueQueueCustomers.map((customer) => (
+                    <option key={customer} value={customer}>{customer}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={queueItemFilter}
+                  onChange={(e) => setQueueItemFilter(e.target.value)}
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-orange-500 focus:outline-none focus:ring-[3px] focus:ring-orange-500/15 lg:w-[190px]"
+                >
+                  <option value="">All items</option>
+                  {uniqueQueueItems.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+
+                {hasActiveQueueFilters ? (
+                  <Button
+                    variant="outline"
+                    onClick={handleClearQueueFilters}
+                    className="h-9 gap-1 rounded-lg border-slate-200 text-xs text-slate-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    Clear filters
+                  </Button>
+                ) : null}
               </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            {!queueData?.rows?.length ? (
+            {!filteredQueueRows.length ? (
               <div className="py-12 text-center">
                 <CheckCircle className="mx-auto mb-3 h-12 w-12 text-green-500" />
-                <p className="text-slate-500">No orders in production</p>
+                <p className="text-slate-500">{queueData?.rows?.length ? "No queue rows match your search and filters" : "No orders in production"}</p>
                 <p className="mt-1 text-sm text-slate-400">Orders with status Approved or In Production will appear here with item-wise details.</p>
               </div>
             ) : (
               <>
                 {/* Mobile: card list */}
                 <div className="space-y-3 p-4 lg:hidden">
-                  {queueData.rows.map((row) => (
-                    <Link
+                  {filteredQueueRows.map((row) => {
+                    const progressPercent = getProgressPercent(row)
+
+                    return (
+                    <button
                       key={row.itemId}
-                      href={`/dashboard/orders/${row.orderId}`}
-                      className="block rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:border-orange-200 hover:bg-orange-50/40 hover:shadow-md active:bg-slate-50"
+                      type="button"
+                      onClick={() => handleRowClick(row)}
+                      className="block w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:border-orange-200 hover:bg-orange-50/40 hover:shadow-md active:bg-slate-50"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -365,13 +487,26 @@ export default function ProductionPage() {
                                   : "bg-red-100 text-red-600"
                             )}>{row.remaining === 0 ? "—" : row.remaining}</span>
                           </div>
+                          <div className="mt-3">
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                              <div
+                                className={cn("h-full rounded-full", progressPercent >= 100 ? "bg-green-500" : "bg-orange-500")}
+                                style={{ width: `${progressPercent}%` }}
+                              />
+                            </div>
+                            <p className="mt-1 text-[11px] font-medium text-slate-400">{progressPercent}% complete</p>
+                          </div>
                         </div>
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition-colors hover:border-orange-500 hover:bg-orange-50 hover:text-orange-500">
+                        <Link
+                          href={`/dashboard/orders/${row.orderId}`}
+                          onClick={(event) => event.stopPropagation()}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition-colors hover:border-orange-500 hover:bg-orange-50 hover:text-orange-500"
+                        >
                           <ExternalLink className="h-3.5 w-3.5" />
-                        </div>
+                        </Link>
                       </div>
-                    </Link>
-                  ))}
+                    </button>
+                  )})}
                 </div>
 
                 {/* Desktop: table */}
@@ -384,19 +519,22 @@ export default function ProductionPage() {
                         <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Item</th>
                         <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Ordered</th>
                         <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Produced</th>
+                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Progress</th>
                         <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Remaining</th>
                         <th className="h-10 w-20 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Link</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {queueData.rows.map((row, index) => {
-                        const isFirstInGroup = index === 0 || queueData.rows[index - 1].orderId !== row.orderId
+                      {filteredQueueRows.map((row, index) => {
+                        const isFirstInGroup = index === 0 || filteredQueueRows[index - 1].orderId !== row.orderId
+                        const progressPercent = getProgressPercent(row)
 
                         return (
                           <tr
                             key={row.itemId}
+                            onClick={() => handleRowClick(row)}
                             className={cn(
-                              "h-12 border-b border-slate-100 text-[13px] text-slate-900 transition-colors hover:bg-orange-50",
+                              "h-12 cursor-pointer border-b border-slate-100 text-[13px] text-slate-900 transition-colors hover:bg-orange-50",
                               index % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"
                             )}
                           >
@@ -404,14 +542,32 @@ export default function ProductionPage() {
                               "px-4 py-0",
                               isFirstInGroup ? "border-l-[3px] border-l-orange-500" : "border-l-[3px] border-l-orange-200"
                             )}>
-                              <Link href={`/dashboard/orders/${row.orderId}`} className="inline-flex items-center text-xs font-medium text-orange-500 hover:text-orange-600">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  handleRowClick(row)
+                                }}
+                                className="inline-flex items-center text-xs font-medium text-orange-500 hover:text-orange-600"
+                              >
                                 {row.orderNumber}
-                              </Link>
+                              </button>
                             </td>
                             <td className="max-w-[180px] truncate px-4 py-0 text-[13px] text-slate-600">{row.customerName}</td>
                             <td className="max-w-[200px] truncate px-4 py-0 text-[13px] font-medium text-slate-900">{row.itemName}</td>
                             <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.ordered}</td>
                             <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.produced}</td>
+                            <td className="px-4 py-0 align-middle">
+                              <div className="mx-auto w-[90px]">
+                                <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+                                  <div
+                                    className={cn("h-full rounded-full", progressPercent >= 100 ? "bg-green-500" : "bg-orange-500")}
+                                    style={{ width: `${progressPercent}%` }}
+                                  />
+                                </div>
+                                <p className="mt-1 text-center text-[11px] text-slate-400">{progressPercent}%</p>
+                              </div>
+                            </td>
                             <td className="px-4 py-0 text-center">
                               {row.remaining === 0 ? (
                                 <span className="text-[13px] font-medium text-slate-300">—</span>
@@ -427,6 +583,7 @@ export default function ProductionPage() {
                             <td className="px-4 py-0 text-center">
                               <Link
                                 href={`/dashboard/orders/${row.orderId}`}
+                                onClick={(event) => event.stopPropagation()}
                                 title="Open order"
                                 className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition-all hover:border-orange-500 hover:bg-orange-50 hover:text-orange-500"
                               >
@@ -440,7 +597,7 @@ export default function ProductionPage() {
                   </table>
 
                   <div className="flex items-center justify-between border-t-2 border-slate-200 bg-slate-50 px-4 py-3">
-                    <p className="text-xs text-slate-400">Showing {queueData.rows.length} of {queueData.rows.length} items</p>
+                    <p className="text-xs text-slate-400">Showing {filteredQueueRows.length} of {queueData?.rows.length ?? 0} items</p>
                     <span className="text-xs text-slate-400">All items loaded</span>
                   </div>
                 </div>
@@ -511,13 +668,20 @@ export default function ProductionPage() {
                             {rows.map(({ itemName, remaining }, index) => (
                               <tr
                                 key={itemName}
-                                className={index % 2 === 0 ? "bg-white hover:bg-slate-50/70" : "bg-slate-50/50 hover:bg-slate-100/50"}
+                                onClick={() => handleNeededItemClick(itemName)}
+                                className={cn(
+                                  "cursor-pointer transition-colors",
+                                  index % 2 === 0 ? "bg-white hover:bg-slate-50/70" : "bg-slate-50/50 hover:bg-slate-100/50"
+                                )}
                               >
                                 <td className="p-4 text-base font-medium text-slate-900">{itemName}</td>
                                 <td className="p-4 text-right">
-                                  <Badge variant="secondary" className="text-lg font-bold px-3 py-1 bg-amber-100 text-amber-800 border-0">
-                                    {remaining}
-                                  </Badge>
+                                  <div className="flex items-center justify-end gap-3">
+                                    <Badge variant="secondary" className="border-0 bg-amber-100 px-3 py-1 text-lg font-bold text-amber-800">
+                                      {remaining}
+                                    </Badge>
+                                    <ChevronRight className="h-4 w-4 text-slate-400" />
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -740,6 +904,7 @@ export default function ProductionPage() {
           </CardContent>
         </Card>
       ) : null}
+      <OrderJourneySheet open={journeyOpen} onOpenChange={setJourneyOpen} row={selectedRow} />
     </div>
   )
 }

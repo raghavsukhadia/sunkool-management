@@ -7,10 +7,34 @@ export type ProductionQueueRow = {
   orderNumber: string
   customerName: string
   itemId: string
+  inventoryItemId?: string
   itemName: string
   ordered: number
   produced: number
   remaining: number
+}
+
+export type JourneyProductionRecord = {
+  id: string
+  productionNumber: string
+  productionType: string
+  status: string
+  createdAt: string
+}
+
+export type JourneyStockData = {
+  currentStock: number
+  demandInPeriod: number
+  weeksOfStock: number | null
+  status: "low" | "ok" | "excess" | "no_demand"
+}
+
+export type OrderJourneyData = {
+  orderStatus: string | null
+  paymentStatus: string | null
+  createdAt: string | null
+  productionRecords: JourneyProductionRecord[]
+  stockData: JourneyStockData | null
 }
 
 export type ProductionQueueResult = {
@@ -142,6 +166,7 @@ export async function getProductionQueue(): Promise<
       orderNumber: order.internal_order_number || order.sales_order_number || item.order_id.slice(0, 8),
       customerName,
       itemId: item.id,
+      inventoryItemId: item.inventory_item_id || undefined,
       itemName,
       ordered,
       produced,
@@ -158,6 +183,146 @@ export async function getProductionQueue(): Promise<
       rows,
       totalUnitsRemaining,
     },
+  }
+}
+
+/**
+ * Fetch order-level journey context and optional inventory impact for a selected queue row.
+ */
+export async function getOrderJourneyData(
+  orderId: string,
+  inventoryItemId?: string
+): Promise<{ success: true; data: OrderJourneyData } | { success: false; error: string }> {
+  const supabase = await createClient()
+
+  try {
+    const [{ data: order, error: orderError }, { data: records, error: recordsError }] = await Promise.all([
+      supabase
+        .from("orders")
+        .select("order_status, payment_status, created_at")
+        .eq("id", orderId)
+        .single(),
+      supabase
+        .from("production_records")
+        .select("id, production_number, production_type, status, created_at")
+        .eq("order_id", orderId)
+        .order("created_at", { ascending: true }),
+    ])
+
+    if (orderError) return { success: false, error: orderError.message }
+    if (recordsError) return { success: false, error: recordsError.message }
+
+    let stockData: JourneyStockData | null = null
+
+    if (inventoryItemId) {
+      const days = 30
+      const since = new Date()
+      since.setDate(since.getDate() - days)
+      const sinceStr = since.toISOString().slice(0, 10)
+
+      const [
+        { data: masterRolls },
+        { data: convertable },
+        { data: rfd },
+        { data: cutAndRoll },
+        { data: dispatchItems },
+        { data: dispatches },
+      ] = await Promise.all([
+        supabase
+          .from("master_rolls")
+          .select("inventory_item_id, quantity")
+          .eq("inventory_item_id", inventoryItemId),
+        supabase
+          .from("convertable_stock")
+          .select("inventory_item_id, front, five_str, seven_str, balance")
+          .eq("inventory_item_id", inventoryItemId),
+        supabase
+          .from("ready_for_dispatch")
+          .select("inventory_item_id, in_hand")
+          .eq("inventory_item_id", inventoryItemId),
+        supabase
+          .from("cut_and_roll")
+          .select("inventory_item_id, in_hand")
+          .eq("inventory_item_id", inventoryItemId),
+        supabase
+          .from("dispatch_items")
+          .select("inventory_item_id, quantity, dispatch_id")
+          .eq("inventory_item_id", inventoryItemId),
+        supabase
+          .from("dispatches")
+          .select("id, dispatch_date")
+          .gte("dispatch_date", sinceStr)
+          .neq("dispatch_type", "return"),
+      ])
+
+      const dispatchIdsInPeriod = new Set((dispatches ?? []).map((d) => d.id))
+      let demandInPeriod = 0
+      for (const di of dispatchItems ?? []) {
+        if (!dispatchIdsInPeriod.has(di.dispatch_id)) continue
+        demandInPeriod += Number(di.quantity ?? 0)
+      }
+
+      let currentStock = 0
+      for (const row of masterRolls ?? []) {
+        currentStock += Number(row.quantity ?? 0)
+      }
+      for (const row of convertable ?? []) {
+        currentStock +=
+          Number(row.front ?? 0) +
+          Number(row.five_str ?? 0) +
+          Number(row.seven_str ?? 0) +
+          Number(row.balance ?? 0)
+      }
+      for (const row of rfd ?? []) {
+        currentStock += Number(row.in_hand ?? 0)
+      }
+      for (const row of cutAndRoll ?? []) {
+        currentStock += Number(row.in_hand ?? 0)
+      }
+
+      const LOW_WEEKS_THRESHOLD = 2
+      const EXCESS_STOCK_MIN = 10
+      const weeksPerDay = 7 / days
+      let weeksOfStock: number | null = null
+      let status: JourneyStockData["status"] = "no_demand"
+
+      if (demandInPeriod > 0) {
+        weeksOfStock = currentStock / (demandInPeriod * weeksPerDay)
+        status = weeksOfStock < LOW_WEEKS_THRESHOLD ? "low" : "ok"
+      } else {
+        if (currentStock >= EXCESS_STOCK_MIN) status = "excess"
+        else if (currentStock > 0) status = "ok"
+      }
+
+      stockData = {
+        currentStock: Math.round(currentStock * 100) / 100,
+        demandInPeriod,
+        weeksOfStock: weeksOfStock != null ? Math.round(weeksOfStock * 10) / 10 : null,
+        status,
+      }
+    }
+
+    const productionRecords: JourneyProductionRecord[] = (records ?? []).map((record) => ({
+      id: record.id,
+      productionNumber: record.production_number || "—",
+      productionType: record.production_type || "full",
+      status: record.status || "pending",
+      createdAt: record.created_at,
+    }))
+
+    return {
+      success: true,
+      data: {
+        orderStatus: order?.order_status ?? null,
+        paymentStatus: order?.payment_status ?? null,
+        createdAt: order?.created_at ?? null,
+        productionRecords,
+        stockData,
+      },
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to fetch order journey data"
+    return { success: false, error: message }
   }
 }
 
