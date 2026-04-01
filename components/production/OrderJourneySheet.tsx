@@ -95,10 +95,10 @@ export function OrderJourneySheet({ open, onOpenChange, row }: OrderJourneySheet
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full overflow-y-auto border-l border-slate-200 bg-white px-0 sm:max-w-lg">
+      <SheetContent className="w-full overflow-y-auto border-l border-slate-200 bg-white px-0 shadow-2xl sm:max-w-xl">
         {!row ? null : (
           <div className="flex h-full flex-col">
-            <SheetHeader className="border-b border-slate-200 px-6 pb-5 pr-12 pt-6">
+            <SheetHeader className="border-b border-slate-200 bg-slate-50/60 px-6 pb-5 pr-12 pt-6">
               <SheetTitle className="text-xl font-semibold text-slate-900">
                 {row.orderNumber} - {row.customerName}
               </SheetTitle>
@@ -116,8 +116,8 @@ export function OrderJourneySheet({ open, onOpenChange, row }: OrderJourneySheet
               </div>
             </SheetHeader>
 
-            <div className="flex-1 space-y-6 px-6 py-6">
-              <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <div className="flex-1 space-y-5 px-6 py-6">
+              <section className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-xs font-medium uppercase tracking-[0.08em] text-slate-400">Selected item</p>
@@ -143,7 +143,7 @@ export function OrderJourneySheet({ open, onOpenChange, row }: OrderJourneySheet
                 </div>
               </section>
 
-              <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">
+              <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center gap-2">
                   <Package2 className="h-4 w-4 text-slate-500" />
                   <h3 className="text-sm font-semibold text-slate-900">Order details</h3>
@@ -180,7 +180,7 @@ export function OrderJourneySheet({ open, onOpenChange, row }: OrderJourneySheet
                 )}
               </section>
 
-              <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">
+              <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center gap-2">
                   <Factory className="h-4 w-4 text-slate-500" />
                   <h3 className="text-sm font-semibold text-slate-900">Production records</h3>
@@ -216,7 +216,7 @@ export function OrderJourneySheet({ open, onOpenChange, row }: OrderJourneySheet
                 )}
               </section>
 
-              <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">
+              <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center gap-2">
                   <Package2 className="h-4 w-4 text-slate-500" />
                   <h3 className="text-sm font-semibold text-slate-900">Inventory impact</h3>

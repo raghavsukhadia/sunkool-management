@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils"
 import type { OrderLineItemSummary } from "@/app/actions/orders"
 import { getOrderLineItemsForDropdown } from "@/app/actions/orders"
 
+const orderItemsCache = new Map<string, OrderLineItemSummary[]>()
+const orderItemsPending = new Map<string, Promise<OrderLineItemSummary[]>>()
+
 interface OrderItemsDropdownProps {
   orderId: string
   count: number
@@ -50,15 +53,29 @@ export function OrderItemsDropdown({
           if (!nextOpen) return
           if (items !== null || loading) return
           if (!orderId) return
+          if (orderItemsCache.has(orderId)) {
+            const cached = orderItemsCache.get(orderId) || []
+            setItems(cached)
+            setResolvedCount(cached.length)
+            return
+          }
 
           void (async () => {
             setLoading(true)
             try {
-              const res = await getOrderLineItemsForDropdown(orderId)
-              setItems(res.items || [])
-              setResolvedCount((res.items || []).length)
+              let pending = orderItemsPending.get(orderId)
+              if (!pending) {
+                pending = getOrderLineItemsForDropdown(orderId).then((res) => res.items || [])
+                orderItemsPending.set(orderId, pending)
+              }
+              const loadedItems = await pending
+              orderItemsCache.set(orderId, loadedItems)
+              orderItemsPending.delete(orderId)
+              setItems(loadedItems)
+              setResolvedCount(loadedItems.length)
             } catch (err) {
               console.error("Failed to load order line items:", err)
+              orderItemsPending.delete(orderId)
               setItems([])
               setResolvedCount(0)
             } finally {

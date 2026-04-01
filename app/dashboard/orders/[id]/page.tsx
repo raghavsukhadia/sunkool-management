@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -193,6 +193,13 @@ export default function OrderDetailsPage() {
   const [savingRequestedPayment, setSavingRequestedPayment] = useState(false)
   const [followupFormById, setFollowupFormById] = useState<Record<string, { payment_received: boolean; payment_date: string; notes: string }>>({})
   const [savingFollowupId, setSavingFollowupId] = useState<string | null>(null)
+  const loadedTabsRef = useRef<Record<string, boolean>>({
+    production: false,
+    shipment: false,
+    payment: false,
+    followup: false,
+  })
+  const followupEnsureKeyRef = useRef<string | null>(null)
 
   // Single source of truth for payment summary (requested, total paid, remaining)
   const paymentSummary = useMemo(() => {
@@ -252,6 +259,7 @@ export default function OrderDetailsPage() {
     let shipmentItemsRemaining = 0
     items.forEach(item => {
       const producedQty = (productionRecords || []).reduce((sum, record) => {
+        if (record.status !== "in_production" && record.status !== "completed") return sum
         if (record.selected_quantities?.[item.id]) return sum + (record.selected_quantities[item.id] as number)
         if (record.production_type === "full") return item.quantity
         return sum
@@ -281,7 +289,11 @@ export default function OrderDetailsPage() {
     setLoading(true)
     setError(null)
     try {
-      const result = await getOrderDetailPageData(orderId)
+      const result = await getOrderDetailPageData(orderId, {
+        includeProductionLists: false,
+        includeInvoiceAttachments: false,
+        includePaymentFollowups: false,
+      })
       if (result.success && result.data) {
         const d = result.data
         setOrder(d.order as any)
@@ -316,7 +328,7 @@ export default function OrderDetailsPage() {
   const dispatchedStates = ['Ready for Dispatch', 'In Transit', 'Delivered', 'Partial Delivered']
   const canRecordPayment = dispatchedStates.includes(order?.order_status || '') || (dispatches && dispatches.length > 0)
 
-  const loadOrderPayments = async () => {
+  const loadOrderPayments = useCallback(async () => {
     setLoadingPayments(true)
     try {
       const result = await getOrderPayments(orderId)
@@ -328,9 +340,9 @@ export default function OrderDetailsPage() {
     } finally {
       setLoadingPayments(false)
     }
-  }
+  }, [orderId])
 
-  const loadProductionLists = async () => {
+  const loadProductionLists = useCallback(async () => {
     try {
       const result = await getOrderProductionLists(orderId)
       if (result.success && result.data) {
@@ -339,9 +351,9 @@ export default function OrderDetailsPage() {
     } catch (err: any) {
       console.error("Failed to load production lists:", err)
     }
-  }
+  }, [orderId])
 
-  const loadProductionRecords = async () => {
+  const loadProductionRecords = useCallback(async () => {
     try {
       const result = await getOrderProductionRecords(orderId)
       if (result.success && result.data) {
@@ -350,7 +362,7 @@ export default function OrderDetailsPage() {
     } catch (err: any) {
       console.error("Failed to load production records:", err)
     }
-  }
+  }, [orderId])
 
   const loadPaymentFollowups = useCallback(async () => {
     try {
@@ -399,6 +411,9 @@ export default function OrderDetailsPage() {
   // When Payment or Followup tab is active and order has amount due, ensure single 14-day followup exists and reload followups
   useEffect(() => {
     if ((activeTab === "payment" || activeTab === "followup") && order?.id && paymentSummary.amountDue > 0) {
+      const key = `${orderId}:${Math.round(paymentSummary.amountDue * 100)}:${activeTab}`
+      if (followupEnsureKeyRef.current === key) return
+      followupEnsureKeyRef.current = key
       ensurePaymentFollowupForOrder(orderId).then(() => loadPaymentFollowups())
     }
   }, [activeTab, order?.id, orderId, paymentSummary.amountDue, loadPaymentFollowups])
@@ -427,7 +442,7 @@ export default function OrderDetailsPage() {
     }
   }
 
-  const loadDispatches = async () => {
+  const loadDispatches = useCallback(async () => {
     try {
       const result = await getOrderDispatches(orderId)
       if (result.success && result.data) {
@@ -436,9 +451,9 @@ export default function OrderDetailsPage() {
     } catch (err: any) {
       console.error("Failed to load dispatches:", err)
     }
-  }
+  }, [orderId])
 
-  const loadCourierCompanies = async () => {
+  const loadCourierCompanies = useCallback(async () => {
     try {
       const result = await getCourierCompanies()
       if (result.success && result.data) {
@@ -447,9 +462,9 @@ export default function OrderDetailsPage() {
     } catch (err: any) {
       console.error("Failed to load courier companies:", err)
     }
-  }
+  }, [])
 
-  const loadInvoiceAttachments = async () => {
+  const loadInvoiceAttachments = useCallback(async () => {
     try {
       const result = await getInvoiceAttachments(orderId)
       if (result.success && result.data) {
@@ -458,7 +473,40 @@ export default function OrderDetailsPage() {
     } catch (err: any) {
       console.error("Failed to load invoice attachments:", err)
     }
-  }
+  }, [orderId])
+
+  useEffect(() => {
+    if (!orderId) return
+    if (activeTab === "production" && !loadedTabsRef.current.production) {
+      loadedTabsRef.current.production = true
+      void Promise.all([loadProductionLists(), loadProductionRecords()])
+      return
+    }
+    if (activeTab === "shipment" && !loadedTabsRef.current.shipment) {
+      loadedTabsRef.current.shipment = true
+      void Promise.all([loadDispatches(), loadCourierCompanies(), loadInvoiceAttachments()])
+      return
+    }
+    if (activeTab === "payment" && !loadedTabsRef.current.payment) {
+      loadedTabsRef.current.payment = true
+      void loadOrderPayments()
+      return
+    }
+    if (activeTab === "followup" && !loadedTabsRef.current.followup) {
+      loadedTabsRef.current.followup = true
+      void loadPaymentFollowups()
+    }
+  }, [
+    activeTab,
+    orderId,
+    loadDispatches,
+    loadInvoiceAttachments,
+    loadOrderPayments,
+    loadPaymentFollowups,
+    loadProductionLists,
+    loadProductionRecords,
+    loadCourierCompanies,
+  ])
 
   const handleAddItem = async () => {
     if (!selectedItem || quantity <= 0) {
@@ -681,8 +729,10 @@ export default function OrderDetailsPage() {
         let changed = false
 
         order.items.forEach((item) => {
-          // Calculate produced quantity up to now for this item
+          // Calculate produced quantity up to now for this item.
+          // Pending records should not reduce remaining until work is started.
           const producedQty = productionRecords.reduce((sum, record) => {
+            if (record.status !== "in_production" && record.status !== "completed") return sum
             if (record.selected_quantities && record.selected_quantities[item.id]) {
               return sum + (record.selected_quantities[item.id] as number)
             }
@@ -1940,8 +1990,11 @@ export default function OrderDetailsPage() {
 
                         const srNo = inventoryItem?.sr_no
 
-                        // Calculate produced quantity from all production records
+                        // Calculate produced quantity from started/completed production records only.
                         const producedQty = productionRecords.reduce((sum, record) => {
+                          if (record.status !== "in_production" && record.status !== "completed") {
+                            return sum
+                          }
                           if (record.selected_quantities && record.selected_quantities[item.id]) {
                             return sum + (record.selected_quantities[item.id] as number)
                           }

@@ -6,6 +6,7 @@
     "node": ">=18.17 <22"
   },
   "scripts": {
+    "predev": "node scripts/clean-next-cache.js",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

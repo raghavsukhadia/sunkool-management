@@ -7,6 +7,9 @@ import { cn } from "@/lib/utils"
 import type { OrderLineItemSummary } from "@/app/actions/orders"
 import { getOrderLineItemsForDropdown } from "@/app/actions/orders"
 
+const orderItemsCache = new Map<string, OrderLineItemSummary[]>()
+const orderItemsPending = new Map<string, Promise<OrderLineItemSummary[]>>()
+
 export interface OrderCardItem {
   id: string
   internal_order_number: string | null
@@ -69,11 +72,12 @@ function OrderCard({ order }: { order: OrderCardItem }) {
     paymentColorMap[order.payment_status] ?? "bg-slate-100 text-slate-700"
 
   const initialItems = order.line_items ?? null
+  const cachedItems = orderItemsCache.get(order.id) ?? null
   const [items, setItems] = useState<OrderLineItemSummary[] | null>(
-    initialItems
+    initialItems ?? cachedItems
   )
   const [loading, setLoading] = useState(false)
-  const [loadedOnce, setLoadedOnce] = useState(initialItems !== null)
+  const [loadedOnce, setLoadedOnce] = useState(initialItems !== null || cachedItems !== null)
 
   const nItems = useMemo(() => {
     if (items) return items.length
@@ -84,9 +88,17 @@ function OrderCard({ order }: { order: OrderCardItem }) {
     if (loading || loadedOnce) return
     setLoading(true)
     try {
-      const res = await getOrderLineItemsForDropdown(order.id)
-      setItems(res.items || [])
+      let pending = orderItemsPending.get(order.id)
+      if (!pending) {
+        pending = getOrderLineItemsForDropdown(order.id).then((res) => res.items || [])
+        orderItemsPending.set(order.id, pending)
+      }
+      const loadedItems = await pending
+      orderItemsCache.set(order.id, loadedItems)
+      orderItemsPending.delete(order.id)
+      setItems(loadedItems)
     } finally {
+      orderItemsPending.delete(order.id)
       setLoading(false)
       setLoadedOnce(true)
     }

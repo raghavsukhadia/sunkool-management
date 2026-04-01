@@ -388,27 +388,25 @@ export async function getAllOrders() {
     const itemCounts: Record<string, number> = {}
 
     const CHUNK_SIZE = 150
+    const orderIdChunks: string[][] = []
     for (let i = 0; i < orderIds.length; i += CHUNK_SIZE) {
-      const batchIds = orderIds.slice(i, i + CHUNK_SIZE)
-      const { data: orderItemsBatch, error: orderItemsBatchError } = await supabase
-        .from("order_items")
-        .select("order_id")
-        .in("order_id", batchIds)
+      orderIdChunks.push(orderIds.slice(i, i + CHUNK_SIZE))
+    }
 
-      if (orderItemsBatchError) {
-        // Fallback to per-order exact counts when batched IN query fails.
-        for (const orderId of batchIds) {
-          const { count } = await supabase
-            .from("order_items")
-            .select("id", { count: "exact", head: true })
-            .eq("order_id", orderId)
+    const orderItemsChunkResults = await Promise.all(
+      orderIdChunks.map((batchIds) =>
+        supabase
+          .from("order_items")
+          .select("order_id")
+          .in("order_id", batchIds)
+      )
+    )
 
-          itemCounts[orderId] = count || 0
-        }
-        continue
+    for (const result of orderItemsChunkResults) {
+      if (result.error) {
+        return { success: false, error: result.error.message, data: null }
       }
-
-      orderItemsBatch?.forEach((item) => {
+      result.data?.forEach((item) => {
         itemCounts[item.order_id] = (itemCounts[item.order_id] || 0) + 1
       })
     }
@@ -489,6 +487,10 @@ export async function getCompletedOrderIds(): Promise<{
     supabase.from("order_payments").select("order_id, amount").in("order_id", orderIds),
   ])
 
+  if (!orderItems || !productionRecords || !dispatches || !payments) {
+    return { success: false, data: null, error: "Failed to fetch completion inputs" }
+  }
+
   const dispatchIds = (dispatches || []).map((d) => d.id)
   let dispatchItemsData: { order_item_id: string; quantity: number; dispatch_id: string }[] = []
   if (dispatchIds.length > 0) {
@@ -511,12 +513,16 @@ export async function getCompletedOrderIds(): Promise<{
   )
 
   const producedByOrderItem: Record<string, number> = {}
+  const orderItemsByOrderId: Record<string, typeof orderItems> = {}
   for (const item of orderItems || []) {
     producedByOrderItem[item.id] = 0
+    if (!orderItemsByOrderId[item.order_id]) orderItemsByOrderId[item.order_id] = []
+    orderItemsByOrderId[item.order_id].push(item)
   }
+
   for (const rec of productionRecords || []) {
     const sq = (rec.selected_quantities as Record<string, number> | null) || null
-    const orderItemsForOrder = (orderItems || []).filter((i) => i.order_id === rec.order_id)
+    const orderItemsForOrder = orderItemsByOrderId[rec.order_id] || []
     for (const item of orderItemsForOrder) {
       if (rec.production_type === "full") {
         producedByOrderItem[item.id] = (producedByOrderItem[item.id] || 0) + item.quantity
@@ -545,7 +551,7 @@ export async function getCompletedOrderIds(): Promise<{
     const amountDue = Math.max(0, requested - totalPaid)
     const fullPaid = amountDue === 0 && (requested > 0 || totalPaid > 0)
 
-    const items = (orderItems || []).filter((i) => i.order_id === order.id)
+    const items = orderItemsByOrderId[order.id] || []
     const allProduced = items.length === 0 || items.every((i) => (producedByOrderItem[i.id] || 0) >= i.quantity)
     const allDelivered = items.length === 0 || items.every((i) => (deliveredByOrderItem[i.id] || 0) >= i.quantity)
 
@@ -2433,19 +2439,6 @@ export async function createProductionRecord(
       })
   }
 
-  // First production record: move order from New Order to In Progress
-  const { data: orderForStatus } = await supabase
-    .from("orders")
-    .select("order_status")
-    .eq("id", orderId)
-    .single()
-  if (orderForStatus?.order_status === "New Order") {
-    await supabase
-      .from("orders")
-      .update({ order_status: "In Progress" })
-      .eq("id", orderId)
-  }
-
   // Fire-and-forget: send WhatsApp notification with order and item details
   ;(async () => {
     try {
@@ -2521,8 +2514,7 @@ export async function createProductionRecord(
     }
   })()
 
-  // If this was the first partial production, order status was already updated above
-  // Reload order details to reflect status change
+  // Reload order details so the new record is reflected in the UI.
   revalidatePath(`/dashboard/orders/${orderId}`)
 
   return { success: true, data: productionRecord }
@@ -2573,6 +2565,14 @@ export async function updateProductionRecordStatus(
 
   if (error) {
     return { success: false, error: error.message }
+  }
+
+  if (status === 'in_production' && record?.order_id) {
+    await supabase
+      .from("orders")
+      .update({ order_status: "In Progress" })
+      .eq("id", record.order_id)
+      .eq("order_status", "New Order")
   }
 
   if (status === 'completed' && record?.order_id) {
@@ -2938,7 +2938,18 @@ export async function deleteProductionRecord(recordId: string) {
 }
 
 // Combined initial load for order detail page (one round-trip)
-export async function getOrderDetailPageData(orderId: string) {
+export async function getOrderDetailPageData(
+  orderId: string,
+  options?: {
+    includeProductionLists?: boolean
+    includeInvoiceAttachments?: boolean
+    includePaymentFollowups?: boolean
+  }
+) {
+  const includeProductionLists = options?.includeProductionLists ?? true
+  const includeInvoiceAttachments = options?.includeInvoiceAttachments ?? true
+  const includePaymentFollowups = options?.includePaymentFollowups ?? true
+
   const [
     orderRes,
     inventoryRes,
@@ -2954,11 +2965,11 @@ export async function getOrderDetailPageData(orderId: string) {
     getInventoryItemsForOrder(),
     getOrderDispatches(orderId),
     getCourierCompanies(),
-    getOrderProductionLists(orderId),
+    includeProductionLists ? getOrderProductionLists(orderId) : Promise.resolve({ success: true as const, data: [] }),
     getOrderProductionRecords(orderId),
-    getInvoiceAttachments(orderId),
+    includeInvoiceAttachments ? getInvoiceAttachments(orderId) : Promise.resolve({ success: true as const, data: [] }),
     getOrderPayments(orderId),
-    getOrderPaymentFollowups(orderId),
+    includePaymentFollowups ? getOrderPaymentFollowups(orderId) : Promise.resolve({ success: true as const, data: [] }),
   ])
 
   if (!orderRes.success || !orderRes.data) {

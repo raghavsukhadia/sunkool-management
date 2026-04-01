@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useDeferredValue } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -184,63 +184,74 @@ export default function OrdersPage() {
     }
   }
 
-  // Filter and sort orders
-  const filteredAndSortedOrders = (() => {
-    let filtered = [...orders]
+  const deferredSearchTerm = useDeferredValue(searchTerm)
+  const normalizedSearchTerm = useMemo(() => deferredSearchTerm.trim().toLowerCase(), [deferredSearchTerm])
+  const completedOrderIdsSet = useMemo(() => new Set(completedOrderIds), [completedOrderIds])
+  const ordersWithDerived = useMemo(
+    () =>
+      orders.map((order) => ({
+        order,
+        createdAtTs: new Date(order.created_at).getTime(),
+        searchable: [
+          order.internal_order_number ?? "",
+          order.sales_order_number ?? "",
+          order.customers?.name ?? "",
+          order.customers?.email ?? "",
+          order.customers?.phone ?? "",
+          order.id,
+        ]
+          .join(" ")
+          .toLowerCase(),
+      })),
+    [orders]
+  )
 
-    // Search filter
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase()
-      filtered = orders.filter(order =>
-        order.internal_order_number?.toLowerCase().includes(term) ||
-        order.sales_order_number?.toLowerCase().includes(term) ||
-        order.customers?.name.toLowerCase().includes(term) ||
-        order.customers?.email?.toLowerCase().includes(term) ||
-        order.customers?.phone?.toLowerCase().includes(term) ||
-        order.id.toLowerCase().includes(term)
-      )
+  const filteredAndSortedOrders = useMemo(() => {
+    let filtered = [...ordersWithDerived]
+
+    if (normalizedSearchTerm) {
+      filtered = filtered.filter(({ searchable }) => searchable.includes(normalizedSearchTerm))
     }
 
     // Status filter
     if (statusFilter !== "all") {
-      filtered = filtered.filter(order => order.order_status === statusFilter)
+      filtered = filtered.filter(({ order }) => order.order_status === statusFilter)
     }
 
     // Payment status filter
     if (paymentFilter !== "all") {
-      filtered = filtered.filter(order => order.payment_status === paymentFilter)
+      filtered = filtered.filter(({ order }) => order.payment_status === paymentFilter)
     }
 
     // Customer filter
     if (customerFilter !== "all") {
-      filtered = filtered.filter((order) => order.customers?.id === customerFilter)
+      filtered = filtered.filter(({ order }) => order.customers?.id === customerFilter)
     }
 
     // Completed filter: default "All Orders" excludes completed; clicking "Completed" shows only completed
-    const completedSet = new Set(completedOrderIds)
     if (completedOnly) {
-      filtered = filtered.filter(order => completedSet.has(order.id))
+      filtered = filtered.filter(({ order }) => completedOrderIdsSet.has(order.id))
     } else {
-      filtered = filtered.filter(order => !completedSet.has(order.id))
+      filtered = filtered.filter(({ order }) => !completedOrderIdsSet.has(order.id))
     }
 
     // Sort
     filtered.sort((a, b) => {
-      let aVal: any
-      let bVal: any
+      let aVal: string | number
+      let bVal: string | number
 
       switch (sortBy) {
         case "created_at":
-          aVal = new Date(a.created_at).getTime()
-          bVal = new Date(b.created_at).getTime()
+          aVal = a.createdAtTs
+          bVal = b.createdAtTs
           break
         case "total_price":
-          aVal = a.total_price || 0
-          bVal = b.total_price || 0
+          aVal = a.order.total_price || 0
+          bVal = b.order.total_price || 0
           break
         case "sales_order_number":
-          aVal = a.sales_order_number || ""
-          bVal = b.sales_order_number || ""
+          aVal = a.order.sales_order_number || ""
+          bVal = b.order.sales_order_number || ""
           break
         default:
           return 0
@@ -251,8 +262,18 @@ export default function OrdersPage() {
       return 0
     })
 
-    return filtered
-  })()
+    return filtered.map(({ order }) => order)
+  }, [
+    completedOnly,
+    completedOrderIdsSet,
+    customerFilter,
+    normalizedSearchTerm,
+    ordersWithDerived,
+    paymentFilter,
+    sortBy,
+    sortDirection,
+    statusFilter,
+  ])
 
   const getStatusColor = (status: string) => {
     switch (status) {
