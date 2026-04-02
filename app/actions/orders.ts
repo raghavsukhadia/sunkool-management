@@ -356,6 +356,7 @@ export async function getOrderLineItemsForDropdown(orderId: string): Promise<{
 export async function getAllOrders() {
   const supabase = await createClient()
 
+  // item count is embedded via PostgREST aggregate — no separate round trip, no row-limit risk
   const { data: orders, error } = await supabase
     .from("orders")
     .select(`
@@ -369,6 +370,7 @@ export async function getAllOrders() {
       cash_discount,
       created_at,
       updated_at,
+      order_items(count),
       customers:customer_id (
         id,
         name,
@@ -382,34 +384,9 @@ export async function getAllOrders() {
     return { success: false, error: error.message, data: null }
   }
 
-  // Get item counts and payment totals per order
+  // Get payment totals per order
   if (orders && orders.length > 0) {
     const orderIds = orders.map(o => o.id)
-    const itemCounts: Record<string, number> = {}
-
-    const CHUNK_SIZE = 150
-    const orderIdChunks: string[][] = []
-    for (let i = 0; i < orderIds.length; i += CHUNK_SIZE) {
-      orderIdChunks.push(orderIds.slice(i, i + CHUNK_SIZE))
-    }
-
-    const orderItemsChunkResults = await Promise.all(
-      orderIdChunks.map((batchIds) =>
-        supabase
-          .from("order_items")
-          .select("order_id")
-          .in("order_id", batchIds)
-      )
-    )
-
-    for (const result of orderItemsChunkResults) {
-      if (result.error) {
-        return { success: false, error: result.error.message, data: null }
-      }
-      result.data?.forEach((item) => {
-        itemCounts[item.order_id] = (itemCounts[item.order_id] || 0) + 1
-      })
-    }
 
     const { data: payments } = await supabase
       .from("order_payments")
@@ -428,18 +405,19 @@ export async function getAllOrders() {
         : (order.total_price ?? 0)
       const totalPaid = totalPaidByOrder[order.id] || 0
       const amountDue = Math.max(0, requested - totalPaid)
-      // Only show "Paid" when there was an amount to pay and it's fully covered.
-      // If requested is 0 and no payments, treat as Pending (not Paid).
       const derivedPaymentStatus =
         amountDue === 0 && (requested > 0 || totalPaid > 0)
           ? "Paid"
           : totalPaid > 0
             ? "Partial"
             : "Pending"
+      // Embedded count comes back as [{ count: N }]
+      const embeddedCount = (order.order_items as unknown as { count: number }[] | null)
+      const item_count = embeddedCount?.[0]?.count ?? 0
       return {
         ...order,
-        item_count: itemCounts[order.id] || 0,
-        payment_status: derivedPaymentStatus
+        item_count,
+        payment_status: derivedPaymentStatus,
       }
     })
 
@@ -457,10 +435,13 @@ export async function getCompletedOrderIds(): Promise<{
 }> {
   const supabase = await createClient()
 
+  // Only orders with a delivery-related status can ever be "completed".
+  // This filters out New Order / In Progress / In Transit etc. upfront,
+  // making all downstream queries dramatically smaller.
   const { data: orders, error: ordersError } = await supabase
     .from("orders")
     .select("id, total_price, requested_payment_amount")
-    .neq("order_status", "Void")
+    .in("order_status", ["Delivered", "Partial Delivered"])
 
   if (ordersError) {
     return { success: false, error: ordersError.message, data: null }
@@ -1741,9 +1722,17 @@ export async function ensurePaymentFollowupForOrder(orderId: string) {
     return { success: false, error: "Order not found" }
   }
 
-  const requested = order.requested_payment_amount != null
+  // Prefer invoice-based totals; fallback to legacy order-level amount when no invoices exist yet.
+  const { data: invoices } = await supabase
+    .from("order_invoices")
+    .select("invoice_amount")
+    .eq("order_id", orderId)
+
+  const invoiceTotal = (invoices || []).reduce((sum: number, i: any) => sum + Number(i.invoice_amount || 0), 0)
+  const legacyRequested = order.requested_payment_amount != null
     ? Number(order.requested_payment_amount)
     : (Number(order.total_price) || 0)
+  const requested = invoiceTotal > 0 ? invoiceTotal : legacyRequested
   if (requested <= 0) return { success: true }
 
   const { data: payments } = await supabase
@@ -2629,6 +2618,7 @@ export async function getInvoiceAttachments(orderId: string) {
 
 export async function uploadInvoiceAttachment(
   orderId: string,
+  invoiceId: string | null | undefined,
   fileBase64: string,
   fileName: string,
   fileType: string,
@@ -2649,6 +2639,16 @@ export async function uploadInvoiceAttachment(
 
   if (!profile) {
     return { success: false, error: "User profile not found" }
+  }
+
+  if (invoiceId) {
+    const { data: inv, error: invErr } = await supabase
+      .from("order_invoices")
+      .select("id, order_id")
+      .eq("id", invoiceId)
+      .single()
+    if (invErr || !inv) return { success: false, error: "Invoice not found" }
+    if ((inv as any).order_id !== orderId) return { success: false, error: "Invoice does not belong to this order" }
   }
 
   const buffer = Buffer.from(fileBase64, 'base64')
@@ -2673,6 +2673,7 @@ export async function uploadInvoiceAttachment(
     .from("invoice_attachments")
     .insert({
       order_id: orderId,
+      invoice_id: invoiceId || null,
       file_name: fileName,
       file_url: urlData.publicUrl,
       file_type: fileType || null,
@@ -2726,6 +2727,160 @@ export async function deleteInvoiceAttachment(attachmentId: string) {
 }
 
 // ============================================
+// Order Invoices (multi-invoice per order)
+// ============================================
+
+export type OrderInvoiceRow = {
+  id: string
+  order_id: string
+  dispatch_id: string | null
+  invoice_number: string
+  invoice_date: string
+  invoice_amount: number
+  notes: string | null
+  created_at: string
+  updated_at: string
+  dispatches?: {
+    id: string
+    dispatch_date: string | null
+    dispatch_type: string | null
+    shipment_status?: string | null
+  } | null
+}
+
+export type OrderInvoiceWithTotals = OrderInvoiceRow & {
+  total_paid: number
+  amount_due: number
+  status: "paid" | "partial" | "pending"
+}
+
+export async function getOrderInvoices(orderId: string): Promise<
+  { success: true; data: OrderInvoiceWithTotals[]; error: null } | { success: false; data: null; error: string }
+> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from("order_invoices")
+    .select(
+      `
+      *,
+      dispatches (
+        id,
+        dispatch_date,
+        dispatch_type,
+        shipment_status
+      ),
+      order_payments (
+        amount
+      )
+    `
+    )
+    .eq("order_id", orderId)
+    .order("invoice_date", { ascending: false })
+    .order("created_at", { ascending: false })
+
+  if (error) return { success: false, data: null, error: error.message }
+
+  const rows = (data ?? []) as Array<OrderInvoiceRow & { order_payments?: Array<{ amount: number | string | null }> }>
+  const withTotals: OrderInvoiceWithTotals[] = rows.map((inv) => {
+    const paid = (inv.order_payments ?? []).reduce((sum, p) => sum + Number(p.amount || 0), 0)
+    const invoiceAmount = Number((inv as any).invoice_amount || 0)
+    const due = Math.max(0, invoiceAmount - paid)
+    const status: OrderInvoiceWithTotals["status"] = due === 0 && invoiceAmount > 0
+      ? "paid"
+      : paid > 0
+        ? "partial"
+        : "pending"
+    const { order_payments: _payments, ...rest } = inv as any
+    return {
+      ...(rest as OrderInvoiceRow),
+      total_paid: paid,
+      amount_due: due,
+      status,
+    }
+  })
+
+  return { success: true, data: withTotals, error: null }
+}
+
+export async function createOrUpdateOrderInvoice(params: {
+  orderId: string
+  invoiceId?: string
+  invoiceNumber: string
+  invoiceDate?: string
+  invoiceAmount: number
+  notes?: string
+  dispatchId?: string | null
+}): Promise<{ success: true; data: any } | { success: false; error: string }> {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: "User not authenticated" }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", user.id)
+    .single()
+
+  if (!profile) return { success: false, error: "User profile not found" }
+
+  const invoiceNumber = params.invoiceNumber?.trim()
+  if (!invoiceNumber) return { success: false, error: "Invoice number is required" }
+  if (!Number.isFinite(params.invoiceAmount) || params.invoiceAmount < 0) {
+    return { success: false, error: "Invoice amount must be a valid number (>= 0)" }
+  }
+
+  const dispatchId = params.dispatchId ?? null
+  if (dispatchId) {
+    const { data: disp, error: dispErr } = await supabase
+      .from("dispatches")
+      .select("id, order_id")
+      .eq("id", dispatchId)
+      .single()
+    if (dispErr || !disp) return { success: false, error: "Dispatch not found" }
+    if ((disp as any).order_id !== params.orderId) {
+      return { success: false, error: "Dispatch does not belong to this order" }
+    }
+  }
+
+  // Once saved, invoice details are immutable by business rule.
+  if (params.invoiceId) {
+    const { data: existingInvoice, error: existingErr } = await supabase
+      .from("order_invoices")
+      .select("id, order_id")
+      .eq("id", params.invoiceId)
+      .single()
+
+    if (existingErr || !existingInvoice) {
+      return { success: false, error: "Invoice not found" }
+    }
+    if ((existingInvoice as any).order_id !== params.orderId) {
+      return { success: false, error: "Invoice does not belong to this order" }
+    }
+    return { success: false, error: "Invoice is locked after save and cannot be edited." }
+  }
+
+  const payload: any = {
+    order_id: params.orderId,
+    dispatch_id: dispatchId,
+    invoice_number: invoiceNumber,
+    invoice_date: params.invoiceDate || new Date().toISOString().split("T")[0],
+    invoice_amount: params.invoiceAmount,
+    notes: params.notes?.trim() || null,
+    created_by: profile.id,
+  }
+
+  const q = supabase.from("order_invoices").insert(payload).select().single()
+
+  const { data, error } = await q
+  if (error) return { success: false, error: error.message }
+
+  revalidatePath(`/dashboard/orders/${params.orderId}`)
+  return { success: true, data }
+}
+
+// ============================================
 // Order Payment Records Functions
 // ============================================
 
@@ -2755,6 +2910,7 @@ export async function getOrderPayments(orderId: string) {
 
 export async function addOrderPayment(
   orderId: string,
+  invoiceId: string,
   amount: number,
   paymentDate?: string,
   paymentMethod?: string,
@@ -2780,6 +2936,10 @@ export async function addOrderPayment(
 
   if (!amount || isNaN(amount) || amount <= 0) {
     return { success: false, error: "Amount must be greater than 0" }
+  }
+
+  if (!invoiceId) {
+    return { success: false, error: "Invoice is required to record a payment." }
   }
 
   // Payment should only be recorded after dispatch - check order status OR presence of dispatch records
@@ -2811,34 +2971,31 @@ export async function addOrderPayment(
     }
   }
 
-  // Fetch requested amount and total already paid to enforce amount <= remaining
-  const { data: orderRow, error: orderFetchError } = await supabase
-    .from("orders")
-    .select("requested_payment_amount, total_price")
-    .eq("id", orderId)
+  // Validate invoice belongs to order and enforce invoice-level remaining
+  const { data: invoiceRow, error: invoiceErr } = await supabase
+    .from("order_invoices")
+    .select("id, order_id, invoice_amount")
+    .eq("id", invoiceId)
     .single()
 
-  if (orderFetchError || !orderRow) {
-    return { success: false, error: "Order not found" }
+  if (invoiceErr || !invoiceRow) {
+    return { success: false, error: "Invoice not found" }
+  }
+  if ((invoiceRow as any).order_id !== orderId) {
+    return { success: false, error: "Invoice does not belong to this order" }
   }
 
-  const requested = orderRow.requested_payment_amount != null
-    ? Number(orderRow.requested_payment_amount)
-    : (Number(orderRow.total_price) || 0)
-
+  const requested = Number((invoiceRow as any).invoice_amount || 0)
   if (requested <= 0) {
-    return {
-      success: false,
-      error: "Please set Requested Payment on the order before adding payment records."
-    }
+    return { success: false, error: "Please set Invoice Amount before adding payment records." }
   }
 
   const { data: payments } = await supabase
     .from("order_payments")
     .select("amount")
-    .eq("order_id", orderId)
+    .eq("invoice_id", invoiceId)
 
-  const totalPaid = (payments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0)
+  const totalPaid = (payments || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0)
   const remaining = Math.max(0, requested - totalPaid)
 
   if (amount > remaining) {
@@ -2852,6 +3009,7 @@ export async function addOrderPayment(
     .from("order_payments")
     .insert({
       order_id: orderId,
+      invoice_id: invoiceId,
       amount,
       payment_date: paymentDate || new Date().toISOString().split('T')[0],
       payment_method: paymentMethod || null,
@@ -2957,6 +3115,7 @@ export async function getOrderDetailPageData(
     courierRes,
     productionListsRes,
     productionRecordsRes,
+    invoicesRes,
     invoiceRes,
     paymentsRes,
     followupsRes,
@@ -2967,6 +3126,7 @@ export async function getOrderDetailPageData(
     getCourierCompanies(),
     includeProductionLists ? getOrderProductionLists(orderId) : Promise.resolve({ success: true as const, data: [] }),
     getOrderProductionRecords(orderId),
+    getOrderInvoices(orderId),
     includeInvoiceAttachments ? getInvoiceAttachments(orderId) : Promise.resolve({ success: true as const, data: [] }),
     getOrderPayments(orderId),
     includePaymentFollowups ? getOrderPaymentFollowups(orderId) : Promise.resolve({ success: true as const, data: [] }),
@@ -2985,6 +3145,7 @@ export async function getOrderDetailPageData(
       courierCompanies: courierRes.success ? (courierRes.data ?? []) : [],
       productionLists: productionListsRes.success ? (productionListsRes.data ?? []) : [],
       productionRecords: productionRecordsRes.success ? (productionRecordsRes.data ?? []) : [],
+      orderInvoices: invoicesRes.success ? (invoicesRes.data ?? []) : [],
       invoiceAttachments: invoiceRes.success ? (invoiceRes.data ?? []) : [],
       orderPayments: paymentsRes.success ? (paymentsRes.data ?? []) : [],
       paymentFollowups: followupsRes.success ? (followupsRes.data ?? []) : [],
