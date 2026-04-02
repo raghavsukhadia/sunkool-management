@@ -1,220 +1,390 @@
 "use client"
 
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
+import { useState, useEffect, useRef, useCallback } from "react"
+import Image from "next/image"
 import { createClient } from "@/lib/supabase/client"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
 import {
-  Package,
+  Home,
   ShoppingCart,
+  Package,
   Factory,
   Truck,
   DollarSign,
   Settings,
-  LogOut,
-  Home,
   Bell,
-  Users
+  Users,
+  LogOut,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import SunkoolLogo from "@/components/brand/SunkoolLogo"
 import { MobileBottomNav } from "@/components/dashboard/MobileBottomNav"
+import { Button } from "@/components/ui/button"
 
-export default function DashboardSidebar({
-  children,
+// ─── Constants ───────────────────────────────────────────────────────────────
+const SIDEBAR_EXPANDED  = 240
+const SIDEBAR_COLLAPSED = 64
+const AUTO_COLLAPSE_MS  = 30_000   // 30 seconds
+const LS_KEY            = "sk_sidebar_collapsed"
+const EASE              = "cubic-bezier(0.4,0,0.2,1)"
+
+// ─── Nav structure ───────────────────────────────────────────────────────────
+const NAV = [
+  {
+    group: "Main",
+    items: [
+      { href: "/dashboard",             label: "Dashboard",  icon: Home         },
+      { href: "/dashboard/orders",      label: "Orders",     icon: ShoppingCart  },
+      { href: "/dashboard/orders/new",  label: "New Order",  icon: Package      },
+      { href: "/dashboard/production",  label: "Production", icon: Factory      },
+      { href: "/dashboard/follow-up",   label: "Follow Up",  icon: DollarSign   },
+      { href: "/dashboard/tracking",    label: "Tracking",   icon: Truck        },
+      { href: "/dashboard/customers",   label: "Customers",  icon: Users        },
+    ],
+  },
+  {
+    group: "Admin",
+    items: [
+      { href: "/dashboard/management",    label: "Management",    icon: Settings },
+      { href: "/dashboard/notifications", label: "Notifications", icon: Bell     },
+    ],
+  },
+]
+
+function resolveTitle(pathname: string) {
+  if (pathname === "/dashboard")                       return "Dashboard"
+  if (pathname.startsWith("/dashboard/orders"))        return "Orders"
+  if (pathname.startsWith("/dashboard/customers"))     return "Customers"
+  if (pathname.startsWith("/dashboard/tracking"))      return "Tracking"
+  if (pathname.startsWith("/dashboard/production"))    return "Production"
+  if (pathname.startsWith("/dashboard/follow-up"))     return "Follow Up"
+  if (pathname.startsWith("/dashboard/notifications")) return "Notifications"
+  if (pathname.startsWith("/dashboard/management"))    return "Management"
+  return "Order Management"
+}
+
+// ─── NavItem ─────────────────────────────────────────────────────────────────
+function NavItem({
+  href, label, icon: Icon, isActive, collapsed,
 }: {
-  children: React.ReactNode
+  href: string; label: string
+  icon: React.ComponentType<{ className?: string }>
+  isActive: boolean; collapsed: boolean
 }) {
-  const desktopSidebarWidth = 220
+  return (
+    <Link
+      href={href}
+      title={collapsed ? label : undefined}
+      className={cn(
+        "group relative flex items-center gap-3 rounded-lg transition-all duration-150",
+        collapsed ? "mx-2 justify-center px-0 py-2.5" : "mx-2 px-3 py-2.5",
+        isActive
+          ? "bg-sk-primary text-white shadow-sm"
+          : "text-[#94a3b8] hover:bg-white/[0.07] hover:text-white",
+      )}
+    >
+      {isActive && (
+        <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-white/50" />
+      )}
+      <Icon className={cn(
+        "flex-shrink-0",
+        collapsed ? "h-[19px] w-[19px]" : "h-[17px] w-[17px]",
+        isActive ? "text-white" : "text-[#64748b] group-hover:text-white",
+      )} />
+      <span className={cn(
+        "overflow-hidden whitespace-nowrap text-[13px] font-medium leading-none transition-all duration-[280ms]",
+        collapsed ? "w-0 opacity-0" : "w-auto opacity-100",
+      )}>
+        {label}
+      </span>
+    </Link>
+  )
+}
+
+// ─── SectionLabel ─────────────────────────────────────────────────────────────
+function SectionLabel({ label, collapsed }: { label: string; collapsed: boolean }) {
+  return (
+    <div className={cn(
+      "mb-1 mt-5 flex items-center",
+      collapsed ? "justify-center px-2" : "px-3",
+    )}>
+      {collapsed
+        ? <div className="h-px w-7 bg-white/[0.07]" />
+        : <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#3f4f63]">{label}</span>
+      }
+    </div>
+  )
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+export default function DashboardSidebar({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const router = useRouter()
+  const router   = useRouter()
   const supabase = createClient()
 
+  const [collapsed, setCollapsed] = useState(false)
+  const [mounted,   setMounted]   = useState(false)
+
+  // ref so timer callbacks always see latest collapsed value
+  const collapsedRef = useRef(collapsed)
+  collapsedRef.current = collapsed
+
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── Read persisted preference after mount ──────────────────────────────────
+  useEffect(() => {
+    const stored = localStorage.getItem(LS_KEY)
+    if (stored === "1") setCollapsed(true)
+    setMounted(true)
+  }, [])
+
+  // ── Auto-collapse helpers ──────────────────────────────────────────────────
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }, [])
+
+  const scheduleCollapse = useCallback(() => {
+    clearTimer()
+    timerRef.current = setTimeout(() => {
+      // Only collapse if currently expanded
+      if (!collapsedRef.current) {
+        setCollapsed(true)
+        localStorage.setItem(LS_KEY, "1")
+      }
+    }, AUTO_COLLAPSE_MS)
+  }, [clearTimer])
+
+  // Start the idle timer once mounted (if sidebar starts expanded)
+  useEffect(() => {
+    if (mounted && !collapsed) scheduleCollapse()
+    return clearTimer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted])
+
+  // ── Manual toggle ──────────────────────────────────────────────────────────
+  const toggleCollapsed = () => {
+    clearTimer()
+    setCollapsed(prev => {
+      const next = !prev
+      localStorage.setItem(LS_KEY, next ? "1" : "0")
+      // If expanding, restart idle timer
+      if (!next) scheduleCollapse()
+      return next
+    })
+  }
+
   const handleSignOut = async () => {
+    clearTimer()
     await supabase.auth.signOut()
     router.push("/login")
     router.refresh()
   }
 
-  const mainNavItems = [
-    { href: "/dashboard", label: "Dashboard", icon: Home },
-    { href: "/dashboard/orders", label: "Orders", icon: ShoppingCart },
-    { href: "/dashboard/orders/new", label: "New Orders", icon: Package },
-    { href: "/dashboard/production", label: "Production", icon: Factory },
-  ]
+  // Sidebar mouse handlers
+  const handleMouseEnter = () => {
+    clearTimer()
+    // Auto-expand if currently collapsed
+    if (collapsedRef.current) {
+      setCollapsed(false)
+      localStorage.setItem(LS_KEY, "0")
+    }
+  }
+  const handleMouseLeave = () => { scheduleCollapse() }
 
-  const settingsNavItems = [
-    { href: "/dashboard/management", label: "Management", icon: Settings },
-    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
-  ]
-
-  const additionalNavItems = [
-    { href: "/dashboard/follow-up", label: "Follow Up", icon: DollarSign },
-    { href: "/dashboard/tracking", label: "Tracking", icon: Truck },
-    { href: "/dashboard/customers", label: "Customers", icon: Users },
-  ]
-
-  const topbarTitle = (() => {
-    if (pathname === "/dashboard") return "Dashboard"
-    if (pathname.startsWith("/dashboard/orders")) return "Orders"
-    if (pathname.startsWith("/dashboard/customers")) return "Customers"
-    if (pathname.startsWith("/dashboard/tracking")) return "Tracking"
-    if (pathname.startsWith("/dashboard/production")) return "Production"
-    if (pathname.startsWith("/dashboard/follow-up")) return "Follow Up"
-    if (pathname.startsWith("/dashboard/notifications")) return "Notifications"
-    if (pathname.startsWith("/dashboard/management")) return "Management"
-    return "Order Management"
-  })()
+  const sidebarW = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED
 
   const todayLabel = new Intl.DateTimeFormat("en-IN", {
-    weekday: "long",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
+    weekday: "long", day: "2-digit", month: "short", year: "numeric",
   }).format(new Date())
 
   return (
     <div className="min-h-screen bg-sk-page-bg">
+
+      {/* ── Desktop Sidebar ───────────────────────────────────────────────── */}
       <aside
-        className="fixed inset-y-0 left-0 z-50 hidden h-full shrink-0 flex-col bg-sk-sidebar lg:flex lg:min-w-[220px] lg:max-w-[220px] lg:basis-[220px]"
-        style={{ width: `${desktopSidebarWidth}px`, minWidth: `${desktopSidebarWidth}px`, maxWidth: `${desktopSidebarWidth}px` }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        className="fixed inset-y-0 left-0 z-50 hidden h-full flex-col lg:flex"
+        style={{
+          width: mounted ? sidebarW : SIDEBAR_EXPANDED,
+          transition: `width 280ms ${EASE}`,
+          background: "linear-gradient(180deg, #0b1120 0%, #0f172a 60%, #111827 100%)",
+          borderRight: "1px solid rgba(255,255,255,0.05)",
+        }}
       >
-        <div className="flex h-full flex-col">
-          <div className="border-b border-[#2d3748] px-4 py-5">
-            <Link href="/dashboard" className="block">
-              <SunkoolLogo size="md" />
-              <p className="mt-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[#4b5563]">
-                Order Management
-              </p>
+        <div className="flex h-full flex-col overflow-hidden">
+
+          {/* ── Logo area ─────────────────────────────────────────────────── */}
+          <div
+            className="relative flex shrink-0 items-center justify-center border-b"
+            style={{ borderColor: "rgba(255,255,255,0.06)", minHeight: 76, padding: "12px 10px" }}
+          >
+            <Link href="/dashboard" className="flex items-center justify-center">
+              {/* Full logo — visible when expanded */}
+              <div
+                className={cn(
+                  "flex items-center justify-center transition-all duration-[280ms]",
+                  collapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100",
+                )}
+                style={{ width: collapsed ? 0 : 160 }}
+              >
+                <Image
+                  src="/images/logo.png"
+                  alt="Sunkool"
+                  width={150}
+                  height={48}
+                  priority
+                  className="h-auto w-full object-contain"
+                />
+              </div>
+
+              {/* Icon logo — visible when collapsed */}
+              <div
+                className={cn(
+                  "flex items-center justify-center transition-all duration-[280ms]",
+                  collapsed ? "opacity-100" : "w-0 overflow-hidden opacity-0",
+                )}
+                style={{ width: collapsed ? 36 : 0 }}
+              >
+                <Image
+                  src="/images/logo-icon.png"
+                  alt="SK"
+                  width={36}
+                  height={36}
+                  priority
+                  className="h-auto w-full object-contain"
+                />
+              </div>
             </Link>
+
+            {/* ── Collapse toggle button (on the right border edge) ── */}
+            <button
+              onClick={toggleCollapsed}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className="absolute -right-3 top-1/2 z-20 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-[#1e293b] bg-[#0f172a] text-[#475569] shadow-lg transition-all duration-150 hover:border-sk-primary hover:bg-sk-primary hover:text-white"
+            >
+              {collapsed
+                ? <ChevronRight className="h-3.5 w-3.5" />
+                : <ChevronLeft  className="h-3.5 w-3.5" />
+              }
+            </button>
           </div>
 
-          <nav className="custom-scrollbar flex-1 overflow-y-auto py-5">
-            <p className="px-4 text-[9px] font-medium uppercase tracking-[0.1em] text-[#4b5563]">Main</p>
-            <div className="mt-2 space-y-1">
-              {mainNavItems.map((item) => {
-                const Icon = item.icon
-                const isActive = pathname === item.href ||
-                  (item.href !== "/dashboard" && pathname.startsWith(item.href))
-
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "mx-[10px] my-[2px] flex items-center gap-2.5 rounded-[8px] px-4 py-[10px] text-[14px] font-medium",
-                      isActive
-                        ? "bg-sk-primary text-sk-sidebar-act"
-                        : "text-sk-sidebar-text hover:bg-[rgba(249,115,22,0.1)] hover:text-sk-primary"
-                    )}
-                  >
-                    <Icon className="h-[18px] w-[18px]" />
-                    {item.label}
-                  </Link>
-                )
-              })}
+          {/* ── Auto-collapse countdown hint (thin progress bar) ─────────── */}
+          {!collapsed && mounted && (
+            <div className="h-[2px] w-full overflow-hidden bg-transparent">
+              <div
+                key={`bar-${collapsed}`}
+                className="h-full bg-sk-primary/30"
+                style={{
+                  animation: `shrink ${AUTO_COLLAPSE_MS}ms linear forwards`,
+                }}
+              />
             </div>
+          )}
 
-            <div className="mt-5 border-t border-[#2d3748] pt-4">
-              <p className="px-4 text-[9px] font-medium uppercase tracking-[0.1em] text-[#4b5563]">Settings</p>
-            </div>
-
-            <div className="mt-2 space-y-1">
-              {settingsNavItems.map((item) => {
-              const Icon = item.icon
-              const isActive = pathname === item.href ||
-                (item.href !== "/dashboard" && pathname.startsWith(item.href))
-
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "mx-[10px] my-[2px] flex items-center gap-2.5 rounded-[8px] px-4 py-[10px] text-[14px] font-medium",
-                    isActive
-                      ? "bg-sk-primary text-sk-sidebar-act"
-                      : "text-sk-sidebar-text hover:bg-[rgba(249,115,22,0.1)] hover:text-sk-primary"
-                  )}
-                >
-                  <Icon className="h-[18px] w-[18px]" />
-                  {item.label}
-                </Link>
-              )
-              })}
-            </div>
-
-            <div className="mt-5 border-t border-[#2d3748] pt-4">
-              <p className="px-4 text-[9px] font-medium uppercase tracking-[0.1em] text-[#4b5563]">Additional</p>
-            </div>
-
-            <div className="mt-2 space-y-1">
-              {additionalNavItems.map((item) => {
-              const Icon = item.icon
-              const isActive = pathname === item.href ||
-                (item.href !== "/dashboard" && pathname.startsWith(item.href))
-
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "mx-[10px] my-[2px] flex items-center gap-2.5 rounded-[8px] px-4 py-[10px] text-[14px] font-medium",
-                    isActive
-                      ? "bg-sk-primary text-sk-sidebar-act"
-                      : "text-sk-sidebar-text hover:bg-[rgba(249,115,22,0.1)] hover:text-sk-primary"
-                  )}
-                >
-                  <Icon className="h-[18px] w-[18px]" />
-                  {item.label}
-                </Link>
-              )
-              })}
-            </div>
+          {/* ── Navigation ────────────────────────────────────────────────── */}
+          <nav
+            className="flex-1 overflow-y-auto overflow-x-hidden py-2"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {NAV.map((section) => (
+              <div key={section.group}>
+                <SectionLabel label={section.group} collapsed={collapsed} />
+                <div className="space-y-0.5">
+                  {section.items.map((item) => {
+                    const isActive =
+                      pathname === item.href ||
+                      (item.href !== "/dashboard" && pathname.startsWith(item.href))
+                    return (
+                      <NavItem
+                        key={item.href}
+                        href={item.href}
+                        label={item.label}
+                        icon={item.icon}
+                        isActive={isActive}
+                        collapsed={collapsed}
+                      />
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
 
-          <div className="border-t border-[#2d3748] px-4 py-4">
+          {/* ── Sign out ──────────────────────────────────────────────────── */}
+          <div className="shrink-0 border-t p-2" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
             <button
               onClick={handleSignOut}
-              className="flex w-full items-center gap-2.5 rounded-[8px] px-4 py-[10px] text-[14px] font-medium text-[#64748b] hover:bg-[rgba(249,115,22,0.1)] hover:text-sk-primary"
+              title={collapsed ? "Sign Out" : undefined}
+              className={cn(
+                "group flex w-full items-center gap-3 rounded-lg py-2.5 text-[13px] font-medium text-[#475569] transition-all duration-150 hover:bg-white/[0.06] hover:text-[#f87171]",
+                collapsed ? "justify-center px-0" : "px-3",
+              )}
             >
-              <LogOut className="h-[18px] w-[18px]" />
-              Sign Out
+              <LogOut className="h-[17px] w-[17px] flex-shrink-0 group-hover:text-[#f87171]" />
+              <span className={cn(
+                "overflow-hidden whitespace-nowrap transition-all duration-[280ms]",
+                collapsed ? "w-0 opacity-0" : "w-auto opacity-100",
+              )}>
+                Sign Out
+              </span>
             </button>
           </div>
         </div>
       </aside>
 
-      <div className="flex min-h-screen min-w-0 flex-col lg:pl-[220px]">
-        <header className="z-30 border-b border-sk-border bg-white">
-          <div className="flex items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+      {/* ── Content area (shifts in sync with sidebar) ───────────────────── */}
+      <div
+        className="flex min-h-screen min-w-0 flex-col"
+        style={{
+          paddingLeft: mounted ? sidebarW : SIDEBAR_EXPANDED,
+          transition: `padding-left 280ms ${EASE}`,
+        }}
+      >
+        {/* ── Top bar ───────────────────────────────────────────────────── */}
+        <header className="sticky top-0 z-30 border-b border-sk-border bg-white/95 backdrop-blur-sm">
+          <div className="flex items-center justify-between px-6 py-3">
             <div className="min-w-0">
-              <h1 className="truncate text-[20px] font-semibold text-sk-text-1">{topbarTitle}</h1>
-              <p className="text-[12px] font-medium text-sk-text-3">{todayLabel}</p>
+              <h1 className="truncate text-[18px] font-semibold text-sk-text-1">
+                {resolveTitle(pathname)}
+              </h1>
+              <p className="text-[11px] font-medium text-sk-text-3" suppressHydrationWarning>
+                {todayLabel}
+              </p>
             </div>
-
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" className="h-9 px-4 text-sk-text-2 hover:bg-sk-primary-tint hover:text-sk-primary-dk">
-                Export
+            <Link href="/dashboard/orders/new">
+              <Button className="h-9 gap-2 bg-sk-primary px-4 text-[13px] font-medium text-white hover:bg-sk-primary-dk">
+                <Plus className="h-4 w-4" />
+                New Order
               </Button>
-              <Link href="/dashboard/orders/new">
-                <Button className="h-9 bg-sk-primary px-[18px] text-[13px] font-medium text-white hover:bg-sk-primary-dk">
-                  + New Order
-                </Button>
-              </Link>
-            </div>
+            </Link>
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto bg-sk-page-bg pb-20 lg:pb-0">
-          <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:pl-8 lg:pr-8 lg:py-8">
+        {/* ── Page ─────────────────────────────────────────────────────── */}
+        <main className="flex-1 bg-sk-page-bg pb-20 lg:pb-0">
+          <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
             {children}
           </div>
         </main>
       </div>
 
       <MobileBottomNav />
+
+      {/* ── Keyframe for countdown bar ───────────────────────────────────── */}
+      <style>{`
+        @keyframes shrink {
+          from { width: 100%; }
+          to   { width: 0%; }
+        }
+      `}</style>
     </div>
   )
 }
-

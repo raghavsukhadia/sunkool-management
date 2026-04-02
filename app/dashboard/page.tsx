@@ -10,13 +10,12 @@ import {
   IndianRupee,
   Package,
   Plus,
-  Triangle,
   Truck,
 } from "lucide-react"
 import { useDashboardStats } from "@/hooks/useDashboardStats"
 import { getDashboardData } from "@/app/actions/dashboard"
-import type { RevenueByDayPoint, RecentActivityRow } from "@/app/actions/dashboard"
-import { RevenueOverview } from "@/components/dashboard/RevenueOverview"
+import type { OrdersOverviewPoint, RecentActivityRow } from "@/app/actions/dashboard"
+import { OrdersOverview } from "@/components/dashboard/OrdersOverview"
 import { RecentActivity, ActivityItem } from "@/components/dashboard/RecentActivity"
 import { OrderPipeline } from "@/components/dashboard/OrderPipeline"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -97,7 +96,7 @@ function mapActivityToItem(row: RecentActivityRow): ActivityItem {
 
 export default function DashboardPage() {
   const { stats, loading: statsLoading } = useDashboardStats()
-  const [revenueByDay, setRevenueByDay] = useState<RevenueByDayPoint[]>([])
+  const [ordersOverview, setOrdersOverview] = useState<OrdersOverviewPoint[]>([])
   const [activities, setActivities] = useState<ActivityItem[]>([])
   const [extraLoading, setExtraLoading] = useState(true)
   const [extraError, setExtraError] = useState<string | null>(null)
@@ -108,7 +107,7 @@ export default function DashboardPage() {
       setExtraError(null)
       const res = await getDashboardData()
       if (res.success && res.data) {
-        setRevenueByDay(res.data.revenueByDay)
+        setOrdersOverview(res.data.ordersOverview)
         setActivities(res.data.recentActivity.map(mapActivityToItem))
       } else {
         setExtraError(res.success ? null : res.error ?? "Failed to load")
@@ -240,7 +239,7 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           ) : (
-            <RevenueOverview data={revenueByDay} dayLabel="7 days" />
+            <OrdersOverview data={ordersOverview} stats={stats} dayLabel="7 days" />
           )}
         </div>
         <div className="h-full">

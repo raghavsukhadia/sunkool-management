@@ -68,17 +68,23 @@ export function OrderJourneySheet({ open, onOpenChange, row }: OrderJourneySheet
       setLoading(true)
       setError(null)
 
-      const result = await getOrderJourneyData(row.orderId, row.inventoryItemId)
-      if (cancelled) return
+      try {
+        const result = await getOrderJourneyData(row.orderId, row.inventoryItemId)
+        if (cancelled) return
 
-      if (result.success) {
-        setJourneyData(result.data)
-      } else {
+        if (result.success) {
+          setJourneyData(result.data)
+        } else {
+          setJourneyData(null)
+          setError(result.error)
+        }
+      } catch (err) {
+        if (cancelled) return
         setJourneyData(null)
-        setError(result.error)
+        setError(err instanceof Error ? err.message : "Failed to load order journey")
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-
-      setLoading(false)
     }
 
     loadJourney()

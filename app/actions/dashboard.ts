@@ -26,6 +26,13 @@ export interface RevenueByDayPoint {
   orders: number
 }
 
+export interface OrdersOverviewPoint {
+  date: string
+  orders: number     // new orders placed that day
+  produced: number   // production records started that day
+  dispatched: number // dispatches sent (non-return) that day
+}
+
 export interface RecentActivityRow {
   id: string
   order_id: string
@@ -128,6 +135,67 @@ export async function getRevenueByDay(dayCount: number): Promise<
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch revenue by day"
     return { success: false, error: message }
+  }
+}
+
+export async function getOrdersOverviewByDay(dayCount: number): Promise<
+  { success: true; data: OrdersOverviewPoint[] } | { success: false; error: string }
+> {
+  try {
+    const supabase = await createClient()
+    const start = new Date()
+    start.setDate(start.getDate() - (dayCount - 1))
+    start.setHours(0, 0, 0, 0)
+    const startIso = start.toISOString()
+
+    // Build the day skeleton (last N days)
+    const skeleton: Record<string, OrdersOverviewPoint> = {}
+    for (let i = 0; i < dayCount; i++) {
+      const d = new Date()
+      d.setDate(d.getDate() - (dayCount - 1 - i))
+      const key = d.toISOString().slice(0, 10)
+      skeleton[key] = {
+        date: new Date(key + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
+        orders: 0,
+        produced: 0,
+        dispatched: 0,
+      }
+    }
+    const keys = Object.keys(skeleton).sort()
+
+    const [ordersRes, productionRes, dispatchRes] = await Promise.all([
+      supabase
+        .from("orders")
+        .select("created_at")
+        .gte("created_at", startIso)
+        .neq("order_status", "Void"),
+      supabase
+        .from("production_records")
+        .select("created_at")
+        .gte("created_at", startIso),
+      supabase
+        .from("dispatches")
+        .select("dispatch_date")
+        .gte("dispatch_date", startIso.slice(0, 10))
+        .neq("dispatch_type", "return"),
+    ])
+
+    for (const o of ordersRes.data ?? []) {
+      const k = (o.created_at as string).slice(0, 10)
+      if (skeleton[k]) skeleton[k].orders += 1
+    }
+    for (const p of productionRes.data ?? []) {
+      const k = (p.created_at as string).slice(0, 10)
+      if (skeleton[k]) skeleton[k].produced += 1
+    }
+    for (const d of dispatchRes.data ?? []) {
+      const k = (d.dispatch_date as string).slice(0, 10)
+      if (skeleton[k]) skeleton[k].dispatched += 1
+    }
+
+    return { success: true, data: keys.map((k) => skeleton[k]) }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Failed to fetch orders overview" }
   }
 }
 
@@ -242,17 +310,27 @@ export async function getRecentActivity(limit: number): Promise<
 }
 
 export async function getDashboardData(): Promise<
-  | { success: true; data: { stats: DashboardStats; revenueByDay: RevenueByDayPoint[]; recentActivity: RecentActivityRow[] } }
+  | {
+      success: true
+      data: {
+        stats: DashboardStats
+        revenueByDay: RevenueByDayPoint[]
+        ordersOverview: OrdersOverviewPoint[]
+        recentActivity: RecentActivityRow[]
+      }
+    }
   | { success: false; error: string }
 > {
-  const [statsRes, revenueRes, activityRes] = await Promise.all([
+  const [statsRes, revenueRes, overviewRes, activityRes] = await Promise.all([
     getDashboardStats(),
     getRevenueByDay(7),
+    getOrdersOverviewByDay(7),
     getRecentActivity(5),
   ])
 
   if (!statsRes.success) return { success: false, error: statsRes.error }
   if (!revenueRes.success) return { success: false, error: revenueRes.error }
+  if (!overviewRes.success) return { success: false, error: overviewRes.error }
   if (!activityRes.success) return { success: false, error: activityRes.error }
 
   return {
@@ -260,6 +338,7 @@ export async function getDashboardData(): Promise<
     data: {
       stats: statsRes.data,
       revenueByDay: revenueRes.data,
+      ordersOverview: overviewRes.data,
       recentActivity: activityRes.data,
     },
   }

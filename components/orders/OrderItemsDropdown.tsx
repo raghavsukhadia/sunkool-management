@@ -33,11 +33,11 @@ export function OrderItemsDropdown({
   const effectiveCount = resolvedCount ?? count
 
   const label =
-    effectiveCount === 0
-      ? "No items"
-      : effectiveCount === 1
-        ? "1 item"
-        : `${effectiveCount} items`
+    effectiveCount === 1
+      ? "1 item"
+      : effectiveCount > 1
+        ? `${effectiveCount} items`
+        : "View items"
 
   return (
     <div

@@ -1,17 +1,17 @@
 "use client"
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import * as XLSX from "xlsx"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Package, Clock, CheckCircle, ExternalLink, Printer, Activity, Search, Maximize2, Minimize2, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Check, X } from "lucide-react"
+import { Package, Clock, CheckCircle, ExternalLink, Printer, Activity, Search, Maximize2, Minimize2, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Check, X, FileDown } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import {
   getProductionQueue,
-  getProductionKpis,
   getProductionRecordsList,
   type ProductionKpiData,
   type ProductionQueueRow,
@@ -44,7 +44,7 @@ interface ProductionRecord {
 type QueueStatusFilter = "All" | "Pending" | "In Progress" | "Completed"
 type QueueSortKey = "orderNumber" | "customerName" | "itemName" | "ordered" | "produced" | "progress" | "remaining"
 type QueueSortDirection = "asc" | "desc"
-type KpiFilter = "none" | "pending" | "units" | "delayed" | "completedMonth"
+type KpiFilter = "none" | "pending" | "units" | "delayed" | "completedMonth" | "noProduction"
 
 export default function ProductionPage() {
   const [productionRecords, setProductionRecords] = useState<ProductionRecord[]>([])
@@ -56,6 +56,7 @@ export default function ProductionPage() {
   const [inventoryHealthView, setInventoryHealthView] = useState<"stock-prediction" | "fast-slow" | "dead-stock">("stock-prediction")
   const [inventoryHealthDays, setInventoryHealthDays] = useState<7 | 30 | 90>(30)
   const [inventoryHealthSearch, setInventoryHealthSearch] = useState("")
+  const [inventoryHealthFilter, setInventoryHealthFilter] = useState<"all" | "needs-action" | "low" | "dead" | "excess" | "fast">("all")
   const [stockPredictionData, setStockPredictionData] = useState<StockPredictionRow[]>([])
   const [fastSlowData, setFastSlowData] = useState<FastSlowRow[]>([])
   const [deadStockData, setDeadStockData] = useState<DeadStockRow[]>([])
@@ -75,22 +76,18 @@ export default function ProductionPage() {
   const [selectedRow, setSelectedRow] = useState<ProductionQueueRow | null>(null)
   const [journeyOpen, setJourneyOpen] = useState(false)
   const neededFullscreenRef = useRef<HTMLDivElement>(null)
+  const [checkedItemIds, setCheckedItemIds] = useState<Set<string>>(new Set())
 
   const loadProductionData = useCallback(async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true)
     else setLoading(true)
     try {
       const [queueRes, recordsRes] = await Promise.all([getProductionQueue(), getProductionRecordsList()])
-      if (queueRes.success) setQueueData(queueRes.data)
-      if (recordsRes.success) setProductionRecords(recordsRes.data as ProductionRecord[])
       if (queueRes.success) {
-        const orderIds = Array.from(new Set(queueRes.data.rows.map((row) => row.orderId)))
-        const kpisRes = await getProductionKpis({
-          orderIds,
-          totalUnitsToProduce: queueRes.data.totalUnitsRemaining,
-        })
-        if (kpisRes.success) setKpiData(kpisRes.data)
+        setQueueData(queueRes.data)
+        setKpiData(queueRes.data.kpiData)
       }
+      if (recordsRes.success) setProductionRecords(recordsRes.data as ProductionRecord[])
       setNeededLastUpdated(new Date())
     } catch (error) {
       console.error("Error fetching production data:", error)
@@ -178,10 +175,65 @@ export default function ProductionPage() {
     () => new Set(kpiData?.completedThisMonthOrderIds ?? []),
     [kpiData?.completedThisMonthOrderIds]
   )
+  const noProductionOrderIdsSet = useMemo(() => new Set(kpiData?.noProductionOrderIds ?? []), [kpiData?.noProductionOrderIds])
+
+  // Merged inventory health data — combines stock prediction + fast/slow + dead stock into one list
+  const mergedInventoryData = useMemo(() => {
+    const speedById: Record<string, "Fast" | "Medium" | "Slow"> = {}
+    for (const r of fastSlowData) speedById[r.itemId] = r.classification
+    const deadById = new Set(deadStockData.map((r) => r.itemId))
+    const daysSinceById: Record<string, number | null> = {}
+    for (const r of deadStockData) daysSinceById[r.itemId] = r.daysSinceMovement
+
+    return stockPredictionData
+      .map((r) => ({
+        ...r,
+        speed: speedById[r.itemId] ?? null as "Fast" | "Medium" | "Slow" | null,
+        isDead: deadById.has(r.itemId),
+        daysSinceMovement: daysSinceById[r.itemId] ?? null as number | null,
+      }))
+      .sort((a, b) => {
+        const urgency = (x: typeof a) => {
+          if (x.status === "low") return 0
+          if (x.isDead && x.currentStock > 0) return 1
+          if (x.status === "ok" && x.speed === "Fast") return 2
+          if (x.status === "ok") return 3
+          if (x.status === "excess") return 4
+          return 5
+        }
+        return urgency(a) - urgency(b)
+      })
+  }, [stockPredictionData, fastSlowData, deadStockData])
+
+  const invSummary = useMemo(() => ({
+    low: mergedInventoryData.filter((r) => r.status === "low").length,
+    dead: mergedInventoryData.filter((r) => r.isDead && r.currentStock > 0).length,
+    excess: mergedInventoryData.filter((r) => r.status === "excess").length,
+    fast: mergedInventoryData.filter((r) => r.speed === "Fast").length,
+  }), [mergedInventoryData])
+
+  const filteredInventoryData = useMemo(() => {
+    const search = inventoryHealthSearch.trim().toLowerCase()
+    return mergedInventoryData.filter((r) => {
+      if (search && !r.itemName.toLowerCase().includes(search)) return false
+      if (inventoryHealthFilter === "low") return r.status === "low"
+      if (inventoryHealthFilter === "dead") return r.isDead && r.currentStock > 0
+      if (inventoryHealthFilter === "excess") return r.status === "excess"
+      if (inventoryHealthFilter === "fast") return r.speed === "Fast"
+      if (inventoryHealthFilter === "needs-action") return r.status === "low" || (r.isDead && r.currentStock > 0)
+      return true
+    })
+  }, [mergedInventoryData, inventoryHealthSearch, inventoryHealthFilter])
 
   const filteredQueueRows = useMemo(
     () =>
       (queueData?.rows ?? []).filter((row) => {
+        const isNoProductionRow = noProductionOrderIdsSet.has(row.orderId)
+
+        // No-production rows are hidden by default; only visible when that KPI is active.
+        if (kpiFilter !== "noProduction" && isNoProductionRow) return false
+        if (kpiFilter === "noProduction" && !isNoProductionRow) return false
+
         if (normalizedQueueSearch) {
           const matchesSearch = [row.orderNumber, row.customerName, row.itemName].some((value) =>
             value.toLowerCase().includes(normalizedQueueSearch)
@@ -192,15 +244,17 @@ export default function ProductionPage() {
         if (queueCustomerFilter && row.customerName !== queueCustomerFilter) return false
         if (queueItemFilter && row.itemName !== queueItemFilter) return false
 
-        const rowStatus = getQueueRowStatus(row)
-        if (queueStatusFilter === "All") {
-          if (useDefaultOpenOnlyFilter && rowStatus === "Completed") return false
-        } else if (rowStatus !== queueStatusFilter) {
-          return false
+        if (kpiFilter !== "noProduction") {
+          const rowStatus = getQueueRowStatus(row)
+          if (queueStatusFilter === "All") {
+            if (useDefaultOpenOnlyFilter && rowStatus === "Completed") return false
+          } else if (rowStatus !== queueStatusFilter) {
+            return false
+          }
         }
 
-        if (kpiFilter !== "none") {
-          if (kpiFilter === "pending" && !pendingOrderIdsSet.has(row.orderId)) return false
+        if (kpiFilter !== "none" && kpiFilter !== "noProduction") {
+          if (kpiFilter === "pending" && (!pendingOrderIdsSet.has(row.orderId) || row.remaining <= 0)) return false
           if (kpiFilter === "units" && row.remaining <= 0) return false
           if (kpiFilter === "delayed" && !delayedOrderIdsSet.has(row.orderId)) return false
           if (kpiFilter === "completedMonth" && !completedMonthOrderIdsSet.has(row.orderId)) return false
@@ -212,6 +266,7 @@ export default function ProductionPage() {
       completedMonthOrderIdsSet,
       delayedOrderIdsSet,
       kpiFilter,
+      noProductionOrderIdsSet,
       normalizedQueueSearch,
       pendingOrderIdsSet,
       queueCustomerFilter,
@@ -279,18 +334,20 @@ export default function ProductionPage() {
     queueStatusFilter !== "All" ||
     !useDefaultOpenOnlyFilter
 
-  // Needed: aggregate by item name, sum remaining (only rows with remaining > 0)
+  // Needed: aggregate by item name, sum remaining (only in-production rows with remaining > 0)
+  // Excludes "Not Started" orders so the total matches the KPI "Total Units to Produce".
   const neededList = useMemo(() => {
     if (!queueData?.rows?.length) return []
     const byName: Record<string, number> = {}
     for (const row of queueData.rows) {
       if (row.remaining <= 0) continue
+      if (noProductionOrderIdsSet.has(row.orderId)) continue
       byName[row.itemName] = (byName[row.itemName] ?? 0) + row.remaining
     }
     return Object.entries(byName)
       .map(([itemName, remaining]) => ({ itemName, remaining }))
       .sort((a, b) => a.itemName.localeCompare(b.itemName))
-  }, [queueData?.rows])
+  }, [queueData?.rows, noProductionOrderIdsSet])
 
   const handleFullscreenNeeded = () => {
     neededFullscreenRef.current?.requestFullscreen()
@@ -303,36 +360,143 @@ export default function ProductionPage() {
   const handlePrintNeeded = () => {
     const printWindow = window.open("", "_blank")
     if (!printWindow) return
-    const rows = neededList
-      .map(
-        (r) =>
-          `<tr><td style="padding:8px 12px;border:1px solid #ddd">${escapeHtml(r.itemName)}</td><td style="padding:8px 12px;border:1px solid #ddd;text-align:right">${r.remaining}</td></tr>`
-      )
-      .join("")
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head><title>Production Needed</title>
-          <style>
-            body { font-family: system-ui, sans-serif; padding: 20px; }
-            h1 { font-size: 1.25rem; margin-bottom: 16px; }
-            table { border-collapse: collapse; width: 100%; max-width: 500px; }
-            th { padding: 10px 12px; border: 1px solid #333; background: #f5f5f5; text-align: left; }
-          </style>
-        </head>
-        <body>
-          <h1>Production Needed – ${new Date().toLocaleDateString()}</h1>
-          <table>
-            <thead><tr><th>Item</th><th style="text-align:right">Remaining</th></tr></thead>
-            <tbody>${rows || "<tr><td colspan=\"2\">No items needed</td></tr>"}</tbody>
-          </table>
-        </body>
-      </html>
-    `)
+
+    const sorted = [...neededList].sort((a, b) => b.remaining - a.remaining)
+    const totalUnits = sorted.reduce((s, r) => s + r.remaining, 0)
+    const now = new Date()
+    const dateStr = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+
+    // Split into two columns for paper efficiency
+    const mid = Math.ceil(sorted.length / 2)
+    const col1 = sorted.slice(0, mid)
+    const col2 = sorted.slice(mid)
+    const maxRows = Math.max(col1.length, col2.length)
+
+    const tableRows = Array.from({ length: maxRows }, (_, i) => {
+      const a = col1[i]
+      const b = col2[i]
+      const cellA = a
+        ? `<td class="sn">${i + 1}</td>
+           <td class="item">${escapeHtml(a.itemName)}</td>
+           <td class="qty">${a.remaining}</td>
+           <td class="cb">□</td>`
+        : `<td colspan="4" class="empty"></td>`
+      const cellB = b
+        ? `<td class="sn">${mid + i + 1}</td>
+           <td class="item">${escapeHtml(b.itemName)}</td>
+           <td class="qty">${b.remaining}</td>
+           <td class="cb">□</td>`
+        : `<td colspan="4" class="empty"></td>`
+      return `<tr>${cellA}<td class="divider"></td>${cellB}</tr>`
+    }).join("")
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Production Work Order – ${dateStr}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: A4; margin: 14mm 12mm; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; color: #1e293b; background: #fff; }
+
+    /* ── Header ── */
+    .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 10px; border-bottom: 2.5px solid #ea580c; margin-bottom: 10px; }
+    .brand { font-size: 22px; font-weight: 800; color: #ea580c; letter-spacing: -0.5px; }
+    .brand-sub { font-size: 9px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-top: 1px; }
+    .doc-title { text-align: right; }
+    .doc-title h2 { font-size: 15px; font-weight: 700; color: #1e293b; text-transform: uppercase; letter-spacing: 1px; }
+    .doc-title p { font-size: 9px; color: #64748b; margin-top: 2px; }
+
+    /* ── Meta row ── */
+    .meta { display: flex; gap: 0; margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; }
+    .meta-cell { flex: 1; padding: 7px 12px; border-right: 1px solid #e2e8f0; }
+    .meta-cell:last-child { border-right: none; }
+    .meta-label { font-size: 8.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; }
+    .meta-value { font-size: 13px; font-weight: 700; color: #1e293b; margin-top: 2px; }
+
+    /* ── Table ── */
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #1e293b; color: #fff; }
+    thead th { padding: 7px 8px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; }
+    th.sn, td.sn { width: 26px; text-align: center; }
+    th.item, td.item { text-align: left; padding-left: 10px; }
+    th.qty, td.qty { width: 48px; text-align: right; font-weight: 700; color: #ea580c; }
+    th.cb, td.cb { width: 28px; text-align: center; font-size: 13px; color: #94a3b8; }
+    th.divider, td.divider { width: 10px; background: #f8fafc; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; }
+    tbody tr { border-bottom: 1px solid #f1f5f9; }
+    tbody tr:nth-child(even) { background: #f8fafc; }
+    td { padding: 6px 8px; font-size: 10.5px; color: #334155; }
+    td.sn { color: #94a3b8; font-size: 9.5px; }
+    td.qty { font-size: 11px; }
+    td.empty { background: #fafafa; }
+
+    /* ── Totals ── */
+    .totals-row td { border-top: 2px solid #1e293b; font-weight: 700; font-size: 11px; padding: 8px; background: #f1f5f9; }
+    .totals-label { text-align: right; text-transform: uppercase; letter-spacing: 0.5px; font-size: 9.5px; color: #64748b; }
+
+    /* ── Footer ── */
+    .footer { margin-top: 14px; padding-top: 8px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 8.5px; color: #94a3b8; }
+    .footer strong { color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="brand">SUNKOOL</div>
+      <div class="brand-sub">Production Management System</div>
+    </div>
+    <div class="doc-title">
+      <h2>Production Work Order</h2>
+      <p>Items to produce — sorted by urgency</p>
+    </div>
+  </div>
+
+  <div class="meta">
+    <div class="meta-cell"><div class="meta-label">Date</div><div class="meta-value">${dateStr}</div></div>
+    <div class="meta-cell"><div class="meta-label">Time</div><div class="meta-value">${timeStr}</div></div>
+    <div class="meta-cell"><div class="meta-label">Total Items</div><div class="meta-value">${sorted.length}</div></div>
+    <div class="meta-cell"><div class="meta-label">Total Units</div><div class="meta-value">${totalUnits.toLocaleString()}</div></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="sn">#</th>
+        <th class="item">Item Name</th>
+        <th class="qty">Qty</th>
+        <th class="cb">✓</th>
+        <th class="divider"></th>
+        <th class="sn">#</th>
+        <th class="item">Item Name</th>
+        <th class="qty">Qty</th>
+        <th class="cb">✓</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRows}
+      <tr class="totals-row">
+        <td colspan="2" class="totals-label">Total Units to Produce</td>
+        <td class="qty" style="color:#1e293b">${totalUnits.toLocaleString()}</td>
+        <td class="cb"></td>
+        <td class="divider"></td>
+        <td colspan="3" style="background:#f1f5f9"></td>
+        <td class="cb"></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <span>Printed: <strong>${dateStr}, ${timeStr}</strong></span>
+    <span>Sunkool Production Management · Confidential</span>
+    <span>Use □ column to mark items as complete</span>
+  </div>
+
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`)
     printWindow.document.close()
-    printWindow.focus()
-    printWindow.print()
-    printWindow.close()
   }
 
   const handleRowClick = (row: ProductionQueueRow) => {
@@ -365,14 +529,71 @@ export default function ProductionPage() {
     setQueueCustomerFilter("")
     setQueueItemFilter("")
     setUseDefaultOpenOnlyFilter(false)
-    if (next === "pending") setQueueStatusFilter("In Progress")
-    else if (next === "completedMonth") setQueueStatusFilter("Completed")
+    if (next === "completedMonth") setQueueStatusFilter("Completed")
     else setQueueStatusFilter("All")
   }
 
   const getProgressPercent = (row: ProductionQueueRow) => {
     if (row.ordered <= 0) return 0
     return Math.min(100, Math.round((row.produced / row.ordered) * 100))
+  }
+
+  const isAllChecked = sortedQueueRows.length > 0 && sortedQueueRows.every((r) => checkedItemIds.has(r.itemId))
+  const isSomeChecked = sortedQueueRows.some((r) => checkedItemIds.has(r.itemId))
+
+  const handleToggleAll = () => {
+    if (isAllChecked) {
+      setCheckedItemIds(new Set())
+    } else {
+      setCheckedItemIds(new Set(sortedQueueRows.map((r) => r.itemId)))
+    }
+  }
+
+  const handleToggleRow = (itemId: string) => {
+    setCheckedItemIds((prev) => {
+      const next = new Set(prev)
+      next.has(itemId) ? next.delete(itemId) : next.add(itemId)
+      return next
+    })
+  }
+
+  const handleExportExcel = () => {
+    const rowsToExport = checkedItemIds.size > 0
+      ? sortedQueueRows.filter((r) => checkedItemIds.has(r.itemId))
+      : sortedQueueRows
+
+    const formatDate = (iso: string | null) => {
+      if (!iso) return "—"
+      return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    }
+
+    const data = rowsToExport.map((row) => {
+      const progress = getProgressPercent(row)
+      const status = getQueueRowStatus(row)
+      return {
+        "Order #": row.orderNumber,
+        "Order Date": formatDate(row.orderDate),
+        "Customer": row.customerName,
+        "Item": row.itemName,
+        "Ordered Qty": row.ordered,
+        "Produced Qty": row.produced,
+        "Remaining Qty": row.remaining,
+        "Progress %": progress,
+        "Status": status,
+      }
+    })
+
+    const ws = XLSX.utils.json_to_sheet(data)
+    // Auto-width columns
+    const colWidths = Object.keys(data[0] ?? {}).map((key) => ({
+      wch: Math.max(key.length, ...data.map((r) => String(r[key as keyof typeof r] ?? "").length)) + 2,
+    }))
+    ws["!cols"] = colWidths
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Production Queue")
+    const fileName = `production-queue-${new Date().toISOString().slice(0, 10)}.xlsx`
+    XLSX.writeFile(wb, fileName)
   }
 
   function escapeHtml(s: string) {
@@ -387,20 +608,6 @@ export default function ProductionPage() {
     year: "numeric",
   }).format(new Date())
 
-  const activeKpiLabel = useMemo(() => {
-    switch (kpiFilter) {
-      case "pending":
-        return "Pending production orders"
-      case "units":
-        return "Remaining units to produce"
-      case "delayed":
-        return "Production delayed by 5+ days"
-      case "completedMonth":
-        return "Completed production this month"
-      default:
-        return null
-    }
-  }, [kpiFilter])
 
   return (
     <div className="space-y-5 bg-[#F1F5F9] pb-3 lg:space-y-6">
@@ -412,27 +619,27 @@ export default function ProductionPage() {
           <p className="mt-1 text-xs text-slate-400">{todayLabel}</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => loadProductionData(true)}
-            disabled={refreshing}
-            className="h-9 rounded-lg border-slate-200 bg-white px-4 text-[13px] font-medium text-slate-600 hover:bg-orange-50 hover:text-orange-500 disabled:opacity-70"
-          >
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </Button>
-          <Button
-            variant="outline"
-            className="h-9 rounded-lg border-slate-200 bg-white px-4 text-[13px] font-medium text-slate-600 hover:bg-orange-50 hover:text-orange-500"
-          >
-            Export
-          </Button>
-        </div>
       </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <button
+          type="button"
+          onClick={() => applyKpiFilter("noProduction")}
+          className={cn(
+            "overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition-all hover:shadow-md",
+            kpiFilter === "noProduction" ? "border-red-400 ring-2 ring-red-200" : "border-slate-200 hover:border-red-200"
+          )}
+        >
+          <div className="h-[3px] w-full bg-red-500"></div>
+          <div className="px-5 py-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Not Started</p>
+            <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">{kpiData?.noProductionOrdersCount ?? 0}</div>
+            <p className="mt-2 text-xs text-slate-500">New orders awaiting production</p>
+          </div>
+        </button>
+
         <button
           type="button"
           onClick={() => applyKpiFilter("pending")}
@@ -498,54 +705,44 @@ export default function ProductionPage() {
         </button>
       </div>
 
-      {/* Filter Buttons - wrap on mobile, min height for touch */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="flex flex-wrap gap-2">
-        <Button
-          variant="outline"
-          onClick={() => setFilter("pending")}
-          className={cn(
-            "h-9 rounded-lg px-4 text-[13px] font-medium transition-colors",
-            filter === "pending"
-              ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600 hover:text-white"
-              : "border-slate-200 bg-white text-slate-600 hover:bg-orange-50 hover:text-orange-500"
-          )}
-        >
-          <Clock className="h-4 w-4" />
-          Queue – Item-wise ({sortedQueueRows.length})
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => setFilter("needed")}
-          className={cn(
-            "h-9 rounded-lg px-4 text-[13px] font-medium transition-colors",
-            filter === "needed"
-              ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600 hover:text-white"
-              : "border-slate-200 bg-white text-slate-600 hover:bg-orange-50 hover:text-orange-500"
-          )}
-        >
-          <Package className="h-4 w-4" />
-          Needed ({neededList.length})
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => setFilter("inventory-health")}
-          className={cn(
-            "h-9 rounded-lg px-4 text-[13px] font-medium transition-colors",
-            filter === "inventory-health"
-              ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600 hover:text-white"
-              : "border-slate-200 bg-white text-slate-600 hover:bg-orange-50 hover:text-orange-500"
-          )}
-        >
-          <Activity className="h-4 w-4" />
-          Inventory Health
-        </Button>
+      {/* Tab Navigation */}
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex overflow-x-auto">
+          {([
+            { key: "pending",          icon: Clock,     label: "Production Queue",   count: sortedQueueRows.length },
+            { key: "needed",           icon: Package,   label: "Needed",             count: neededList.length },
+            { key: "inventory-health", icon: Activity,  label: "Inventory Health",   count: null },
+          ] as const).map(({ key, icon: Icon, label, count }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFilter(key)}
+              className={cn(
+                "relative flex shrink-0 items-center gap-2 px-5 py-4 text-[13px] font-medium transition-colors focus:outline-none",
+                filter === key
+                  ? "text-orange-500"
+                  : "text-slate-500 hover:text-slate-800"
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+              {count !== null && (
+                <span className={cn(
+                  "rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none",
+                  filter === key
+                    ? "bg-orange-100 text-orange-600"
+                    : "bg-slate-100 text-slate-500"
+                )}>
+                  {count}
+                </span>
+              )}
+              {/* Active underline */}
+              {filter === key && (
+                <span className="absolute bottom-0 left-0 right-0 h-[2.5px] rounded-t-full bg-orange-500" />
+              )}
+            </button>
+          ))}
         </div>
-        {activeKpiLabel ? (
-          <div className="mt-3 inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">
-            Active KPI filter: {activeKpiLabel}
-          </div>
-        ) : null}
       </div>
 
       {/* Content based on filter */}
@@ -759,6 +956,15 @@ export default function ProductionPage() {
                   <table className="w-full">
                     <thead className="border-b-2 border-slate-200 bg-slate-50/80">
                       <tr>
+                        <th className="h-10 w-10 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isAllChecked}
+                            ref={(el) => { if (el) el.indeterminate = isSomeChecked && !isAllChecked }}
+                            onChange={handleToggleAll}
+                            className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-orange-500"
+                          />
+                        </th>
                         <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <button type="button" onClick={() => handleSort("orderNumber")} className="inline-flex items-center gap-1 hover:text-slate-700">
                             Order #
@@ -779,6 +985,7 @@ export default function ProductionPage() {
                             )}
                           </button>
                         </th>
+                        <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Order Date</th>
                         <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <button type="button" onClick={() => handleSort("itemName")} className="inline-flex items-center gap-1 hover:text-slate-700">
                             Item
@@ -843,9 +1050,17 @@ export default function ProductionPage() {
                             onClick={() => handleRowClick(row)}
                             className={cn(
                               "h-12 cursor-pointer border-b border-slate-100 text-[13px] text-slate-900 transition-colors hover:bg-orange-50/70",
-                              index % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"
+                              checkedItemIds.has(row.itemId) ? "bg-orange-50/60" : index % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"
                             )}
                           >
+                            <td className="px-3 py-0 text-center" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={checkedItemIds.has(row.itemId)}
+                                onChange={() => handleToggleRow(row.itemId)}
+                                className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-orange-500"
+                              />
+                            </td>
                             <td className={cn(
                               "px-4 py-0",
                               isFirstInGroup ? "border-l-[3px] border-l-orange-500" : "border-l-[3px] border-l-orange-200"
@@ -862,6 +1077,9 @@ export default function ProductionPage() {
                               </button>
                             </td>
                             <td className="max-w-[180px] truncate px-4 py-0 text-[13px] text-slate-600">{row.customerName}</td>
+                            <td className="whitespace-nowrap px-4 py-0 text-[12px] text-slate-400">
+                              {row.orderDate ? new Date(row.orderDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                            </td>
                             <td className="max-w-[200px] truncate px-4 py-0 text-[13px] font-medium text-slate-900">{row.itemName}</td>
                             <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.ordered}</td>
                             <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.produced}</td>
@@ -905,8 +1123,18 @@ export default function ProductionPage() {
                   </table>
 
                   <div className="flex items-center justify-between border-t-2 border-slate-200 bg-slate-50 px-4 py-3">
-                    <p className="text-xs text-slate-400">Showing {sortedQueueRows.length} of {queueData?.rows.length ?? 0} items</p>
-                    <span className="text-xs text-slate-400">All items loaded</span>
+                    <p className="text-xs text-slate-400">
+                      Showing {sortedQueueRows.length} of {queueData?.rows.length ?? 0} items
+                      {checkedItemIds.size > 0 && <span className="ml-2 font-medium text-orange-500">· {checkedItemIds.size} selected</span>}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleExportExcel}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:border-green-300 hover:bg-green-50 hover:text-green-700"
+                    >
+                      <FileDown className="h-3.5 w-3.5" />
+                      {checkedItemIds.size > 0 ? `Export ${checkedItemIds.size} rows` : "Export all"}
+                    </button>
                   </div>
                 </div>
               </>
@@ -916,301 +1144,407 @@ export default function ProductionPage() {
       ) : filter === "needed" ? (
         <div
           ref={neededFullscreenRef}
-          className="relative rounded-2xl border border-slate-200 bg-white shadow-sm [&:fullscreen]:min-h-screen [&:fullscreen]:border-0 [&:fullscreen]:bg-slate-50 [&:fullscreen]:p-8"
-        >
-          {isNeededFullscreen && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExitFullscreen}
-              className="absolute top-4 right-4 z-10 gap-2 print:hidden bg-white shadow-md hover:bg-slate-50"
-              aria-label="Exit fullscreen"
-            >
-              <Minimize2 className="h-4 w-4" />
-              Exit fullscreen
-            </Button>
+          className={cn(
+            "rounded-2xl border border-slate-200 bg-white shadow-sm",
+            isNeededFullscreen && "flex flex-col border-0 bg-[#F1F5F9]"
           )}
-          <Card className="border-0 shadow-none">
-            <CardHeader className="flex flex-row items-center justify-between gap-4">
-              <div>
-                <CardTitle className="text-xl font-semibold text-slate-900">Production – Needed</CardTitle>
-                <p className="text-sm text-slate-500 mt-1">Items with remaining quantity to produce (aggregated).</p>
-                {neededLastUpdated && (
-                  <p className="text-xs text-slate-400 mt-1">Last updated: {neededLastUpdated.toLocaleTimeString()}</p>
-                )}
+        >
+          {/* Header */}
+          <div className={cn(
+            "flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4",
+            isNeededFullscreen && "bg-white px-8 py-5 shadow-sm"
+          )}>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-[16px] font-semibold text-slate-900">Production Needed</h2>
+                <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-[12px] font-semibold text-orange-600">
+                  {neededList.length} items
+                </span>
               </div>
-              <div className="flex gap-2 print:hidden">
-                <Button onClick={handlePrintNeeded} className="gap-2" variant="outline">
-                  <Printer className="h-4 w-4" />
-                  Print list
-                </Button>
-                <Button onClick={handleFullscreenNeeded} className="gap-2" variant="outline" aria-label="View fullscreen">
-                  <Maximize2 className="h-4 w-4" />
-                  FullScreen
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              {neededList.length === 0 ? (
-                <div className="py-12 text-center">
-                  <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-3" />
-                  <p className="text-slate-500">No items needed</p>
-                  <p className="text-sm text-slate-400 mt-1">All items in production orders are fully produced.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-6 p-4 lg:grid-cols-2">
-                  {(() => {
-                    const mid = Math.ceil(neededList.length / 2)
-                    const firstHalf = neededList.slice(0, mid)
-                    const secondHalf = neededList.slice(mid)
-                    const renderTable = (rows: { itemName: string; remaining: number }[], tableKey: string) => (
-                      <div key={tableKey} className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-                        <table className="w-full">
-                          <thead className="bg-slate-100 border-b-2 border-slate-200">
-                            <tr>
-                              <th className="text-left p-4 text-sm font-semibold text-slate-700 uppercase tracking-wider">Item</th>
-                              <th className="text-right p-4 text-sm font-semibold text-slate-700 uppercase tracking-wider w-32">Remaining</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {rows.map(({ itemName, remaining }, index) => (
-                              <tr
-                                key={itemName}
-                                onClick={() => handleNeededItemClick(itemName)}
-                                className={cn(
-                                  "cursor-pointer transition-colors",
-                                  index % 2 === 0 ? "bg-white hover:bg-slate-50/70" : "bg-slate-50/50 hover:bg-slate-100/50"
-                                )}
-                              >
-                                <td className="p-4 text-base font-medium text-slate-900">{itemName}</td>
-                                <td className="p-4 text-right">
-                                  <div className="flex items-center justify-end gap-3">
-                                    <Badge variant="secondary" className="border-0 bg-amber-100 px-3 py-1 text-lg font-bold text-amber-800">
-                                      {remaining}
-                                    </Badge>
-                                    <ChevronRight className="h-4 w-4 text-slate-400" />
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )
-                    return (
-                      <>
-                        {renderTable(firstHalf, "needed-table-1")}
-                        {secondHalf.length > 0 ? renderTable(secondHalf, "needed-table-2") : null}
-                      </>
-                    )
-                  })()}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      ) : filter === "inventory-health" ? (
-        <Card className="overflow-hidden rounded-2xl border-slate-200 shadow-sm">
-          <CardHeader className="border-b border-slate-200 bg-white">
-            <CardTitle className="text-lg">Inventory Health</CardTitle>
-            <p className="text-sm text-slate-500 mt-1">Stock prediction, fast/slow moving items, and dead stock detection.</p>
-            <div className="flex flex-wrap items-center gap-4 mt-4">
-              <div className="flex gap-2">
-                {([7, 30, 90] as const).map((d) => (
-                  <Button
-                    key={d}
-                    variant={inventoryHealthDays === d ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setInventoryHealthDays(d)}
-                  >
-                    Last {d} days
-                  </Button>
-                ))}
-              </div>
-              <div className="relative flex-1 min-w-[200px] max-w-xs">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
-                  placeholder="Search by item name..."
-                  value={inventoryHealthSearch}
-                  onChange={(e) => setInventoryHealthSearch(e.target.value)}
-                  className="pl-8 h-9"
-                />
-              </div>
+              <p className="mt-0.5 text-xs text-slate-400">
+                {neededList.reduce((s, r) => s + r.remaining, 0).toLocaleString()} total units to produce
+                {neededLastUpdated && <span className="ml-2">· Updated {neededLastUpdated.toLocaleTimeString()}</span>}
+              </p>
             </div>
-            <div className="flex gap-2 mt-3 border-b border-slate-200 pb-0">
-              <Button
-                variant={inventoryHealthView === "stock-prediction" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setInventoryHealthView("stock-prediction")}
-                className="rounded-b-none"
+            <div className="flex items-center gap-2 print:hidden">
+              <button
+                type="button"
+                onClick={handlePrintNeeded}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-[13px] font-medium text-slate-600 shadow-sm transition-colors hover:border-orange-300 hover:bg-orange-50 hover:text-orange-600"
               >
-                Stock Prediction
-              </Button>
-              <Button
-                variant={inventoryHealthView === "fast-slow" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setInventoryHealthView("fast-slow")}
-                className="rounded-b-none"
+                <Printer className="h-4 w-4" />
+                Print Work Order
+              </button>
+              <button
+                type="button"
+                onClick={isNeededFullscreen ? handleExitFullscreen : handleFullscreenNeeded}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-[13px] font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
+                aria-label={isNeededFullscreen ? "Exit fullscreen" : "View fullscreen"}
               >
-                Fast / Slow Moving
-              </Button>
-              <Button
-                variant={inventoryHealthView === "dead-stock" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setInventoryHealthView("dead-stock")}
-                className="rounded-b-none"
-              >
-                Dead Stock
-              </Button>
+                {isNeededFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                {isNeededFullscreen ? "Exit" : "Fullscreen"}
+              </button>
             </div>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {inventoryHealthLoading ? (
-              <div className="py-12 text-center text-slate-500">Loading inventory health data...</div>
-            ) : inventoryHealthView === "stock-prediction" ? (
-              (() => {
-                const filtered = stockPredictionData.filter((r) =>
-                  r.itemName.toLowerCase().includes(inventoryHealthSearch.toLowerCase())
-                )
-                if (filtered.length === 0) {
-                  return (
-                    <div className="py-12 text-center text-slate-500">
-                      No inventory items match. Stock data is for active inventory items only.
-                    </div>
-                  )
-                }
-                return (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase">Item</th>
-                          <th className="text-right p-3 text-xs font-semibold text-slate-600 uppercase">Current stock</th>
-                          <th className="text-right p-3 text-xs font-semibold text-slate-600 uppercase">Demand ({inventoryHealthDays}d)</th>
-                          <th className="text-right p-3 text-xs font-semibold text-slate-600 uppercase">Weeks of stock</th>
-                          <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {filtered.map((r) => (
-                          <tr key={r.itemId} className="hover:bg-slate-50/50">
-                            <td className="p-3 font-medium text-slate-900">{r.itemName}</td>
-                            <td className="p-3 text-right text-sm text-slate-700">{r.currentStock.toLocaleString()}</td>
-                            <td className="p-3 text-right text-sm text-slate-700">{r.demandInPeriod}</td>
-                            <td className="p-3 text-right text-sm text-slate-700">{r.weeksOfStock ?? "—"}</td>
-                            <td className="p-3 text-center">
-                              <Badge
-                                variant="secondary"
-                                className={
-                                  r.status === "low"
-                                    ? "bg-amber-100 text-amber-800"
-                                    : r.status === "excess"
-                                      ? "bg-slate-200 text-slate-700"
-                                      : r.status === "no_demand"
-                                        ? "bg-slate-100 text-slate-600"
-                                        : "bg-green-100 text-green-800"
-                                }
-                              >
-                                {r.status === "no_demand" ? "No demand" : r.status === "low" ? "Low" : r.status === "excess" ? "Excess" : "Ok"}
-                              </Badge>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )
-              })()
-            ) : inventoryHealthView === "fast-slow" ? (
-              (() => {
-                const filtered = fastSlowData.filter((r) =>
-                  r.itemName.toLowerCase().includes(inventoryHealthSearch.toLowerCase())
-                )
-                if (filtered.length === 0) {
-                  return (
-                    <div className="py-12 text-center text-slate-500">
-                      No movement in the selected period. Try a longer date range.
-                    </div>
-                  )
-                }
-                return (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase">Item</th>
-                          <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase">Type</th>
-                          <th className="text-right p-3 text-xs font-semibold text-slate-600 uppercase">Quantity dispatched</th>
-                          <th className="text-center p-3 text-xs font-semibold text-slate-600 uppercase">Classification</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {filtered.map((r) => (
-                          <tr key={`${r.itemType}-${r.itemId}`} className="hover:bg-slate-50/50">
-                            <td className="p-3 font-medium text-slate-900">{r.itemName}</td>
-                            <td className="p-3 text-sm text-slate-600 capitalize">{r.itemType}</td>
-                            <td className="p-3 text-right text-sm font-medium text-slate-700">{r.quantityDispatched}</td>
-                            <td className="p-3 text-center">
-                              <Badge
-                                variant="secondary"
-                                className={
-                                  r.classification === "Fast"
-                                    ? "bg-green-100 text-green-800"
-                                    : r.classification === "Slow"
-                                      ? "bg-amber-100 text-amber-800"
-                                      : "bg-slate-100 text-slate-700"
-                                }
-                              >
-                                {r.classification}
-                              </Badge>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )
-              })()
+          </div>
+
+          {/* Content */}
+          <div className={cn(
+            "p-4",
+            isNeededFullscreen && "flex-1 overflow-y-auto px-8 py-6"
+          )}>
+            {neededList.length === 0 ? (
+              <div className="py-16 text-center">
+                <CheckCircle className="mx-auto mb-3 h-12 w-12 text-green-400" />
+                <p className="font-medium text-slate-600">All clear!</p>
+                <p className="mt-1 text-sm text-slate-400">All production order items are fully produced.</p>
+              </div>
             ) : (
               (() => {
-                const filtered = deadStockData.filter((r) =>
-                  r.itemName.toLowerCase().includes(inventoryHealthSearch.toLowerCase())
-                )
-                if (filtered.length === 0) {
-                  return (
-                    <div className="py-12 text-center text-slate-500">
-                      No dead stock in the selected period (all items had some movement).
-                    </div>
-                  )
-                }
-                return (
-                  <div className="overflow-x-auto">
+                const sorted = [...neededList].sort((a, b) => b.remaining - a.remaining)
+                const mid = Math.ceil(sorted.length / 2)
+                const col1 = sorted.slice(0, mid)
+                const col2 = sorted.slice(mid)
+
+                const renderCol = (rows: { itemName: string; remaining: number }[], offset: number) => (
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                     <table className="w-full">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase">Item</th>
-                          <th className="text-left p-3 text-xs font-semibold text-slate-600 uppercase">Type</th>
-                          <th className="text-right p-3 text-xs font-semibold text-slate-600 uppercase">Last movement</th>
-                          <th className="text-right p-3 text-xs font-semibold text-slate-600 uppercase">Days since movement</th>
+                      <thead>
+                        <tr className="border-b-2 border-slate-200 bg-slate-50">
+                          <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-8">#</th>
+                          <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">Item</th>
+                          <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-24">To Produce</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {filtered.map((r) => (
-                          <tr key={`${r.itemType}-${r.itemId}`} className="hover:bg-slate-50/50">
-                            <td className="p-3 font-medium text-slate-900">{r.itemName}</td>
-                            <td className="p-3 text-sm text-slate-600 capitalize">{r.itemType}</td>
-                            <td className="p-3 text-right text-sm text-slate-600">{r.lastMovementAt ? new Date(r.lastMovementAt).toLocaleDateString() : "—"}</td>
-                            <td className="p-3 text-right text-sm text-slate-600">{r.daysSinceMovement ?? "—"}</td>
-                          </tr>
-                        ))}
+                      <tbody>
+                        {rows.map(({ itemName, remaining }, i) => {
+                          const rank = offset + i + 1
+                          const isHigh = remaining > 100
+                          const isMed = remaining > 30 && remaining <= 100
+                          return (
+                            <tr
+                              key={itemName}
+                              onClick={() => handleNeededItemClick(itemName)}
+                              className={cn(
+                                "cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-orange-50/60",
+                                i % 2 === 0 ? "bg-white" : "bg-slate-50/40"
+                              )}
+                            >
+                              <td className="px-4 py-3 text-[11px] text-slate-300 font-medium">{rank}</td>
+                              <td className="px-4 py-3">
+                                <span className="text-[13px] font-medium text-slate-800">{itemName}</span>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span className={cn(
+                                  "inline-flex items-center rounded-full px-3 py-1 text-[13px] font-bold",
+                                  isHigh ? "bg-red-100 text-red-700"
+                                    : isMed ? "bg-amber-100 text-amber-700"
+                                      : "bg-slate-100 text-slate-600"
+                                )}>
+                                  {remaining}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
+                  </div>
+                )
+
+                return (
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    {renderCol(col1, 0)}
+                    {col2.length > 0 && renderCol(col2, mid)}
                   </div>
                 )
               })()
             )}
-          </CardContent>
-        </Card>
+          </div>
+
+          {/* Footer summary */}
+          {neededList.length > 0 && (
+            <div className={cn(
+              "flex items-center justify-between border-t border-slate-200 bg-slate-50/80 px-5 py-3 print:hidden",
+              isNeededFullscreen && "px-8"
+            )}>
+              <p className="text-xs text-slate-400">
+                Sorted highest to lowest · Click any item to filter the queue
+              </p>
+              <p className="text-xs font-semibold text-slate-600">
+                Total: {neededList.reduce((s, r) => s + r.remaining, 0).toLocaleString()} units
+              </p>
+            </div>
+          )}
+        </div>
+      ) : filter === "inventory-health" ? (
+        <div className="space-y-4">
+          {/* Header */}
+          <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-[17px] font-semibold text-[#0F172A]">Inventory Intelligence</h2>
+                <p className="mt-0.5 text-xs text-slate-400">What needs your attention — sorted by urgency</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Period:</span>
+                {([7, 30, 90] as const).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setInventoryHealthDays(d)}
+                    className={cn(
+                      "h-8 rounded-lg px-3 text-[13px] font-medium transition-colors",
+                      inventoryHealthDays === d
+                        ? "bg-orange-500 text-white"
+                        : "border border-slate-200 bg-white text-slate-600 hover:border-orange-300 hover:text-orange-500"
+                    )}
+                  >
+                    {d}d
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {inventoryHealthLoading ? (
+            <div className="rounded-2xl border border-slate-200 bg-white py-16 text-center shadow-sm">
+              <Activity className="mx-auto mb-3 h-8 w-8 animate-pulse text-slate-300" />
+              <p className="text-sm text-slate-400">Analysing your inventory...</p>
+            </div>
+          ) : (
+            <>
+              {/* Summary cards */}
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <button
+                  type="button"
+                  onClick={() => setInventoryHealthFilter(inventoryHealthFilter === "low" ? "all" : "low")}
+                  className={cn(
+                    "rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md",
+                    inventoryHealthFilter === "low" ? "border-red-400 ring-2 ring-red-100" : "border-slate-200 hover:border-red-200"
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Low Stock</p>
+                    <span className="text-lg">🔴</span>
+                  </div>
+                  <p className="mt-2 text-3xl font-bold text-slate-900">{invSummary.low}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">items running low — produce soon</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInventoryHealthFilter(inventoryHealthFilter === "dead" ? "all" : "dead")}
+                  className={cn(
+                    "rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md",
+                    inventoryHealthFilter === "dead" ? "border-amber-400 ring-2 ring-amber-100" : "border-slate-200 hover:border-amber-200"
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Not Moving</p>
+                    <span className="text-lg">📦</span>
+                  </div>
+                  <p className="mt-2 text-3xl font-bold text-slate-900">{invSummary.dead}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">items with stock but no sales</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInventoryHealthFilter(inventoryHealthFilter === "fast" ? "all" : "fast")}
+                  className={cn(
+                    "rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md",
+                    inventoryHealthFilter === "fast" ? "border-green-400 ring-2 ring-green-100" : "border-slate-200 hover:border-green-200"
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Fast Moving</p>
+                    <span className="text-lg">🚀</span>
+                  </div>
+                  <p className="mt-2 text-3xl font-bold text-slate-900">{invSummary.fast}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">top selling items — keep stocked</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInventoryHealthFilter(inventoryHealthFilter === "excess" ? "all" : "excess")}
+                  className={cn(
+                    "rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md",
+                    inventoryHealthFilter === "excess" ? "border-slate-500 ring-2 ring-slate-100" : "border-slate-200 hover:border-slate-400"
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Overstocked</p>
+                    <span className="text-lg">⚠️</span>
+                  </div>
+                  <p className="mt-2 text-3xl font-bold text-slate-900">{invSummary.excess}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">items with excess inventory</p>
+                </button>
+              </div>
+
+              {/* Filter + Search bar */}
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex flex-wrap gap-1.5">
+                    {(["all", "needs-action", "low", "dead", "fast", "excess"] as const).map((f) => {
+                      const labels: Record<typeof f, string> = {
+                        "all": "All items",
+                        "needs-action": `⚠️ Needs Action (${invSummary.low + invSummary.dead})`,
+                        "low": `🔴 Low Stock (${invSummary.low})`,
+                        "dead": `📦 Not Moving (${invSummary.dead})`,
+                        "fast": `🚀 Fast Moving (${invSummary.fast})`,
+                        "excess": `Overstocked (${invSummary.excess})`,
+                      }
+                      return (
+                        <button
+                          key={f}
+                          type="button"
+                          onClick={() => setInventoryHealthFilter(f)}
+                          className={cn(
+                            "h-7 rounded-full px-3 text-[12px] font-medium transition-colors",
+                            inventoryHealthFilter === f
+                              ? "bg-orange-500 text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          )}
+                        >
+                          {labels[f]}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="relative lg:w-56">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={inventoryHealthSearch}
+                      onChange={(e) => setInventoryHealthSearch(e.target.value)}
+                      placeholder="Search item..."
+                      className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-3 text-[13px] text-slate-700 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-500/15"
+                    />
+                  </div>
+                </div>
+
+                {/* Table */}
+                {filteredInventoryData.length === 0 ? (
+                  <div className="py-14 text-center">
+                    <CheckCircle className="mx-auto mb-3 h-10 w-10 text-green-400" />
+                    <p className="text-sm font-medium text-slate-600">All clear!</p>
+                    <p className="mt-1 text-xs text-slate-400">No items match this filter.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="border-b-2 border-slate-100 bg-slate-50/60">
+                        <tr>
+                          <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">Item</th>
+                          <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Stock Level</th>
+                          <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-400">In Hand</th>
+                          <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-400">Sold ({inventoryHealthDays}d)</th>
+                          <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Weeks Left</th>
+                          <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Speed</th>
+                          <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredInventoryData.map((r, i) => {
+                          const weeksBarWidth = r.weeksOfStock != null
+                            ? Math.min(100, Math.round((r.weeksOfStock / 8) * 100))
+                            : r.currentStock > 0 ? 100 : 0
+                          const barColor = r.status === "low"
+                            ? "bg-red-400"
+                            : r.status === "excess"
+                              ? "bg-slate-300"
+                              : r.weeksOfStock != null && r.weeksOfStock < 4
+                                ? "bg-amber-400"
+                                : "bg-green-400"
+
+                          const actionLabel = r.status === "low"
+                            ? { text: "Produce Now", cls: "bg-red-100 text-red-700" }
+                            : r.isDead && r.currentStock > 0
+                              ? { text: "Investigate", cls: "bg-amber-100 text-amber-700" }
+                              : r.status === "excess"
+                                ? { text: "Overstocked", cls: "bg-slate-100 text-slate-600" }
+                                : r.speed === "Fast"
+                                  ? { text: "Keep Stocked", cls: "bg-green-100 text-green-700" }
+                                  : { text: "—", cls: "text-slate-300" }
+
+                          const weeksLabel = r.weeksOfStock != null
+                            ? `${r.weeksOfStock}w`
+                            : r.currentStock > 0 ? "∞" : "0"
+                          const weeksCls = r.status === "low"
+                            ? "bg-red-100 text-red-700 font-semibold"
+                            : r.weeksOfStock != null && r.weeksOfStock < 4
+                              ? "bg-amber-100 text-amber-700"
+                              : r.status === "excess"
+                                ? "bg-slate-100 text-slate-500"
+                                : "bg-green-100 text-green-700"
+
+                          return (
+                            <tr
+                              key={r.itemId}
+                              className={cn(
+                                "border-b border-slate-100 text-[13px] transition-colors hover:bg-orange-50/40",
+                                i % 2 === 0 ? "bg-white" : "bg-slate-50/40"
+                              )}
+                            >
+                              <td className={cn(
+                                "px-5 py-3 font-medium text-slate-900",
+                                r.status === "low" ? "border-l-[3px] border-l-red-400" : "border-l-[3px] border-l-transparent"
+                              )}>
+                                {r.itemName}
+                                {r.isDead && r.currentStock > 0 && (
+                                  <span className="ml-2 text-[10px] font-medium text-amber-500">
+                                    {r.daysSinceMovement != null ? `${r.daysSinceMovement}d no sales` : "no movement"}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="mx-auto w-24">
+                                  <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                                    <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${weeksBarWidth}%` }} />
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-right font-medium text-slate-800">{r.currentStock.toLocaleString()}</td>
+                              <td className="px-4 py-3 text-right text-slate-500">{r.demandInPeriod > 0 ? r.demandInPeriod : "—"}</td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px]", weeksCls)}>
+                                  {weeksLabel}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {r.speed ? (
+                                  <span className={cn(
+                                    "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+                                    r.speed === "Fast" ? "bg-green-100 text-green-700"
+                                      : r.speed === "Slow" ? "bg-amber-100 text-amber-700"
+                                        : "bg-slate-100 text-slate-500"
+                                  )}>
+                                    {r.speed}
+                                  </span>
+                                ) : <span className="text-slate-300">—</span>}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium", actionLabel.cls)}>
+                                  {actionLabel.text}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-3">
+                      <p className="text-xs text-slate-400">
+                        Showing {filteredInventoryData.length} of {mergedInventoryData.length} items · Period: last {inventoryHealthDays} days
+                        {invSummary.low > 0 && (
+                          <span className="ml-3 font-medium text-red-500">{invSummary.low} item{invSummary.low > 1 ? "s" : ""} need production attention</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       ) : null}
       <OrderJourneySheet open={journeyOpen} onOpenChange={setJourneyOpen} row={selectedRow} />
     </div>

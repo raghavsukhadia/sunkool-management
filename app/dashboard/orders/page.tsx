@@ -78,6 +78,7 @@ export default function OrdersPage() {
   const [exporting, setExporting] = useState(false)
   const [filterSheetOpen, setFilterSheetOpen] = useState(false)
   const [customerFilter, setCustomerFilter] = useState<"all" | string>("all")
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set())
 
   const uniqueCustomers = useMemo(() => {
     const map = new Map<string, string>()
@@ -103,7 +104,11 @@ export default function OrdersPage() {
   }, [])
 
   const handleExport = async () => {
-    const ids = filteredAndSortedOrders.map((o) => o.id)
+    const exportOrders =
+      selectedOrderIds.size > 0
+        ? filteredAndSortedOrders.filter((o) => selectedOrderIds.has(o.id))
+        : filteredAndSortedOrders
+    const ids = exportOrders.map((o) => o.id)
     if (ids.length === 0) {
       setError("No orders to export")
       return
@@ -111,49 +116,182 @@ export default function OrdersPage() {
     setExporting(true)
     setError(null)
     try {
-      const XLSX = await import("xlsx")
+      const XLSX = await import("xlsx-js-style")
       const res = await getOrdersExportData(ids)
       if (!res.success || !res.data) {
         setError(res.error || "Export failed")
         return
       }
-      const headers = [
-        "Order Id",
-        "Order ID",
-        "Timestamp",
-        "Dispatched date",
-        "Customer Name",
-        "Inv No",
-        "Order Status",
-        "Order",
-        "Bill To",
-        "Ship To",
-        "Card Pic",
-        "Docket no",
-        "COURIER NAME",
-        "Expected Delivered",
+
+      // Build a lookup map from already-loaded order data (has price, payment, email, phone)
+      const orderLookup = new Map(filteredAndSortedOrders.map((o) => [o.id, o]))
+
+      // ── Color palette ──────────────────────────────────────────────
+      const C = {
+        brandDark: "3D1F05",   // deep espresso (title bg)
+        brandMid:  "7C4A1E",   // warm walnut   (header bg)
+        brandTint: "FFF8F2",   // ivory tint    (alt row bg)
+        white:     "FFFFFF",
+        lightGray: "F1EDE9",
+        borderCol: "D6C4B0",   // warm sand border
+        textDark:  "1A1007",
+        textMuted: "6B5744",
+      }
+
+      // ── Column definitions ─────────────────────────────────────────
+      const COLS = [
+        { label: "SR #",               width: 6  },
+        { label: "Internal Order #",   width: 17 },
+        { label: "Sales Order #",      width: 16 },
+        { label: "Order Date",         width: 14 },
+        { label: "Customer Name",      width: 24 },
+        { label: "Phone",              width: 14 },
+        { label: "Email",              width: 28 },
+        { label: "Items Ordered",      width: 42 },
+        { label: "Order Status",       width: 19 },
+        { label: "Payment Status",     width: 16 },
+        { label: "Cash Discount",      width: 14 },
+        { label: "Amount (₹)",         width: 15 },
+        { label: "Invoice #",          width: 14 },
+        { label: "Dispatch Date",      width: 14 },
+        { label: "Courier",            width: 20 },
+        { label: "Tracking / Docket #", width: 24 },
+        { label: "Ship-to Address",    width: 32 },
       ]
-      const rows = res.data.map((r) => [
-        r.internal_order_number ?? "",
-        r.sales_order_number ?? "",
-        r.created_at,
-        r.dispatch_date,
-        r.customer_name,
-        r.invoice_number ?? "",
-        r.order_status,
-        r.item_details,
-        r.bill_to,
-        r.ship_to,
-        r.card_pic,
-        r.tracking_id ?? "",
-        r.courier_name,
-        r.expected_delivered,
-      ])
-      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
+      const numCols = COLS.length
+      // Column letter helper (A..Z for up to 26 cols)
+      const colLetter = (i: number) => String.fromCharCode(65 + i)
+
+      // ── Shared styles ──────────────────────────────────────────────
+      const border = {
+        top:    { style: "thin", color: { rgb: C.borderCol } },
+        bottom: { style: "thin", color: { rgb: C.borderCol } },
+        left:   { style: "thin", color: { rgb: C.borderCol } },
+        right:  { style: "thin", color: { rgb: C.borderCol } },
+      }
+
+      const sTitle = {
+        font: { bold: true, sz: 15, color: { rgb: C.white }, name: "Calibri" },
+        fill: { patternType: "solid", fgColor: { rgb: C.brandDark } },
+        alignment: { horizontal: "center", vertical: "center" },
+      }
+      const sMeta = {
+        font: { sz: 10, color: { rgb: C.textMuted }, name: "Calibri" },
+        fill: { patternType: "solid", fgColor: { rgb: C.lightGray } },
+        alignment: { horizontal: "center", vertical: "center" },
+      }
+      const sHeader = {
+        font: { bold: true, sz: 10, color: { rgb: C.white }, name: "Calibri" },
+        fill: { patternType: "solid", fgColor: { rgb: C.brandMid } },
+        alignment: { horizontal: "center", vertical: "center", wrapText: true },
+        border,
+      }
+
+      // ── Build worksheet ────────────────────────────────────────────
+      const ws: Record<string, unknown> = {}
+
+      // Row 1 — Title
+      ws["A1"] = { v: "SUNKOOL MANAGEMENT — Orders Export Report", t: "s", s: sTitle }
+
+      // Row 2 — Meta
+      const totalValue = ids.reduce((sum, id) => {
+        const o = orderLookup.get(id)
+        return sum + (o ? getOrderDisplayTotal(o) : 0)
+      }, 0)
+      ws["A2"] = {
+        v: `Generated: ${new Date().toLocaleString("en-IN")}   |   Orders Exported: ${res.data.length}   |   Total Value: ₹${totalValue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
+        t: "s",
+        s: sMeta,
+      }
+
+      // Row 3 — blank spacer (styled with title bg for a clean bar)
+      ws["A3"] = { v: "", t: "s", s: { fill: { patternType: "solid", fgColor: { rgb: C.brandDark } } } }
+
+      // Row 4 — Column headers
+      COLS.forEach((col, i) => {
+        ws[`${colLetter(i)}4`] = { v: col.label, t: "s", s: sHeader }
+      })
+
+      // Rows 5+ — Data
+      res.data.forEach((row, idx) => {
+        const order = orderLookup.get(row.orderId)
+        const r = idx + 5
+        const isAlt = idx % 2 === 1
+        const fillBg = isAlt ? C.brandTint : C.white
+
+        const sData = {
+          font: { sz: 10, name: "Calibri", color: { rgb: C.textDark } },
+          fill: { patternType: "solid", fgColor: { rgb: fillBg } },
+          alignment: { vertical: "center", wrapText: true },
+          border,
+        }
+        const sCenter = { ...sData, alignment: { ...sData.alignment, horizontal: "center" } }
+        const sBold   = { ...sData, font: { ...sData.font, bold: true } }
+        const sAmount = {
+          ...sData,
+          font: { ...sData.font, bold: true },
+          alignment: { ...sData.alignment, horizontal: "right" },
+          numFmt: "#,##0.00",
+        }
+
+        const cells = [
+          { v: idx + 1,                                    t: "n", s: sCenter },
+          { v: row.internal_order_number || "—",           t: "s", s: sBold   },
+          { v: row.sales_order_number    || "—",           t: "s", s: sData   },
+          { v: row.created_at            || "—",           t: "s", s: sCenter },
+          { v: row.customer_name         || "—",           t: "s", s: sBold   },
+          { v: order?.customers?.phone   || "—",           t: "s", s: sData   },
+          { v: order?.customers?.email   || "—",           t: "s", s: sData   },
+          { v: row.item_details          || "—",           t: "s", s: sData   },
+          { v: row.order_status          || "—",           t: "s", s: sCenter },
+          { v: order?.payment_status     || "—",           t: "s", s: sCenter },
+          { v: order?.cash_discount ? "Yes" : "No",        t: "s", s: sCenter },
+          { v: order ? getOrderDisplayTotal(order) : 0,    t: "n", s: sAmount },
+          { v: row.invoice_number        || "—",           t: "s", s: sCenter },
+          { v: row.dispatch_date         || "—",           t: "s", s: sCenter },
+          { v: row.courier_name          || "—",           t: "s", s: sData   },
+          { v: row.tracking_id           || "—",           t: "s", s: sData   },
+          { v: row.ship_to               || "—",           t: "s", s: sData   },
+        ]
+        cells.forEach((cell, ci) => {
+          ws[`${colLetter(ci)}${r}`] = cell
+        })
+      })
+
+      // Worksheet range
+      const lastRow = res.data.length + 4
+      const lastCol = colLetter(numCols - 1)
+      ws["!ref"] = `A1:${lastCol}${lastRow}`
+
+      // Merge title, meta, and spacer across all columns
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: numCols - 1 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: numCols - 1 } },
+      ]
+
+      // Column widths
+      ws["!cols"] = COLS.map((c) => ({ wch: c.width }))
+
+      // Row heights
+      ws["!rows"] = [
+        { hpt: 38 }, // title
+        { hpt: 22 }, // meta
+        { hpt: 6  }, // spacer
+        { hpt: 34 }, // header
+      ]
+
+      // Freeze top 4 rows + first 2 columns
+      ws["!freeze"] = { xSplit: 2, ySplit: 4 }
+
+      // Auto-filter on header row
+      ws["!autofilter"] = { ref: `A4:${lastCol}4` }
+
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, "Orders")
+
       const date = new Date().toISOString().slice(0, 10)
-      XLSX.writeFile(wb, `orders-export-${date}.xlsx`)
+      XLSX.writeFile(wb, `sunkool-orders-${date}.xlsx`)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Export failed")
     } finally {
@@ -165,22 +303,27 @@ export default function OrdersPage() {
     setLoading(true)
     setError(null)
     try {
-      const [ordersResult, completedResult] = await Promise.all([
-        getAllOrders(),
-        getCompletedOrderIds(),
-      ])
+      // 1. Fetch and show orders immediately — don't block on completed IDs
+      const ordersResult = await getAllOrders()
       if (ordersResult.success && ordersResult.data) {
         setOrders(ordersResult.data as unknown as Order[])
       } else {
         setError(ordersResult.error || "Failed to load orders")
       }
-      if (completedResult.success && completedResult.data) {
-        setCompletedOrderIds(completedResult.data)
-      }
     } catch (err: any) {
       setError(err.message || "An error occurred")
     } finally {
-      setLoading(false)
+      setLoading(false) // Orders are visible now
+    }
+
+    // 2. Load completed IDs silently in the background
+    try {
+      const completedResult = await getCompletedOrderIds()
+      if (completedResult.success && completedResult.data) {
+        setCompletedOrderIds(completedResult.data)
+      }
+    } catch {
+      // Non-critical — completed filter just won't highlight anything
     }
   }
 
@@ -275,6 +418,28 @@ export default function OrdersPage() {
     statusFilter,
   ])
 
+  const allVisibleSelected =
+    filteredAndSortedOrders.length > 0 &&
+    filteredAndSortedOrders.every((o) => selectedOrderIds.has(o.id))
+  const someSelected = selectedOrderIds.size > 0 && !allVisibleSelected
+
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) {
+      setSelectedOrderIds(new Set())
+    } else {
+      setSelectedOrderIds(new Set(filteredAndSortedOrders.map((o) => o.id)))
+    }
+  }
+
+  const toggleOrder = (id: string) => {
+    setSelectedOrderIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "New Order":
@@ -345,7 +510,11 @@ export default function OrdersPage() {
             className="gap-2 border-sk-border bg-white text-sk-text-1 hover:bg-sk-page-bg"
           >
             <Download className="w-4 h-4" />
-            {exporting ? "Exporting..." : "Export"}
+            {exporting
+              ? "Exporting..."
+              : selectedOrderIds.size > 0
+                ? `Export ${selectedOrderIds.size} selected`
+                : "Export All"}
           </Button>
           <Button onClick={() => router.push("/dashboard/orders/new")} className="gap-2 px-4">
             <Plus className="w-4 h-4 mr-2" />
@@ -640,23 +809,30 @@ export default function OrdersPage() {
 
       {/* Orders Table - desktop only */}
       <Card className="hidden border border-sk-border bg-white lg:block">
-        <CardHeader className="border-b border-sk-border bg-[#fcf7f2]">
-          <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-sk-text-1">
-            <div className="rounded-md bg-sk-primary-tint p-1.5">
-              <ShoppingCart className="w-4 h-4 text-sk-primary" />
+        <CardHeader className="border-b border-sk-border bg-[#fcf7f2] py-3 px-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="rounded-md bg-sk-primary-tint p-1.5">
+                <ShoppingCart className="w-4 h-4 text-sk-primary" />
+              </div>
+              <div>
+                <span className="text-base font-semibold text-sk-text-1">
+                  Orders
+                  <span className="ml-1.5 text-sm font-normal text-sk-text-3">({filteredAndSortedOrders.length})</span>
+                </span>
+                <p className="text-xs text-sk-text-3 mt-0.5">
+                  {completedOnly
+                    ? <span className="inline-flex items-center gap-1">Showing completed only <span className="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-2 py-px text-[10px] font-medium text-green-800">Completed</span></span>
+                    : `In-progress orders · ${completedOrderIds.length} completed`}
+                </p>
+              </div>
             </div>
-            Orders
-            <span className="ml-1 text-sm font-normal text-sk-text-2">
-              ({filteredAndSortedOrders.length})
-            </span>
-          </CardTitle>
-          <CardDescription className="mt-1.5 flex flex-wrap items-center gap-2 text-sk-text-2">
-            {completedOnly ? (
-              <>Click any row to view details. <span className="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-800">Showing completed only</span></>
-            ) : (
-              <>In-progress orders only. Click the <strong>Completed</strong> card above to see {completedOrderIds.length} finished order{completedOrderIds.length !== 1 ? "s" : ""}.</>
+            {selectedOrderIds.size > 0 && (
+              <span className="text-xs font-medium text-sk-primary">
+                {selectedOrderIds.size} selected — click Export to download
+              </span>
             )}
-          </CardDescription>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {filteredAndSortedOrders.length === 0 ? (
@@ -692,7 +868,17 @@ export default function OrdersPage() {
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b border-sk-border bg-[#fcf7f2]">
-                    <th className="px-8 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">
+                    <th className="w-10 px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        ref={(el) => { if (el) el.indeterminate = someSelected }}
+                        onChange={toggleSelectAll}
+                        aria-label="Select all orders"
+                        className="h-4 w-4 cursor-pointer rounded border-sk-border accent-sk-primary"
+                      />
+                    </th>
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">
                       <button
                         onClick={() => {
                           if (sortBy === "sales_order_number") {
@@ -702,21 +888,21 @@ export default function OrdersPage() {
                             setSortDirection("asc")
                           }
                         }}
-                        className="group flex items-center gap-1.5 transition-colors hover:text-sk-text-1"
+                        className="group flex items-center gap-1 transition-colors hover:text-sk-text-1"
                       >
                         Order #
                         {sortBy === "sales_order_number" ? (
-                          sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-sk-primary" /> : <ArrowDown className="h-3.5 w-3.5 text-sk-primary" />
+                          sortDirection === "asc" ? <ArrowUp className="h-3 w-3 text-sk-primary" /> : <ArrowDown className="h-3 w-3 text-sk-primary" />
                         ) : (
-                          <ArrowUpDown className="h-3.5 w-3.5 text-sk-text-3 group-hover:text-sk-text-2" />
+                          <ArrowUpDown className="h-3 w-3 text-sk-text-3 group-hover:text-sk-text-2" />
                         )}
                       </button>
                     </th>
-                    <th className="px-8 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">Customer</th>
-                    <th className="px-8 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">Items</th>
-                    <th className="px-8 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">Order Status</th>
-                    <th className="px-8 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">Payment Status</th>
-                    <th className="px-8 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">Customer</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">Items</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">Status</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">Payment</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">
                       <button
                         onClick={() => {
                           if (sortBy === "total_price") {
@@ -726,17 +912,17 @@ export default function OrdersPage() {
                             setSortDirection("desc")
                           }
                         }}
-                        className="group flex items-center gap-1.5 transition-colors hover:text-sk-text-1"
+                        className="group flex items-center gap-1 transition-colors hover:text-sk-text-1"
                       >
                         Total
                         {sortBy === "total_price" ? (
-                          sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-sk-primary" /> : <ArrowDown className="h-3.5 w-3.5 text-sk-primary" />
+                          sortDirection === "asc" ? <ArrowUp className="h-3 w-3 text-sk-primary" /> : <ArrowDown className="h-3 w-3 text-sk-primary" />
                         ) : (
-                          <ArrowUpDown className="h-3.5 w-3.5 text-sk-text-3 group-hover:text-sk-text-2" />
+                          <ArrowUpDown className="h-3 w-3 text-sk-text-3 group-hover:text-sk-text-2" />
                         )}
                       </button>
                     </th>
-                    <th className="px-8 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">
                       <button
                         onClick={() => {
                           if (sortBy === "created_at") {
@@ -746,84 +932,96 @@ export default function OrdersPage() {
                             setSortDirection("desc")
                           }
                         }}
-                        className="group flex items-center gap-1.5 transition-colors hover:text-sk-text-1"
+                        className="group flex items-center gap-1 transition-colors hover:text-sk-text-1"
                       >
                         Date
                         {sortBy === "created_at" ? (
-                          sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-sk-primary" /> : <ArrowDown className="h-3.5 w-3.5 text-sk-primary" />
+                          sortDirection === "asc" ? <ArrowUp className="h-3 w-3 text-sk-primary" /> : <ArrowDown className="h-3 w-3 text-sk-primary" />
                         ) : (
-                          <ArrowUpDown className="h-3.5 w-3.5 text-sk-text-3 group-hover:text-sk-text-2" />
+                          <ArrowUpDown className="h-3 w-3 text-sk-text-3 group-hover:text-sk-text-2" />
                         )}
                       </button>
                     </th>
-                    <th className="px-8 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">Actions</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-sk-text-3">View</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredAndSortedOrders.map((order, index) => (
                     <tr
                       key={order.id}
-                      className={`cursor-pointer border-b border-sk-border transition-colors hover:bg-sk-page-bg ${index % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}
+                      className={`cursor-pointer border-b border-sk-border transition-colors hover:bg-sk-page-bg ${
+                        selectedOrderIds.has(order.id)
+                          ? "bg-amber-50/60"
+                          : index % 2 === 0
+                            ? "bg-white"
+                            : "bg-slate-50/40"
+                      }`}
                       onClick={() => router.push(`/dashboard/orders/${order.id}`)}
                     >
-                      <td className="px-8 py-5 align-middle">
+                      <td className="w-10 px-3 py-3.5 text-center align-middle" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedOrderIds.has(order.id)}
+                          onChange={() => toggleOrder(order.id)}
+                          aria-label={`Select order ${order.internal_order_number || order.id}`}
+                          className="h-4 w-4 cursor-pointer rounded border-sk-border accent-sk-primary"
+                        />
+                      </td>
+                      <td className="px-4 py-3.5 align-middle">
                         <div className="flex flex-col">
                           <span className="text-sm font-semibold text-sk-text-1">
                             {order.internal_order_number || order.sales_order_number || `#${order.id.slice(0, 8)}`}
                           </span>
                           {order.sales_order_number && order.internal_order_number && (
-                            <span className="mt-0.5 text-xs text-sk-text-2">Sales: {order.sales_order_number}</span>
+                            <span className="mt-0.5 text-xs text-sk-text-3">SO: {order.sales_order_number}</span>
                           )}
                           {order.cash_discount && (
-                            <span className="mt-1 inline-flex w-fit items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">Cash Discount</span>
+                            <span className="mt-0.5 inline-flex w-fit items-center rounded border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">CD</span>
                           )}
                         </div>
                       </td>
-                      <td className="px-8 py-5 align-middle">
+                      <td className="px-4 py-3.5 align-middle">
                         <div className="flex flex-col">
-                          <span className="text-sm font-semibold text-sk-text-1">
+                          <span className="text-sm font-medium text-sk-text-1">
                             {order.customers?.name || "N/A"}
                           </span>
-                          {order.customers?.email && (
-                            <span className="mt-0.5 text-xs text-sk-text-2">{order.customers.email}</span>
-                          )}
                           {order.customers?.phone && (
                             <span className="mt-0.5 text-xs text-sk-text-3">{order.customers.phone}</span>
                           )}
                         </div>
                       </td>
-                      <td className="px-8 py-5 align-middle" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-4 py-3.5 align-middle" onClick={(e) => e.stopPropagation()}>
                         <OrderItemsDropdown
                           orderId={order.id}
                           count={order.item_count || 0}
                         />
                       </td>
-                      <td className="px-8 py-5 align-middle">
-                        <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${getStatusColor(order.order_status)}`}>
+                      <td className="px-4 py-3.5 align-middle">
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${getStatusColor(order.order_status)}`}>
                           {order.order_status}
                         </span>
                       </td>
-                      <td className="px-8 py-5 align-middle">
-                        <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${getPaymentStatusColor(order.payment_status)}`}>
+                      <td className="px-4 py-3.5 align-middle">
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${getPaymentStatusColor(order.payment_status)}`}>
                           {order.payment_status}
                         </span>
                       </td>
-                      <td className="px-8 py-5 align-middle">
+                      <td className="px-4 py-3.5 align-middle">
                         <span className="text-sm font-semibold text-sk-text-1">
                           ₹{getOrderDisplayTotal(order).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                         </span>
                       </td>
-                      <td className="px-8 py-5 align-middle">
+                      <td className="px-4 py-3.5 align-middle">
                         <div className="flex flex-col">
-                          <span className="text-sm text-sk-text-1">
-                            {new Date(order.created_at).toLocaleDateString()}
+                          <span className="text-xs font-medium text-sk-text-1">
+                            {new Date(order.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                           </span>
-                          <span className="text-xs text-sk-text-3">
-                            {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          <span className="text-[11px] text-sk-text-3">
+                            {new Date(order.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </span>
                         </div>
                       </td>
-                      <td className="px-8 py-5 align-middle">
+                      <td className="px-4 py-3.5 align-middle">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -831,10 +1029,10 @@ export default function OrdersPage() {
                             e.stopPropagation()
                             router.push(`/dashboard/orders/${order.id}`)
                           }}
-                          className="h-9 w-9 rounded-full border border-transparent p-0 text-sk-text-2 hover:border-sk-border hover:bg-white hover:text-sk-primary"
+                          className="h-8 w-8 rounded-full border border-transparent p-0 text-sk-text-2 hover:border-sk-border hover:bg-white hover:text-sk-primary"
                           aria-label={`View ${order.internal_order_number || order.sales_order_number || order.id}`}
                         >
-                          <Eye className="h-4 w-4" />
+                          <Eye className="h-3.5 w-3.5" />
                         </Button>
                       </td>
                     </tr>
