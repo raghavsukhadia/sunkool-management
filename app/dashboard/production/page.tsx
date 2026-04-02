@@ -160,10 +160,8 @@ export default function ProductionPage() {
   }, [queueItemSearch, uniqueQueueItems])
 
   const getQueueRowStatus = (row: ProductionQueueRow): QueueStatusFilter => {
-    // Keep started jobs visible as "In Progress" until user marks them done.
+    // Queue now contains only actively started rows (in progress), not done rows.
     if (row.hasInProductionRecord) return "In Progress"
-    if (row.hasCompletedRecord && row.remaining <= 0) return "Completed"
-    if (row.remaining <= 0) return "Completed"
     return row.produced > 0 ? "In Progress" : "Pending"
   }
 

@@ -2,11 +2,15 @@
 
 import { createClient } from "@/lib/supabase/server"
 
-const ACTIVE_PRODUCTION_STATUSES = [
+const QUEUE_VISIBLE_PRODUCTION_STATUSES = [
   "in_production",
   "in production",
   "In Progress",
   "in progress",
+] as const
+
+const KPI_PRODUCTION_STATUSES = [
+  ...QUEUE_VISIBLE_PRODUCTION_STATUSES,
   "completed",
   "Completed",
 ] as const
@@ -87,7 +91,7 @@ export async function getProductionQueue(): Promise<
     supabase
       .from("production_records")
       .select("order_id, production_type, selected_quantities, status, updated_at, created_at")
-      .in("status", [...ACTIVE_PRODUCTION_STATUSES]),
+      .in("status", [...QUEUE_VISIBLE_PRODUCTION_STATUSES]),
     supabase
       .from("orders")
       .select(`id, internal_order_number, sales_order_number, created_at, customers:customer_id ( name )`)
@@ -497,7 +501,7 @@ export async function getProductionItems(): Promise<
   const { data: activeRecords, error: activeRecordsError } = await supabase
     .from("production_records")
     .select("order_id")
-    .in("status", [...ACTIVE_PRODUCTION_STATUSES])
+    .in("status", [...QUEUE_VISIBLE_PRODUCTION_STATUSES])
 
   if (activeRecordsError) return { success: false, error: activeRecordsError.message }
 
@@ -598,7 +602,7 @@ export async function getProductionKpis(
     .from("production_records")
     .select("order_id, status, updated_at, created_at")
     .in("order_id", orderIds)
-    .in("status", [...ACTIVE_PRODUCTION_STATUSES])
+    .in("status", [...KPI_PRODUCTION_STATUSES])
 
   if (error) return { success: false, error: error.message }
 
