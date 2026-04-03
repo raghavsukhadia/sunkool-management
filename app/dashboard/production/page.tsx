@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
-import * as XLSX from "xlsx"
+// xlsx-js-style loaded dynamically in handleExportExcel for code-splitting
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -36,6 +36,11 @@ function getRemainingUntilDone(row: ProductionQueueRow): number {
 function getProducedForDisplay(row: ProductionQueueRow): number {
   if (row.producedCompleted != null) return row.producedCompleted
   return Math.max(0, row.ordered - getRemainingUntilDone(row))
+}
+
+/** RP (Requested Production) = quantity allocated in active in-production checklists, not yet completed. */
+function getRequestedProduction(row: ProductionQueueRow): number {
+  return Math.max(0, row.produced - getProducedForDisplay(row))
 }
 
 /**
@@ -89,15 +94,9 @@ function formatActiveBatches(row: ProductionQueueRow): string {
   return labels.length ? labels.join(", ") : "—"
 }
 
-/** Order column: prefer single active batch id (e.g. SK36C); otherwise base + batch list. */
+/** Order column: always show the base order number. Batch labels live in the "Active batch" column. */
 function getQueueOrderDisplayLabel(row: ProductionQueueRow): string {
-  const base = row.orderNumber
-  const active = row.activeBatchLabels ?? []
-  const completed = row.completedBatchLabels ?? []
-  const labels = active.length > 0 ? active : completed
-  if (labels.length === 1) return labels[0]!
-  if (labels.length > 1) return `${base} (${labels.join(", ")})`
-  return base
+  return row.orderNumber
 }
 
 function getQueueOrderNumberClass(row: ProductionQueueRow): string {
@@ -310,8 +309,7 @@ export default function ProductionPage() {
       (queueData?.rows ?? []).filter((row) => {
         const isNoProductionRow = noProductionOrderIdsSet.has(row.orderId)
 
-        // No-production rows are hidden by default; only visible when that KPI is active.
-        if (kpiFilter !== "noProduction" && isNoProductionRow) return false
+        // When "Not Started" KPI is active, show only those rows; otherwise show everything.
         if (kpiFilter === "noProduction" && !isNoProductionRow) return false
 
         if (normalizedQueueSearch) {
@@ -424,22 +422,22 @@ export default function ProductionPage() {
     !useDefaultOpenOnlyFilter ||
     showLinesAwaitingClosure
 
-  // Needed: same order lines as queue checkbox “Show lines awaiting batch closure…”.
-  // Per item: total remaining quantity (until DONE) summed across those lines — what production still owes.
+  // Needed: total remaining quantity per item across ALL open order lines — matches the Queue exactly.
   const neededList = useMemo(() => {
     if (!queueData?.rows?.length) return []
     const byName: Record<string, { lineCount: number; remainingQty: number }> = {}
     for (const row of queueData.rows) {
-      if (!isAwaitingBatchClosureRow(row, noProductionOrderIdsSet)) continue
+      const remaining = getRemainingUntilDone(row)
+      if (remaining <= 0) continue
       const cur = byName[row.itemName] ?? { lineCount: 0, remainingQty: 0 }
       cur.lineCount += 1
-      cur.remainingQty += getRemainingUntilDone(row)
+      cur.remainingQty += remaining
       byName[row.itemName] = cur
     }
     return Object.entries(byName)
       .map(([itemName, v]) => ({ itemName, lineCount: v.lineCount, remainingQty: v.remainingQty }))
       .sort((a, b) => a.itemName.localeCompare(b.itemName))
-  }, [queueData?.rows, noProductionOrderIdsSet])
+  }, [queueData?.rows])
 
   const neededClosureLineTotal = useMemo(
     () => neededList.reduce((s, r) => s + r.lineCount, 0),
@@ -459,9 +457,27 @@ export default function ProductionPage() {
     if (document.fullscreenElement) document.exitFullscreen()
   }
 
-  const handlePrintNeeded = () => {
+  const handlePrintNeeded = async () => {
     const printWindow = window.open("", "_blank")
     if (!printWindow) return
+
+    // Fetch logo as base64 data URL so it renders in the isolated print window
+    let logoHtml = `<div class="brand-text">SUNKOOL</div>`
+    try {
+      const response = await fetch('/images/logo.png')
+      if (response.ok) {
+        const blob = await response.blob()
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        })
+        logoHtml = `<img src="${dataUrl}" alt="Sunkool" class="brand-logo" />`
+      }
+    } catch {
+      // fall back to text brand
+    }
 
     const sorted = [...neededList].sort((a, b) => b.remainingQty - a.remainingQty)
     const totalLines = sorted.reduce((s, r) => s + r.lineCount, 0)
@@ -498,7 +514,7 @@ export default function ProductionPage() {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Batch closure work list – ${dateStr}</title>
+  <title>Production needed – ${dateStr}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     @page { size: A4; margin: 14mm 12mm; }
@@ -506,7 +522,8 @@ export default function ProductionPage() {
 
     /* ── Header ── */
     .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 10px; border-bottom: 2.5px solid #ea580c; margin-bottom: 10px; }
-    .brand { font-size: 22px; font-weight: 800; color: #ea580c; letter-spacing: -0.5px; }
+    .brand-logo { height: 36px; width: auto; display: block; }
+    .brand-text { font-size: 22px; font-weight: 800; color: #ea580c; letter-spacing: -0.5px; }
     .brand-sub { font-size: 9px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-top: 1px; }
     .doc-title { text-align: right; }
     .doc-title h2 { font-size: 15px; font-weight: 700; color: #1e293b; text-transform: uppercase; letter-spacing: 1px; }
@@ -547,12 +564,12 @@ export default function ProductionPage() {
 <body>
   <div class="header">
     <div>
-      <div class="brand">SUNKOOL</div>
+      ${logoHtml}
       <div class="brand-sub">Production Management System</div>
     </div>
     <div class="doc-title">
-      <h2>Batch closure — work list</h2>
-      <p>Order lines awaiting batch closure — sorted by remaining quantity (until DONE)</p>
+      <h2>Production Needed</h2>
+      <p>Total units to produce per item across all open orders — sorted by remaining quantity</p>
     </div>
   </div>
 
@@ -610,8 +627,7 @@ export default function ProductionPage() {
 
   const handleNeededItemClick = (itemName: string) => {
     setFilter("pending")
-    setQueueSearch(itemName)
-    setShowLinesAwaitingClosure(true)
+    setQueueItemFilter(itemName)
     setUseDefaultOpenOnlyFilter(true)
   }
 
@@ -660,43 +676,187 @@ export default function ProductionPage() {
     })
   }
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
+    const XLSX = await import("xlsx-js-style")
+
     const rowsToExport = checkedItemIds.size > 0
       ? sortedQueueRows.filter((r) => checkedItemIds.has(r.itemId))
       : sortedQueueRows
 
-    const formatDate = (iso: string | null) => {
-      if (!iso) return "—"
-      return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    const formatDate = (iso: string | null) =>
+      iso ? new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"
+
+    // ── Color palette (orange / slate brand) ──────────────────────────
+    const C = {
+      brandDark:  "1E293B",   // slate-900  — title bar
+      brandOrange:"EA580C",   // orange-600 — header bar
+      orangeTint: "FFF7ED",   // orange-50  — alt row
+      white:      "FFFFFF",
+      lightGray:  "F8FAFC",   // slate-50
+      border:     "E2E8F0",   // slate-200
+      textDark:   "0F172A",   // slate-950
+      textMuted:  "64748B",   // slate-500
+      green:      "166534",   // green-800 text
+      greenBg:    "DCFCE7",   // green-100
+      amber:      "92400E",   // amber-800 text
+      amberBg:    "FEF3C7",   // amber-100
+      blue:       "1E40AF",   // blue-800 text
+      blueBg:     "DBEAFE",   // blue-100
     }
 
-    const data = rowsToExport.map((row) => {
-      const status = getQueueRowStatus(row)
-      return {
-        "Order #": getQueueOrderDisplayLabel(row),
-        "Order Date": formatDate(row.orderDate),
-        "Customer": row.customerName,
-        "Item": row.itemName,
-        "Ordered Qty": row.ordered,
-        "Produced Qty": getProducedForDisplay(row),
-        "Remaining (until DONE)": getRemainingUntilDone(row),
-        "Status": status,
-        "Active batch(es)": formatActiveBatches(row),
-        "Batch count": row.activeBatchCount ?? row.activeBatchLabels?.length ?? 0,
-      }
+    // ── Column definitions ────────────────────────────────────────────
+    const COLS = [
+      { label: "#",              width: 5  },
+      { label: "Order #",        width: 14 },
+      { label: "Order Date",     width: 14 },
+      { label: "Customer",       width: 24 },
+      { label: "Item",           width: 34 },
+      { label: "Active Batch",   width: 14 },
+      { label: "Ordered",        width: 10 },
+      { label: "Produced",       width: 10 },
+      { label: "RP",             width: 8  },
+      { label: "Remaining",      width: 11 },
+      { label: "Status",         width: 13 },
+    ]
+    const numCols = COLS.length
+    const colLetter = (i: number) => String.fromCharCode(65 + i)
+    const lastCol = colLetter(numCols - 1)
+
+    // ── Shared border ─────────────────────────────────────────────────
+    const border = {
+      top:    { style: "thin", color: { rgb: C.border } },
+      bottom: { style: "thin", color: { rgb: C.border } },
+      left:   { style: "thin", color: { rgb: C.border } },
+      right:  { style: "thin", color: { rgb: C.border } },
+    }
+
+    // ── Shared styles ─────────────────────────────────────────────────
+    const sTitle = {
+      font: { bold: true, sz: 14, color: { rgb: C.white }, name: "Calibri" },
+      fill: { patternType: "solid", fgColor: { rgb: C.brandDark } },
+      alignment: { horizontal: "center", vertical: "center" },
+    }
+    const sMeta = {
+      font: { sz: 9, italic: true, color: { rgb: C.textMuted }, name: "Calibri" },
+      fill: { patternType: "solid", fgColor: { rgb: C.lightGray } },
+      alignment: { horizontal: "center", vertical: "center" },
+    }
+    const sHeader = {
+      font: { bold: true, sz: 10, color: { rgb: C.white }, name: "Calibri" },
+      fill: { patternType: "solid", fgColor: { rgb: C.brandOrange } },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border,
+    }
+    const sData = (alt: boolean) => ({
+      font: { sz: 10, name: "Calibri", color: { rgb: C.textDark } },
+      fill: { patternType: "solid", fgColor: { rgb: alt ? C.orangeTint : C.white } },
+      alignment: { vertical: "center" },
+      border,
+    })
+    const sDataCenter = (alt: boolean) => ({
+      ...sData(alt),
+      alignment: { horizontal: "center", vertical: "center" },
+    })
+    const sDataBold = (alt: boolean) => ({
+      ...sData(alt),
+      font: { sz: 10, name: "Calibri", color: { rgb: C.textDark }, bold: true },
+    })
+    const sStatus = (status: string, alt: boolean) => {
+      const base = sDataCenter(alt)
+      if (status === "Completed")  return { ...base, font: { ...base.font, bold: true, color: { rgb: C.green  } }, fill: { patternType: "solid", fgColor: { rgb: C.greenBg  } } }
+      if (status === "In Progress") return { ...base, font: { ...base.font, bold: true, color: { rgb: C.blue  } }, fill: { patternType: "solid", fgColor: { rgb: C.blueBg  } } }
+      return { ...base, font: { ...base.font, bold: true, color: { rgb: C.amber } }, fill: { patternType: "solid", fgColor: { rgb: C.amberBg } } }
+    }
+    const sRemaining = (val: number, alt: boolean) => {
+      const base = sDataCenter(alt)
+      const color = val === 0 ? C.green : val > 100 ? "991B1B" : val > 20 ? "92400E" : C.textDark
+      return { ...base, font: { ...base.font, bold: val > 0, color: { rgb: color } } }
+    }
+
+    // ── Build worksheet ───────────────────────────────────────────────
+    const ws: Record<string, unknown> = {}
+
+    const totalRemaining = rowsToExport.reduce((s, r) => s + getRemainingUntilDone(r), 0)
+    const totalOrdered   = rowsToExport.reduce((s, r) => s + r.ordered, 0)
+    const exportedAt     = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+
+    // Row 1 — Title (merged across all columns)
+    ws["A1"] = { v: "SUNKOOL — Production Queue", t: "s", s: sTitle }
+
+    // Row 2 — Meta
+    ws["A2"] = {
+      v: `Exported: ${exportedAt}   |   Rows: ${rowsToExport.length}   |   Total Ordered: ${totalOrdered.toLocaleString()}   |   Total Remaining: ${totalRemaining.toLocaleString()}`,
+      t: "s", s: sMeta,
+    }
+
+    // Row 3 — Orange divider bar
+    ws["A3"] = { v: "", t: "s", s: { fill: { patternType: "solid", fgColor: { rgb: C.brandOrange } } } }
+
+    // Row 4 — Column headers
+    COLS.forEach((col, i) => {
+      ws[`${colLetter(i)}4`] = { v: col.label, t: "s", s: sHeader }
     })
 
-    const ws = XLSX.utils.json_to_sheet(data)
-    // Auto-width columns
-    const colWidths = Object.keys(data[0] ?? {}).map((key) => ({
-      wch: Math.max(key.length, ...data.map((r) => String(r[key as keyof typeof r] ?? "").length)) + 2,
-    }))
-    ws["!cols"] = colWidths
+    // Rows 5+ — Data
+    rowsToExport.forEach((row, idx) => {
+      const r    = idx + 5
+      const alt  = idx % 2 === 1
+      const status = getQueueRowStatus(row)
+      const remaining = getRemainingUntilDone(row)
+      const rp = getRequestedProduction(row)
+
+      ws[`A${r}`] = { v: idx + 1,                         t: "n", s: sDataCenter(alt) }
+      ws[`B${r}`] = { v: getQueueOrderDisplayLabel(row),   t: "s", s: sDataBold(alt)  }
+      ws[`C${r}`] = { v: formatDate(row.orderDate),         t: "s", s: sDataCenter(alt) }
+      ws[`D${r}`] = { v: row.customerName,                 t: "s", s: sData(alt)      }
+      ws[`E${r}`] = { v: row.itemName,                     t: "s", s: sData(alt)      }
+      ws[`F${r}`] = { v: formatActiveBatches(row),         t: "s", s: sDataCenter(alt) }
+      ws[`G${r}`] = { v: row.ordered,                      t: "n", s: sDataCenter(alt) }
+      ws[`H${r}`] = { v: getProducedForDisplay(row),       t: "n", s: sDataCenter(alt) }
+      ws[`I${r}`] = { v: rp > 0 ? rp : "—",               t: rp > 0 ? "n" : "s", s: sDataCenter(alt) }
+      ws[`J${r}`] = { v: remaining,                        t: "n", s: sRemaining(remaining, alt) }
+      ws[`K${r}`] = { v: status,                           t: "s", s: sStatus(status, alt) }
+    })
+
+    // ── Totals row ────────────────────────────────────────────────────
+    const tr = rowsToExport.length + 5
+    const sTotals = {
+      font: { bold: true, sz: 10, name: "Calibri", color: { rgb: C.white } },
+      fill: { patternType: "solid", fgColor: { rgb: C.brandDark } },
+      alignment: { horizontal: "center", vertical: "center" },
+      border,
+    }
+    const sTotalsLabel = { ...sTotals, alignment: { horizontal: "right", vertical: "center" } }
+    for (let i = 0; i < numCols; i++) ws[`${colLetter(i)}${tr}`] = { v: "", t: "s", s: sTotals }
+    ws[`D${tr}`] = { v: "TOTALS",                 t: "s", s: sTotalsLabel }
+    ws[`G${tr}`] = { v: totalOrdered,              t: "n", s: sTotals }
+    ws[`J${tr}`] = { v: totalRemaining,            t: "n", s: sTotals }
+
+    // ── Worksheet metadata ────────────────────────────────────────────
+    ws["!ref"] = `A1:${lastCol}${tr}`
+
+    // Merge title + meta + divider rows across all columns
+    ws["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } },  // title
+      { s: { r: 1, c: 0 }, e: { r: 1, c: numCols - 1 } },  // meta
+      { s: { r: 2, c: 0 }, e: { r: 2, c: numCols - 1 } },  // divider
+    ]
+
+    ws["!cols"] = COLS.map((c) => ({ wch: c.width }))
+
+    // Row heights
+    ws["!rows"] = [
+      { hpt: 28 },  // title
+      { hpt: 18 },  // meta
+      { hpt: 4  },  // divider
+      { hpt: 22 },  // headers
+      ...rowsToExport.map(() => ({ hpt: 18 })),
+      { hpt: 20 },  // totals
+    ]
 
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Production Queue")
-    const fileName = `production-queue-${new Date().toISOString().slice(0, 10)}.xlsx`
-    XLSX.writeFile(wb, fileName)
+    XLSX.writeFile(wb, `sunkool-production-${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
   function escapeHtml(s: string) {
@@ -1054,6 +1214,14 @@ export default function ProductionPage() {
                           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                             <span>Ordered: {row.ordered}</span>
                             <span>Produced: {getProducedForDisplay(row)}</span>
+                            {getRequestedProduction(row) > 0 && (
+                              <span className="flex items-center gap-1">
+                                RP:&nbsp;
+                                <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                                  {getRequestedProduction(row)}
+                                </span>
+                              </span>
+                            )}
                             <span className="font-semibold text-slate-700">Remaining:</span>
                             <RemainingQuantityDisplay row={row} size="sm" />
                           </div>
@@ -1148,6 +1316,14 @@ export default function ProductionPage() {
                           </button>
                         </th>
                         <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                          <span
+                            title="Requested Production — quantity allocated in active (in-production) checklists, not yet completed."
+                            className="mx-auto inline-flex cursor-default items-center gap-1"
+                          >
+                            RP
+                          </span>
+                        </th>
+                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <button
                             type="button"
                             onClick={() => handleSort("remaining")}
@@ -1220,6 +1396,15 @@ export default function ProductionPage() {
                             >
                               {getProducedForDisplay(row)}
                             </td>
+                            <td className="px-4 py-0 text-center" title="Requested Production — quantity in active in-production checklists, not yet completed.">
+                              {getRequestedProduction(row) > 0 ? (
+                                <span className="inline-flex min-w-[2rem] items-center justify-center rounded-full bg-blue-100 px-2.5 py-0.5 text-[11px] font-semibold tabular-nums text-blue-700">
+                                  {getRequestedProduction(row)}
+                                </span>
+                              ) : (
+                                <span className="text-[12px] text-slate-300">—</span>
+                              )}
+                            </td>
                             <td className="px-4 py-0 text-center">
                               <RemainingQuantityDisplay row={row} />
                             </td>
@@ -1279,12 +1464,12 @@ export default function ProductionPage() {
                 </span>
               </div>
               <p className="mt-0.5 text-xs text-slate-400">
-                Same lines as &quot;Show lines awaiting batch closure (0 remaining until DONE on order)&quot; on the queue —{" "}
+                Total units still to produce across all open orders —{" "}
                 <span className="font-medium text-slate-600">
-                  {neededRemainingTotal.toLocaleString()} units (until DONE)
+                  {neededRemainingTotal.toLocaleString()} units remaining
                 </span>{" "}
                 across {neededClosureLineTotal.toLocaleString()} order line{neededClosureLineTotal === 1 ? "" : "s"} ·{" "}
-                {neededList.length} item{neededList.length === 1 ? "" : "s"}
+                {neededList.length} item type{neededList.length === 1 ? "" : "s"}
                 {neededLastUpdated && <span className="ml-2">· Updated {neededLastUpdated.toLocaleTimeString()}</span>}
               </p>
             </div>
@@ -1295,7 +1480,7 @@ export default function ProductionPage() {
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-[13px] font-medium text-slate-600 shadow-sm transition-colors hover:border-orange-300 hover:bg-orange-50 hover:text-orange-600"
               >
                 <Printer className="h-4 w-4" />
-                Print closure list
+                Print production list
               </button>
               <button
                 type="button"
@@ -1318,7 +1503,7 @@ export default function ProductionPage() {
               <div className="py-16 text-center">
                 <CheckCircle className="mx-auto mb-3 h-12 w-12 text-green-400" />
                 <p className="font-medium text-slate-600">All clear!</p>
-                <p className="mt-1 text-sm text-slate-400">No order lines are waiting for batch closure.</p>
+                <p className="mt-1 text-sm text-slate-400">No remaining production across all open orders.</p>
               </div>
             ) : (
               (() => {
@@ -1336,7 +1521,7 @@ export default function ProductionPage() {
                           <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">Item</th>
                           <th
                             className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-32"
-                            title="Sum of remaining quantity (until DONE) on each order line awaiting batch closure"
+                            title="Sum of remaining quantity (until DONE) across all open order lines for this item"
                           >
                             Remaining qty
                           </th>
@@ -1398,7 +1583,7 @@ export default function ProductionPage() {
                 Sorted by remaining quantity (until DONE) · Click an item to open the queue filtered to that SKU
               </p>
               <p className="text-xs font-semibold text-slate-600">
-                Total: {neededRemainingTotal.toLocaleString()} units · {neededClosureLineTotal.toLocaleString()} closure lines · {neededList.length} items
+                Total: {neededRemainingTotal.toLocaleString()} units · {neededClosureLineTotal.toLocaleString()} order line{neededClosureLineTotal === 1 ? "" : "s"} · {neededList.length} item type{neededList.length === 1 ? "" : "s"}
               </p>
             </div>
           )}

@@ -2145,25 +2145,7 @@ export default function OrderDetailsPage() {
                           </td>
                           <td className="px-6 py-4">
                             <div className="flex items-center justify-end gap-2">
-                              {record.status === "pending" && (
-                                <Button
-                                  size="sm"
-                                  onClick={async () => {
-                                    const result = await updateProductionRecordStatus(record.id, "in_production")
-                                    if (result.success) {
-                                      await loadProductionRecords()
-                                      setSuccess("Started!")
-                                      setTimeout(() => setSuccess(null), 2000)
-                                    } else {
-                                      setError(result.error || "Failed")
-                                    }
-                                  }}
-                                  className="h-7 text-xs font-semibold bg-orange-500 hover:bg-orange-600 text-white rounded-lg px-3"
-                                >
-                                  START
-                                </Button>
-                              )}
-                              {record.status === "in_production" && (
+                              {(record.status === "in_production" || record.status === "pending") && (
                                 <Button
                                   size="sm"
                                   onClick={async () => {

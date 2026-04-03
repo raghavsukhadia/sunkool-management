@@ -138,7 +138,10 @@ export async function getProductionQueue(): Promise<
     noProductionOrderIds: [],
   }
 
-  // Fetch production records + "New Order" orders in parallel (step 1).
+  // Fetch production records + all open orders in parallel (step 1).
+  // "Open" = any status that still has outstanding production work (not Delivered/Void).
+  const OPEN_ORDER_STATUSES = ["New Order", "In Progress", "Partial Delivered"] as const
+
   const [productionRecordsResult, newOrdersResult] = await Promise.all([
     supabase
       .from("production_records")
@@ -147,7 +150,7 @@ export async function getProductionQueue(): Promise<
     supabase
       .from("orders")
       .select(`id, internal_order_number, sales_order_number, created_at, customers:customer_id ( name )`)
-      .eq("order_status", "New Order")
+      .in("order_status", [...OPEN_ORDER_STATUSES])
       .order("internal_order_number", { ascending: true }),
   ])
 
@@ -202,6 +205,15 @@ export async function getProductionQueue(): Promise<
         .range(0, 9999)
     : Promise.resolve({ data: [] as Array<{ id: string; order_id: string; quantity: number; inventory_item_id: string | null; product_id: string | null }>, error: null })
 
+  // Fetch any existing production records (completed/pending) for no-active-production orders.
+  // Needed for "Partial Delivered" orders that have prior completed batches — so remaining qty is correct.
+  const fetchNoProductionRecords = noProductionOrderIds_raw.length > 0
+    ? supabase
+        .from("production_records")
+        .select("order_id, production_type, selected_quantities, status, updated_at, created_at, production_number")
+        .in("order_id", noProductionOrderIds_raw)
+    : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null })
+
   const fetchTotalsForQueueOrders =
     orderIds.length > 0
       ? supabase
@@ -211,10 +223,11 @@ export async function getProductionQueue(): Promise<
           .in("status", [...QUEUE_VISIBLE_PRODUCTION_STATUSES, "completed", "Completed"])
       : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null })
 
-  const [[ordersResult, itemsResult], noProductionItemsResult, totalsResult] = await Promise.all([
+  const [[ordersResult, itemsResult], noProductionItemsResult, totalsResult, noProductionRecordsResult] = await Promise.all([
     fetchInProduction,
     fetchNoProductionItems,
     fetchTotalsForQueueOrders,
+    fetchNoProductionRecords,
   ])
 
   if (ordersResult.error) return { success: false, error: ordersResult.error.message }
@@ -365,12 +378,42 @@ export async function getProductionQueue(): Promise<
     })
   }
 
-  // Build rows for no-production (New Order, untouched) orders.
+  // Build lookup for any prior production records on no-active-production orders (e.g. Partial Delivered).
+  const recordsByOrderIdForNoProd: Record<string, QueueRecordRow[]> = {}
+  for (const rec of (noProductionRecordsResult.data || []) as Array<{
+    order_id: string
+    production_type?: string | null
+    selected_quantities?: Record<string, number> | null
+    status?: string | null
+    updated_at?: string | null
+    created_at?: string | null
+    production_number?: string | null
+  }>) {
+    if (!rec.order_id) continue
+    if (!recordsByOrderIdForNoProd[rec.order_id]) recordsByOrderIdForNoProd[rec.order_id] = []
+    recordsByOrderIdForNoProd[rec.order_id].push({
+      production_type: rec.production_type || "full",
+      selected_quantities: rec.selected_quantities ?? null,
+      status: rec.status || "pending",
+      updated_at: rec.updated_at ?? null,
+      created_at: rec.created_at ?? null,
+      production_number: rec.production_number ?? null,
+    })
+  }
+
+  // Build rows for open orders with no active in_production record (New Order, Partial Delivered, etc.).
   for (const item of noProductionItems) {
     const order = noProductionOrderMap.get(item.order_id)
     if (!order) continue
     const itemName = nameById[item.inventory_item_id || ""] || nameById[item.product_id || ""] || "Product"
     const customerName = (order.customers as { name?: string } | null)?.name ?? "—"
+    const priorRecords = recordsByOrderIdForNoProd[item.order_id] || []
+    const producedCompleted = producedQtyForLineItemCompletedOnly(priorRecords, item.id, item.quantity)
+    const produced = producedQtyForLineItem(priorRecords, item.id, item.quantity)
+    const remaining = Math.max(0, item.quantity - produced)
+    const remainingUntilDone = Math.max(0, item.quantity - producedCompleted)
+    const hasCompletedRecord = priorRecords.some((r) => normalizeProductionStatus(r.status) === "completed")
+    const completedBatchLabelsForItem = completedBatchLabelsForLine(priorRecords, item.id)
 
     rows.push({
       orderId: item.order_id,
@@ -381,25 +424,22 @@ export async function getProductionQueue(): Promise<
       inventoryItemId: item.inventory_item_id || undefined,
       itemName,
       ordered: item.quantity,
-      produced: 0,
-      producedCompleted: 0,
-      remaining: item.quantity,
-      remainingUntilDone: item.quantity,
+      produced,
+      producedCompleted,
+      remaining,
+      remainingUntilDone,
       hasInProductionRecord: false,
-      hasCompletedRecord: false,
+      hasCompletedRecord,
       needsBatchClosure: false,
       activeBatchLabels: [],
       activeBatchCount: 0,
-      completedBatchLabels: [],
+      completedBatchLabels: completedBatchLabelsForItem,
     })
   }
 
-  // "Units to produce" counts only in-production rows (not the untouched backlog).
+  // Total units = every open order line with remaining work, including new/partial orders.
   const noProductionOrderIdsSet_raw = new Set(noProductionOrderIds_raw)
-  const totalUnitsRemaining = rows.reduce((sum, r) => {
-    if (noProductionOrderIdsSet_raw.has(r.orderId)) return sum
-    return sum + r.remainingUntilDone
-  }, 0)
+  const totalUnitsRemaining = rows.reduce((sum, r) => sum + r.remainingUntilDone, 0)
 
   // Compute KPI data inline (now/monthStart already set above; completed month uses separate query).
   const delayedThreshold = new Date(now)
@@ -444,10 +484,37 @@ export async function getProductionQueue(): Promise<
         (row.remainingUntilDone > 0 || !!row.needsBatchClosure)
     )
   )
-  const delayedOrderIds = queueOrderIds.filter((id) => {
+  // Delayed: in-production orders with no activity for 5+ days and still not completed.
+  const delayedInProductionIds = queueOrderIds.filter((id) => {
     const a = aggByOrder[id]
     return a?.hasStarted && !a?.hasCompleted && !!a?.lastActivityAt && a.lastActivityAt < delayedThreshold
   })
+
+  // Delayed: no-active-production orders (new / partial delivered) idle for 5+ days with remaining work.
+  // Use last production record activity if any exists, otherwise fall back to order creation date.
+  const delayedNoProductionIds = noProductionQueueOrderIds.filter((id) => {
+    const hasRemaining = rows.some((r) => r.orderId === id && r.remainingUntilDone > 0)
+    if (!hasRemaining) return false
+
+    const priorRecs = recordsByOrderIdForNoProd[id] || []
+    let lastActivity: Date | null = null
+    for (const rec of priorRecs) {
+      const d = new Date(rec.updated_at || rec.created_at || now.toISOString())
+      if (!lastActivity || d > lastActivity) lastActivity = d
+    }
+
+    if (!lastActivity) {
+      // No prior production at all — use order creation date
+      const order = noProductionOrderMap.get(id)
+      const createdAt = (order as { created_at?: string | null })?.created_at
+      if (!createdAt) return false
+      lastActivity = new Date(createdAt)
+    }
+
+    return lastActivity < delayedThreshold
+  })
+
+  const delayedOrderIds = [...delayedInProductionIds, ...delayedNoProductionIds]
   const kpiData: ProductionKpiData = {
     pendingOrdersCount: pendingOrderIds.length,
     totalUnitsToProduce: totalUnitsRemaining,

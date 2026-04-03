@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Bell, UserPlus, MessageSquare, Settings, Trash2, Edit2, Monitor } from "lucide-react"
+import { Bell, UserPlus, MessageSquare, Settings, Trash2, Edit2, Monitor, BarChart2, Send, Clock } from "lucide-react"
 import {
   getNotificationRecipients,
   createNotificationRecipient,
@@ -16,6 +16,9 @@ import {
   upsertWhatsAppConfig,
   getNotificationTemplates,
   upsertNotificationTemplate,
+  getMorningReportConfig,
+  upsertMorningReportConfig,
+  sendMorningReportNow,
 } from "@/app/actions/notifications"
 
 type Recipient = { id: string; name: string; phone: string; is_active: boolean }
@@ -74,14 +77,23 @@ export default function NotificationsPage() {
   const [savingTemplate, setSavingTemplate] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null)
 
+  // Morning report
+  const [morningReportEnabled, setMorningReportEnabled] = useState(false)
+  const [managerPhones, setManagerPhones] = useState<string[]>([])
+  const [newManagerPhone, setNewManagerPhone] = useState("")
+  const [savingMorningConfig, setSavingMorningConfig] = useState(false)
+  const [sendingReport, setSendingReport] = useState(false)
+  const [reportSendResult, setReportSendResult] = useState<string | null>(null)
+
   const loadAll = async () => {
     setLoading(true)
     setError(null)
     try {
-      const [rRes, cRes, tRes] = await Promise.all([
+      const [rRes, cRes, tRes, mrRes] = await Promise.all([
         getNotificationRecipients(),
         getWhatsAppConfig(),
         getNotificationTemplates(),
+        getMorningReportConfig(),
       ])
       if (rRes.success && rRes.data) setRecipients(rRes.data as Recipient[])
       if (cRes.success && cRes.data) {
@@ -96,6 +108,8 @@ export default function NotificationsPage() {
         }
       }
       if (tRes.success && tRes.data) setTemplates(tRes.data as Template[])
+      setMorningReportEnabled(mrRes.enabled)
+      setManagerPhones(mrRes.managerPhones)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load")
     } finally {
@@ -261,6 +275,75 @@ export default function NotificationsPage() {
     setTemplateEventType("order_created")
   }
 
+  const handleToggleMorningReport = async (enabled: boolean) => {
+    setMorningReportEnabled(enabled)
+    setSavingMorningConfig(true)
+    try {
+      await upsertMorningReportConfig(enabled, managerPhones)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save morning report config")
+    } finally {
+      setSavingMorningConfig(false)
+    }
+  }
+
+  const handleAddManagerPhone = async () => {
+    const phone = newManagerPhone.trim()
+    if (!phone) return
+    if (!/^\+\d{10,13}$/.test(phone)) {
+      setError("Phone must start with + followed by 10–13 digits (e.g. +91XXXXXXXXXX)")
+      return
+    }
+    if (managerPhones.includes(phone)) {
+      setError("This phone number is already added")
+      return
+    }
+    setError(null)
+    const updated = [...managerPhones, phone]
+    setManagerPhones(updated)
+    setNewManagerPhone("")
+    setSavingMorningConfig(true)
+    try {
+      await upsertMorningReportConfig(morningReportEnabled, updated)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save")
+    } finally {
+      setSavingMorningConfig(false)
+    }
+  }
+
+  const handleRemoveManagerPhone = async (phone: string) => {
+    const updated = managerPhones.filter((p) => p !== phone)
+    setManagerPhones(updated)
+    setSavingMorningConfig(true)
+    try {
+      await upsertMorningReportConfig(morningReportEnabled, updated)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save")
+    } finally {
+      setSavingMorningConfig(false)
+    }
+  }
+
+  const handleSendReportNow = async () => {
+    setSendingReport(true)
+    setReportSendResult(null)
+    setError(null)
+    try {
+      const result = await sendMorningReportNow()
+      if (result.success) {
+        setReportSendResult(`Report sent to ${result.sent} recipient(s) successfully.`)
+        setTimeout(() => setReportSendResult(null), 6000)
+      } else {
+        setError(result.error ?? "Failed to send report")
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to send report")
+    } finally {
+      setSendingReport(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -318,6 +401,106 @@ export default function NotificationsPage() {
           {success}
         </div>
       )}
+
+      {/* Morning Production Report */}
+      <Card className="border-slate-200 border-l-4 border-l-orange-500">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BarChart2 className="h-5 w-5 text-orange-500" />
+            Morning Production Report
+          </CardTitle>
+          <CardDescription>
+            Automatically generates a PDF of the pending production queue and sends it via WhatsApp to configured manager phone numbers.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {/* Enable toggle */}
+          <div className="flex items-center gap-3">
+            <input
+              id="morning-report-toggle"
+              type="checkbox"
+              className="h-4 w-4 accent-orange-500 cursor-pointer"
+              checked={morningReportEnabled}
+              disabled={savingMorningConfig}
+              onChange={(e) => handleToggleMorningReport(e.target.checked)}
+            />
+            <Label htmlFor="morning-report-toggle" className="cursor-pointer select-none">
+              {morningReportEnabled ? "Morning report enabled" : "Morning report disabled"}
+            </Label>
+            {savingMorningConfig && <span className="text-xs text-slate-400">Saving...</span>}
+          </div>
+
+          {/* Schedule info */}
+          <div className="flex items-center gap-2 rounded-md bg-slate-50 border border-slate-200 px-4 py-2.5 text-sm text-slate-600">
+            <Clock className="h-4 w-4 text-slate-400 shrink-0" />
+            <span>Sent daily at <strong>9:55 AM IST</strong> (4:25 AM UTC) via Vercel Cron</span>
+          </div>
+
+          {/* Manager phones */}
+          <div className="space-y-3">
+            <Label className="text-sm font-medium text-slate-700">Manager phone numbers</Label>
+            {managerPhones.length === 0 ? (
+              <p className="text-sm text-slate-500">No manager phones added yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {managerPhones.map((phone) => (
+                  <li key={phone} className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-50 border border-slate-100">
+                    <span className="font-mono text-sm text-slate-800">{phone}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveManagerPhone(phone)}
+                      disabled={savingMorningConfig}
+                    >
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="space-y-1.5">
+                <Label htmlFor="new-manager-phone" className="text-xs text-slate-500">Add phone number</Label>
+                <Input
+                  id="new-manager-phone"
+                  value={newManagerPhone}
+                  onChange={(e) => setNewManagerPhone(e.target.value)}
+                  placeholder="+91XXXXXXXXXX"
+                  className="w-52"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddManagerPhone() }}
+                />
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleAddManagerPhone}
+                disabled={savingMorningConfig || !newManagerPhone.trim()}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+
+          {/* Send now */}
+          <div className="border-t pt-4 flex flex-col gap-2">
+            <Button
+              onClick={handleSendReportNow}
+              disabled={sendingReport || managerPhones.length === 0}
+              className="w-fit bg-orange-600 hover:bg-orange-700 text-white gap-2"
+            >
+              <Send className="h-4 w-4" />
+              {sendingReport ? "Sending..." : "Send Test Report Now"}
+            </Button>
+            {managerPhones.length === 0 && (
+              <p className="text-xs text-slate-400">Add at least one manager phone to send.</p>
+            )}
+            {reportSendResult && (
+              <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-700">
+                {reportSendResult}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Section 1: Recipients */}
       <Card className="border-slate-200 border-l-4 border-l-blue-600">

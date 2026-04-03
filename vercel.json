@@ -2,9 +2,18 @@
   "buildCommand": "npm run build",
   "devCommand": "npm run dev",
   "installCommand": "npm ci",
+  "crons": [
+    {
+      "path": "/api/cron/morning-report",
+      "schedule": "25 4 * * *"
+    }
+  ],
   "functions": {
     "app/api/**": {
       "maxDuration": 30
+    },
+    "app/api/cron/**": {
+      "maxDuration": 60
     },
     "app/actions/**": {
       "maxDuration": 60

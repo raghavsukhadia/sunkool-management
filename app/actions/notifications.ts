@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache"
 import * as notificationService from "@/lib/notificationService"
 import { checkRateLimit } from "@/lib/server/rate-limit"
 import { reportError } from "@/lib/monitoring"
+import { getProductionQueue } from "@/app/actions/production"
+import { generateMorningReportPDF } from "@/lib/morning-report-pdf"
 
 const NOTIFICATIONS_PATH = "/dashboard/notifications"
 
@@ -245,6 +247,150 @@ export async function sendOrderCreatedNotification(payload: {
   } catch (error) {
     reportError(error, { area: "notifications.sendOrderCreated" })
   }
+}
+
+// ---- Morning report config ----
+
+const MORNING_REPORT_EVENT_TYPE = "morning_report_config"
+
+export async function getMorningReportConfig(): Promise<{
+  enabled: boolean
+  managerPhones: string[]
+}> {
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from("notification_templates")
+    .select("template_body")
+    .eq("event_type", MORNING_REPORT_EVENT_TYPE)
+    .maybeSingle()
+
+  if (!data?.template_body) return { enabled: false, managerPhones: [] }
+  try {
+    const cfg = JSON.parse(data.template_body) as { enabled?: boolean; manager_phones?: string[] }
+    return {
+      enabled: cfg.enabled === true,
+      managerPhones: Array.isArray(cfg.manager_phones) ? cfg.manager_phones : [],
+    }
+  } catch {
+    return { enabled: false, managerPhones: [] }
+  }
+}
+
+export async function upsertMorningReportConfig(
+  enabled: boolean,
+  managerPhones: string[]
+): Promise<{ success: boolean; error?: string }> {
+  const templateBody = JSON.stringify({ enabled, manager_phones: managerPhones })
+  const result = await upsertNotificationTemplate({
+    event_type: MORNING_REPORT_EVENT_TYPE,
+    name: "Morning Production Report Config",
+    template_body: templateBody,
+  })
+  if (!result.success) return { success: false, error: result.error ?? "Failed to save config" }
+  return { success: true }
+}
+
+export async function sendMorningReportNow(): Promise<{
+  success: boolean
+  error?: string
+  sent?: number
+}> {
+  const supabase = await createClient()
+
+  // Fetch production queue
+  const queueResult = await getProductionQueue()
+  if (!queueResult.success) {
+    return { success: false, error: queueResult.error }
+  }
+
+  const pendingRows = queueResult.data.rows.filter((r) => r.remainingUntilDone > 0)
+
+  // Fetch logo best-effort
+  let logoDataUrl: string | undefined
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "")
+  if (appUrl) {
+    try {
+      const logoRes = await fetch(`${appUrl}/images/logo.png`)
+      if (logoRes.ok) {
+        const logoBuffer = await logoRes.arrayBuffer()
+        const base64 = Buffer.from(logoBuffer).toString("base64")
+        logoDataUrl = `data:image/png;base64,${base64}`
+      }
+    } catch {
+      // not critical
+    }
+  }
+
+  // Generate PDF
+  const { blob, filename } = generateMorningReportPDF(pendingRows, logoDataUrl)
+
+  // Upload to Supabase storage
+  const pdfBuffer = await blob.arrayBuffer()
+  const pdfPath = `reports/${filename}`
+  let pdfUrl = ""
+
+  const { error: uploadError } = await supabase.storage
+    .from("production-reports")
+    .upload(pdfPath, pdfBuffer, { contentType: "application/pdf", upsert: true })
+
+  if (!uploadError) {
+    const { data: urlData } = supabase.storage
+      .from("production-reports")
+      .getPublicUrl(pdfPath)
+    pdfUrl = urlData?.publicUrl ?? ""
+  }
+
+  // Fetch WhatsApp config
+  const configRes = await getWhatsAppConfig()
+  const waConfig = toServiceConfig(configRes.success ? configRes.data : null)
+
+  if (!waConfig) {
+    return { success: false, error: "WhatsApp not configured (missing endpoint, username, or password)" }
+  }
+
+  // Fetch manager phones
+  const { managerPhones } = await getMorningReportConfig()
+  if (managerPhones.length === 0) {
+    return { success: false, error: "No manager phone numbers configured for morning report" }
+  }
+
+  // Build message
+  const now = new Date()
+  const dateStr = now.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  })
+
+  const distinctOrders = new Set(pendingRows.map((r) => r.orderId)).size
+  const totalRemaining = pendingRows.reduce((s, r) => s + r.remainingUntilDone, 0)
+  const notStarted = pendingRows.filter(
+    (r) => !r.hasInProductionRecord && !r.hasCompletedRecord
+  ).length
+
+  const message =
+    `📊 *Morning Production Report — ${dateStr}*\n` +
+    `\n` +
+    `*Pending Orders:* ${distinctOrders}\n` +
+    `*Total Units Remaining:* ${totalRemaining}\n` +
+    `*Not Started:* ${notStarted}\n` +
+    (pdfUrl ? `\n📄 Download Report: ${pdfUrl}\n` : "") +
+    `\nPlease review and assign production tasks.`
+
+  let sentCount = 0
+  try {
+    for (const phone of managerPhones) {
+      if (!phone?.trim()) continue
+      const result = await notificationService.sendMessage(waConfig, phone.trim(), message)
+      if (result.ok) sentCount++
+    }
+  } catch (error) {
+    reportError(error, { area: "notifications.sendMorningReportNow" })
+    return { success: false, error: error instanceof Error ? error.message : "Failed to send" }
+  }
+
+  return { success: true, sent: sentCount }
 }
 
 /** Sends production record created notification (when "Create Production Record" is clicked). */

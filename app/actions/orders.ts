@@ -2392,7 +2392,7 @@ export async function createProductionRecord(
     pdfFileSize = buffer.length
   }
 
-  // Create production record
+  // Create production record — auto-started so it appears in Production tab immediately
   const { data: productionRecord, error: recordError } = await supabase
     .from("production_records")
     .insert({
@@ -2400,7 +2400,7 @@ export async function createProductionRecord(
       production_number: productionNumber,
       production_type: productionType,
       selected_quantities: selectedQuantities || null,
-      status: 'pending',
+      status: 'in_production',
       pdf_file_name: pdfFileName,
       pdf_file_url: pdfFileUrl,
       pdf_file_size: pdfFileSize,
@@ -2412,6 +2412,13 @@ export async function createProductionRecord(
   if (recordError) {
     return { success: false, error: recordError.message }
   }
+
+  // Auto-advance order status to "In Progress" (same logic as pressing START)
+  await supabase
+    .from("orders")
+    .update({ order_status: "In Progress" })
+    .eq("id", orderId)
+    .eq("order_status", "New Order")
 
   // Also create a production_pdfs record for backward compatibility
   if (pdfFileUrl && pdfFileName) {
