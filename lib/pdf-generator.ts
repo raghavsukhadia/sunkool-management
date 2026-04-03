@@ -83,15 +83,17 @@ export function generateProductionChecklistPDF(
   const PAGE_HEIGHT = doc.internal.pageSize.getHeight()
   const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2
 
+  /** Item table column widths (no SUB column; MAIN = former MAIN + SUB). Sum = CONTENT_WIDTH. */
+  const TABLE_COLS = {
+    INDEX: 10,
+    MAIN: 100,
+    ORDERED: 23,
+    PACKING: 23,
+    CHECK: 24,
+  }
+
   // Start higher to save space
   let currentY = 15
-
-  // Column positions (defined globally for use in addPageIfNeeded)
-  const xIndex = MARGIN + 4
-  const xDesc = MARGIN + 12
-  const xOrdered = 115
-  const xPacking = 145
-  const xCheck = 172
 
   // --- Helpers ---
   const addPageIfNeeded = (rowHeight: number) => {
@@ -108,17 +110,8 @@ export function generateProductionChecklistPDF(
       doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
       doc.rect(MARGIN, currentY, CONTENT_WIDTH, headerHeight, 'FD')
 
-      // Use the updated dynamic column widths for redraw
-      const COLS = {
-        INDEX: 10,
-        MAIN: 50,
-        SUB: 50,
-        ORDERED: 23,
-        PACKING: 23,
-        CHECK: 24
-      }
       let vX = MARGIN
-      const dividers = [COLS.INDEX, COLS.MAIN, COLS.SUB, COLS.ORDERED, COLS.PACKING]
+      const dividers = [TABLE_COLS.INDEX, TABLE_COLS.MAIN, TABLE_COLS.ORDERED, TABLE_COLS.PACKING]
       dividers.forEach(w => {
         vX += w
         doc.line(vX, currentY, vX, currentY + headerHeight)
@@ -129,17 +122,15 @@ export function generateProductionChecklistPDF(
       doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
 
       let xH = MARGIN
-      doc.text('#', xH + COLS.INDEX / 2, currentY + 6.5, { align: 'center' })
-      xH += COLS.INDEX
+      doc.text('#', xH + TABLE_COLS.INDEX / 2, currentY + 6.5, { align: 'center' })
+      xH += TABLE_COLS.INDEX
       doc.text('MAIN ITEM', xH + 2, currentY + 6.5)
-      xH += COLS.MAIN
-      doc.text('SUB ITEM', xH + 2, currentY + 6.5)
-      xH += COLS.SUB
-      doc.text('ORDERED', xH + COLS.ORDERED / 2, currentY + 6.5, { align: 'center' })
-      xH += COLS.ORDERED
-      doc.text('PACKING', xH + COLS.PACKING / 2, currentY + 6.5, { align: 'center' })
-      xH += COLS.PACKING
-      doc.text('CHECK', xH + COLS.CHECK / 2, currentY + 6.5, { align: 'center' })
+      xH += TABLE_COLS.MAIN
+      doc.text('ORDERED', xH + TABLE_COLS.ORDERED / 2, currentY + 6.5, { align: 'center' })
+      xH += TABLE_COLS.ORDERED
+      doc.text('PACKING', xH + TABLE_COLS.PACKING / 2, currentY + 6.5, { align: 'center' })
+      xH += TABLE_COLS.PACKING
+      doc.text('CHECK', xH + TABLE_COLS.CHECK / 2, currentY + 6.5, { align: 'center' })
 
       currentY += headerHeight + 2
     }
@@ -305,14 +296,6 @@ export function generateProductionChecklistPDF(
   // --- ITEMS TABLE ---
   const drawItemsTable = () => {
     const headerHeight = 8
-    const COLS = {
-      INDEX: 10,
-      MAIN: 62,
-      SUB: 38,
-      ORDERED: 23,
-      PACKING: 23,
-      CHECK: 24
-    }
 
     doc.setFillColor(COLORS.LIGHT_BG[0], COLORS.LIGHT_BG[1], COLORS.LIGHT_BG[2])
     doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
@@ -320,7 +303,7 @@ export function generateProductionChecklistPDF(
 
     let vX = MARGIN
     doc.setLineWidth(0.2)
-    const dividersForHeader = [COLS.INDEX, COLS.MAIN, COLS.SUB, COLS.ORDERED, COLS.PACKING]
+    const dividersForHeader = [TABLE_COLS.INDEX, TABLE_COLS.MAIN, TABLE_COLS.ORDERED, TABLE_COLS.PACKING]
     dividersForHeader.forEach(w => {
       vX += w
       doc.line(vX, currentY, vX, currentY + headerHeight)
@@ -331,35 +314,24 @@ export function generateProductionChecklistPDF(
     doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
 
     let xPos = MARGIN
-    doc.text('#', xPos + COLS.INDEX / 2, currentY + 5.5, { align: 'center' })
-    xPos += COLS.INDEX
+    doc.text('#', xPos + TABLE_COLS.INDEX / 2, currentY + 5.5, { align: 'center' })
+    xPos += TABLE_COLS.INDEX
     doc.text('MAIN ITEM', xPos + 2, currentY + 5.5)
-    xPos += COLS.MAIN
-    doc.text('SUB ITEM / QTY', xPos + 2, currentY + 5.5)
-    xPos += COLS.SUB
-    doc.text('ORDERED', xPos + COLS.ORDERED / 2, currentY + 5.5, { align: 'center' })
-    xPos += COLS.ORDERED
-    doc.text('PACKING', xPos + COLS.PACKING / 2, currentY + 5.5, { align: 'center' })
-    xPos += COLS.PACKING
-    doc.text('CHECK', xPos + COLS.CHECK / 2, currentY + 5.5, { align: 'center' })
+    xPos += TABLE_COLS.MAIN
+    doc.text('ORDERED', xPos + TABLE_COLS.ORDERED / 2, currentY + 5.5, { align: 'center' })
+    xPos += TABLE_COLS.ORDERED
+    doc.text('PACKING', xPos + TABLE_COLS.PACKING / 2, currentY + 5.5, { align: 'center' })
+    xPos += TABLE_COLS.PACKING
+    doc.text('CHECK', xPos + TABLE_COLS.CHECK / 2, currentY + 5.5, { align: 'center' })
 
     currentY += headerHeight
-
-    if (!order.items || order.items.length === 0) {
-      addPageIfNeeded(10)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(8)
-      doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
-      doc.text('No items found for this order.', MARGIN + 2, currentY + 4)
-      currentY += 12
-      return
-    }
 
     const processedIds = new Set<string>()
     const displayRows: Array<{ mainName: string; subName: string; qty: number; index: number }> = []
 
-    // 1. Identify all rows for Dual Column structure (Deduplicated)
-    order.items.forEach((item) => {
+    // 1. Identify all rows (Deduplicated)
+    if (order.items && order.items.length > 0) {
+      order.items.forEach((item) => {
       if (processedIds.has(item.id)) return
 
       let matchedInventoryItem = inventoryItems.find(inv =>
@@ -445,75 +417,92 @@ export function generateProductionChecklistPDF(
       }
 
       processedIds.add(item.id)
-    })
+      })
+    }
 
     // 2. Keep user-added order and assign sequential index
     // Also FILTER out rows with qty <= 0 (important for partial production)
     const filteredRows = displayRows.filter(row => row.qty > 0)
     filteredRows.forEach((row, i) => row.index = i + 1)
 
-    // 3. Render rows in full grid
-    filteredRows.forEach((row, i) => {
-      const rowHeight = 8
+    const drawTableRowShell = (stripeIndex: number, rowHeight: number) => {
       addPageIfNeeded(rowHeight)
-
-      if (i % 2 !== 0) {
+      if (stripeIndex % 2 !== 0) {
         doc.setFillColor(252, 252, 252)
         doc.rect(MARGIN, currentY, CONTENT_WIDTH, rowHeight, 'F')
       }
-
       doc.setDrawColor(COLORS.BORDER[0], COLORS.BORDER[1], COLORS.BORDER[2])
       doc.setLineWidth(0.2)
       doc.rect(MARGIN, currentY, CONTENT_WIDTH, rowHeight, 'S')
-
       let itVX = MARGIN
-      const rowDividers = [COLS.INDEX, COLS.MAIN, COLS.SUB, COLS.ORDERED, COLS.PACKING]
-      rowDividers.forEach(w => {
+      ;[TABLE_COLS.INDEX, TABLE_COLS.MAIN, TABLE_COLS.ORDERED, TABLE_COLS.PACKING].forEach((w) => {
         itVX += w
         doc.line(itVX, currentY, itVX, currentY + rowHeight)
       })
+    }
+
+    // 3. Render data rows
+    filteredRows.forEach((row, i) => {
+      const rowHeight = row.subName ? 11 : 8
+      drawTableRowShell(i, rowHeight)
 
       let x = MARGIN
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(8)
       doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
-      doc.text(String(row.index), x + COLS.INDEX / 2, currentY + 5.5, { align: 'center' })
+      doc.text(String(row.index), x + TABLE_COLS.INDEX / 2, currentY + 5.5, { align: 'center' })
 
-      x += COLS.INDEX
+      x += TABLE_COLS.INDEX
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(10)
-      const mainLines = doc.splitTextToSize(row.mainName, COLS.MAIN - 4)
+      doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
+      const mainLines = doc.splitTextToSize(row.mainName, TABLE_COLS.MAIN - 4)
       doc.text(mainLines[0], x + 2, currentY + 5.5)
-
-      x += COLS.MAIN
-      doc.setFont('helvetica', row.subName ? 'normal' : 'bold')
-      doc.setFontSize(10)
       if (row.subName) {
-        const subLines = doc.splitTextToSize(row.subName, COLS.SUB - 4)
-        doc.text(subLines[0], x + 2, currentY + 5.5)
-      } else {
-        doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
-        doc.setFontSize(9)
-        doc.setFont('helvetica', 'bold')
-        doc.text(String(row.qty), x + COLS.SUB / 2, currentY + 5.5, { align: 'center' })
         doc.setFont('helvetica', 'normal')
+        doc.setFontSize(9)
+        const subLines = doc.splitTextToSize(row.subName, TABLE_COLS.MAIN - 4)
+        doc.text(subLines[0], x + 2, currentY + 9.5)
       }
 
-      x += COLS.SUB
+      x += TABLE_COLS.MAIN
       doc.setFontSize(9)
       doc.setFont('helvetica', 'bold')
-      doc.text(String(row.qty), x + COLS.ORDERED / 2, currentY + 5.5, { align: 'center' })
+      doc.text(String(row.qty), x + TABLE_COLS.ORDERED / 2, currentY + 5.5, { align: 'center' })
       doc.setFont('helvetica', 'normal')
 
-      x += COLS.ORDERED
+      x += TABLE_COLS.ORDERED
       doc.setDrawColor(180, 180, 180)
-      doc.line(x + 4, currentY + 6, x + COLS.PACKING - 4, currentY + 6)
+      doc.line(x + 4, currentY + 6, x + TABLE_COLS.PACKING - 4, currentY + 6)
 
-      x += COLS.PACKING
-      drawCheckbox(x + COLS.CHECK / 2, currentY + 4, 5.2)
+      x += TABLE_COLS.PACKING
+      drawCheckbox(x + TABLE_COLS.CHECK / 2, currentY + 4, 5.2)
 
       currentY += rowHeight
     })
+
+    // 4. Three blank rows for handwriting (serial continues)
+    const nextSerial = filteredRows.length + 1
+    for (let b = 0; b < 3; b++) {
+      const rowHeight = 8
+      const stripeIndex = filteredRows.length + b
+      drawTableRowShell(stripeIndex, rowHeight)
+
+      let x = MARGIN
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8)
+      doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
+      doc.text(String(nextSerial + b), x + TABLE_COLS.INDEX / 2, currentY + 5.5, { align: 'center' })
+
+      x += TABLE_COLS.INDEX + TABLE_COLS.MAIN + TABLE_COLS.ORDERED
+      doc.setDrawColor(180, 180, 180)
+      doc.line(x + 4, currentY + 6, x + TABLE_COLS.PACKING - 4, currentY + 6)
+
+      x += TABLE_COLS.PACKING
+      drawCheckbox(x + TABLE_COLS.CHECK / 2, currentY + 4, 5.2)
+
+      currentY += rowHeight
+    }
   }
 
   // --- PACKAGING PROTOCOLS ---

@@ -38,6 +38,19 @@ function getProducedForDisplay(row: ProductionQueueRow): number {
   return Math.max(0, row.ordered - getRemainingUntilDone(row))
 }
 
+/**
+ * Rows that appear when Production Queue has
+ * “Show lines awaiting batch closure (0 remaining until DONE on order)” enabled:
+ * full allocation on an open batch; DONE on the order still pending.
+ */
+function isAwaitingBatchClosureRow(
+  row: ProductionQueueRow,
+  noProductionOrderIds: Set<string>
+): boolean {
+  if (noProductionOrderIds.has(row.orderId)) return false
+  return !!row.needsBatchClosure
+}
+
 /** Remaining qty pill: orange/amber for normal backlog; red only for very large remaining. */
 function getRemainingBadgeClass(row: ProductionQueueRow): string {
   const n = getRemainingUntilDone(row)
@@ -411,22 +424,30 @@ export default function ProductionPage() {
     !useDefaultOpenOnlyFilter ||
     showLinesAwaitingClosure
 
-  // Needed: lines awaiting batch closure — 0 remaining until DONE on order (needsBatchClosure).
+  // Needed: same order lines as queue checkbox “Show lines awaiting batch closure…”.
+  // Per item: total remaining quantity (until DONE) summed across those lines — what production still owes.
   const neededList = useMemo(() => {
     if (!queueData?.rows?.length) return []
-    const byName: Record<string, number> = {}
+    const byName: Record<string, { lineCount: number; remainingQty: number }> = {}
     for (const row of queueData.rows) {
-      if (!row.needsBatchClosure) continue
-      if (noProductionOrderIdsSet.has(row.orderId)) continue
-      byName[row.itemName] = (byName[row.itemName] ?? 0) + 1
+      if (!isAwaitingBatchClosureRow(row, noProductionOrderIdsSet)) continue
+      const cur = byName[row.itemName] ?? { lineCount: 0, remainingQty: 0 }
+      cur.lineCount += 1
+      cur.remainingQty += getRemainingUntilDone(row)
+      byName[row.itemName] = cur
     }
     return Object.entries(byName)
-      .map(([itemName, lineCount]) => ({ itemName, lineCount }))
+      .map(([itemName, v]) => ({ itemName, lineCount: v.lineCount, remainingQty: v.remainingQty }))
       .sort((a, b) => a.itemName.localeCompare(b.itemName))
   }, [queueData?.rows, noProductionOrderIdsSet])
 
-  const neededLineTotal = useMemo(
+  const neededClosureLineTotal = useMemo(
     () => neededList.reduce((s, r) => s + r.lineCount, 0),
+    [neededList]
+  )
+
+  const neededRemainingTotal = useMemo(
+    () => neededList.reduce((s, r) => s + r.remainingQty, 0),
     [neededList]
   )
 
@@ -442,8 +463,9 @@ export default function ProductionPage() {
     const printWindow = window.open("", "_blank")
     if (!printWindow) return
 
-    const sorted = [...neededList].sort((a, b) => b.lineCount - a.lineCount)
+    const sorted = [...neededList].sort((a, b) => b.remainingQty - a.remainingQty)
     const totalLines = sorted.reduce((s, r) => s + r.lineCount, 0)
+    const totalRemaining = sorted.reduce((s, r) => s + r.remainingQty, 0)
     const now = new Date()
     const dateStr = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
@@ -460,13 +482,13 @@ export default function ProductionPage() {
       const cellA = a
         ? `<td class="sn">${i + 1}</td>
            <td class="item">${escapeHtml(a.itemName)}</td>
-           <td class="qty">${a.lineCount}</td>
+           <td class="qty">${a.remainingQty.toLocaleString()}</td>
            <td class="cb">□</td>`
         : `<td colspan="4" class="empty"></td>`
       const cellB = b
         ? `<td class="sn">${mid + i + 1}</td>
            <td class="item">${escapeHtml(b.itemName)}</td>
-           <td class="qty">${b.lineCount}</td>
+           <td class="qty">${b.remainingQty.toLocaleString()}</td>
            <td class="cb">□</td>`
         : `<td colspan="4" class="empty"></td>`
       return `<tr>${cellA}<td class="divider"></td>${cellB}</tr>`
@@ -530,7 +552,7 @@ export default function ProductionPage() {
     </div>
     <div class="doc-title">
       <h2>Batch closure — work list</h2>
-      <p>Order lines with 0 remaining until DONE — sorted by line count</p>
+      <p>Order lines awaiting batch closure — sorted by remaining quantity (until DONE)</p>
     </div>
   </div>
 
@@ -539,6 +561,7 @@ export default function ProductionPage() {
     <div class="meta-cell"><div class="meta-label">Time</div><div class="meta-value">${timeStr}</div></div>
     <div class="meta-cell"><div class="meta-label">Total Items</div><div class="meta-value">${sorted.length}</div></div>
     <div class="meta-cell"><div class="meta-label">Total lines</div><div class="meta-value">${totalLines.toLocaleString()}</div></div>
+    <div class="meta-cell"><div class="meta-label">Total remaining qty</div><div class="meta-value">${totalRemaining.toLocaleString()}</div></div>
   </div>
 
   <table>
@@ -546,20 +569,20 @@ export default function ProductionPage() {
       <tr>
         <th class="sn">#</th>
         <th class="item">Item Name</th>
-        <th class="qty">Lines</th>
+        <th class="qty">Rem. qty</th>
         <th class="cb">✓</th>
         <th class="divider"></th>
         <th class="sn">#</th>
         <th class="item">Item Name</th>
-        <th class="qty">Lines</th>
+        <th class="qty">Rem. qty</th>
         <th class="cb">✓</th>
       </tr>
     </thead>
     <tbody>
       ${tableRows}
       <tr class="totals-row">
-        <td colspan="2" class="totals-label">Total lines awaiting closure</td>
-        <td class="qty" style="color:#1e293b">${totalLines.toLocaleString()}</td>
+        <td colspan="2" class="totals-label">Total remaining (until DONE)</td>
+        <td class="qty" style="color:#1e293b">${totalRemaining.toLocaleString()}</td>
         <td class="cb"></td>
         <td class="divider"></td>
         <td colspan="3" style="background:#f1f5f9"></td>
@@ -788,14 +811,21 @@ export default function ProductionPage() {
       {/* Tab Navigation */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex overflow-x-auto">
-          {([
-            { key: "pending",          icon: Clock,     label: "Production Queue",   count: sortedQueueRows.length },
-            { key: "needed",           icon: Package,   label: "Needed",             count: neededList.length },
-            { key: "inventory-health", icon: Activity,  label: "Inventory Health",   count: null },
-          ] as const).map(({ key, icon: Icon, label, count }) => (
+          {[
+            { key: "pending" as const, icon: Clock, label: "Production Queue", count: sortedQueueRows.length, tabTitle: undefined as string | undefined },
+            {
+              key: "needed" as const,
+              icon: Package,
+              label: "Needed",
+              count: neededRemainingTotal,
+              tabTitle: undefined as string | undefined,
+            },
+            { key: "inventory-health" as const, icon: Activity, label: "Inventory Health", count: null as number | null, tabTitle: undefined as string | undefined },
+          ].map(({ key, icon: Icon, label, count, tabTitle }) => (
             <button
               key={key}
               type="button"
+              title={tabTitle}
               onClick={() => setFilter(key)}
               className={cn(
                 "relative flex shrink-0 items-center gap-2 px-5 py-4 text-[13px] font-medium transition-colors focus:outline-none",
@@ -813,7 +843,7 @@ export default function ProductionPage() {
                     ? "bg-orange-100 text-orange-600"
                     : "bg-slate-100 text-slate-500"
                 )}>
-                  {count}
+                  {typeof count === "number" ? count.toLocaleString() : count}
                 </span>
               )}
               {/* Active underline */}
@@ -1249,7 +1279,12 @@ export default function ProductionPage() {
                 </span>
               </div>
               <p className="mt-0.5 text-xs text-slate-400">
-                {neededLineTotal.toLocaleString()} order line{neededLineTotal === 1 ? "" : "s"} awaiting batch closure (0 remaining until DONE)
+                Same lines as &quot;Show lines awaiting batch closure (0 remaining until DONE on order)&quot; on the queue —{" "}
+                <span className="font-medium text-slate-600">
+                  {neededRemainingTotal.toLocaleString()} units (until DONE)
+                </span>{" "}
+                across {neededClosureLineTotal.toLocaleString()} order line{neededClosureLineTotal === 1 ? "" : "s"} ·{" "}
+                {neededList.length} item{neededList.length === 1 ? "" : "s"}
                 {neededLastUpdated && <span className="ml-2">· Updated {neededLastUpdated.toLocaleTimeString()}</span>}
               </p>
             </div>
@@ -1287,26 +1322,31 @@ export default function ProductionPage() {
               </div>
             ) : (
               (() => {
-                const sorted = [...neededList].sort((a, b) => b.lineCount - a.lineCount)
+                const sorted = [...neededList].sort((a, b) => b.remainingQty - a.remainingQty)
                 const mid = Math.ceil(sorted.length / 2)
                 const col1 = sorted.slice(0, mid)
                 const col2 = sorted.slice(mid)
 
-                const renderCol = (rows: { itemName: string; lineCount: number }[], offset: number) => (
+                const renderCol = (rows: { itemName: string; lineCount: number; remainingQty: number }[], offset: number) => (
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b-2 border-slate-200 bg-slate-50">
                           <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-8">#</th>
                           <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">Item</th>
-                          <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-28">Lines</th>
+                          <th
+                            className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-32"
+                            title="Sum of remaining quantity (until DONE) on each order line awaiting batch closure"
+                          >
+                            Remaining qty
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {rows.map(({ itemName, lineCount }, i) => {
+                        {rows.map(({ itemName, remainingQty }, i) => {
                           const rank = offset + i + 1
-                          const isHigh = lineCount >= 5
-                          const isMed = lineCount >= 2 && lineCount < 5
+                          const isHigh = remainingQty >= 100
+                          const isMed = remainingQty >= 25 && remainingQty < 100
                           return (
                             <tr
                               key={itemName}
@@ -1327,7 +1367,7 @@ export default function ProductionPage() {
                                     : isMed ? "bg-amber-100 text-amber-700"
                                       : "bg-slate-100 text-slate-600"
                                 )}>
-                                  {lineCount}
+                                  {remainingQty.toLocaleString()}
                                 </span>
                               </td>
                             </tr>
@@ -1355,10 +1395,10 @@ export default function ProductionPage() {
               isNeededFullscreen && "px-8"
             )}>
               <p className="text-xs text-slate-400">
-                Sorted highest to lowest · Click any item to filter the queue
+                Sorted by remaining quantity (until DONE) · Click an item to open the queue filtered to that SKU
               </p>
               <p className="text-xs font-semibold text-slate-600">
-                Total: {neededLineTotal.toLocaleString()} lines
+                Total: {neededRemainingTotal.toLocaleString()} units · {neededClosureLineTotal.toLocaleString()} closure lines · {neededList.length} items
               </p>
             </div>
           )}
