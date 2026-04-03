@@ -35,13 +35,23 @@ function getRemainingBadgeClass(row: ProductionQueueRow): string {
   return "bg-orange-100 text-orange-800"
 }
 
-function getRemainingZeroDisplayClass(row: ProductionQueueRow): string {
-  if (row.needsBatchClosure) return "text-slate-400"
-  if (!row.hasInProductionRecord) return "text-emerald-700"
-  return "text-slate-300"
+/** Exact units left to produce = ordered − produced on in-progress/completed batches (same as order screen). */
+function remainingZeroBadgeClass(row: ProductionQueueRow): string {
+  if (row.needsBatchClosure) return "bg-slate-100 text-slate-700 border border-slate-200"
+  if (!row.hasInProductionRecord) return "bg-emerald-50 text-emerald-800 border border-emerald-100"
+  return "bg-slate-50 text-slate-500 border border-slate-100"
 }
 
-/** Remaining is hidden as "—" only when it is zero; for closure lines we show 0 so it is not mistaken for missing data. */
+function remainingZeroTitle(row: ProductionQueueRow): string {
+  if (row.needsBatchClosure) {
+    return "0 units left to produce (fully allocated on an open batch — mark the batch DONE on the order when finished)."
+  }
+  if (!row.hasInProductionRecord) {
+    return "0 units left to produce (line complete for production purposes)."
+  }
+  return "0 units left to produce."
+}
+
 function RemainingQuantityDisplay({
   row,
   size = "md",
@@ -49,35 +59,35 @@ function RemainingQuantityDisplay({
   row: ProductionQueueRow
   size?: "sm" | "md"
 }) {
-  if (row.remaining > 0) {
-    const pill = size === "sm" ? "text-[11px]" : "text-[11px]"
+  const pill = size === "sm" ? "text-[11px]" : "text-[11px]"
+  const numCls = size === "sm" ? "text-[11px]" : "text-[13px]"
+  const n = row.remaining
+
+  if (n > 0) {
     return (
       <span
         className={cn(
-          "inline-flex items-center rounded-full px-2.5 py-0.5 font-medium",
+          "inline-flex min-w-[2rem] items-center justify-center rounded-full px-2.5 py-0.5 font-semibold tabular-nums",
           pill,
           getRemainingBadgeClass(row)
         )}
+        title="Units still to produce on this line (ordered minus produced on started batches)."
       >
-        {row.remaining}
+        {n}
       </span>
     )
   }
-  if (row.needsBatchClosure) {
-    const n = size === "sm" ? "text-[11px] font-semibold tabular-nums" : "text-[13px] font-semibold tabular-nums"
-    return (
-      <span
-        className="inline-flex items-baseline gap-1.5 whitespace-nowrap"
-        title="All ordered quantity is allocated on the open batch, so nothing is left to produce until this batch is marked DONE on the order."
-      >
-        <span className={cn(n, getRemainingZeroDisplayClass(row))}>0</span>
-        <span className="text-[10px] font-medium text-slate-400">closure</span>
-      </span>
-    )
-  }
+
   return (
-    <span className={cn(size === "sm" ? "text-[11px]" : "text-[13px]", "font-medium", getRemainingZeroDisplayClass(row))}>
-      —
+    <span
+      className={cn(
+        "inline-flex min-w-[2rem] items-center justify-center rounded-full px-2.5 py-0.5 font-semibold tabular-nums",
+        numCls,
+        remainingZeroBadgeClass(row)
+      )}
+      title={remainingZeroTitle(row)}
+    >
+      0
     </span>
   )
 }
@@ -1097,7 +1107,12 @@ export default function ProductionPage() {
                           </button>
                         </th>
                         <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
-                          <button type="button" onClick={() => handleSort("remaining")} className="mx-auto inline-flex items-center gap-1 hover:text-slate-700">
+                          <button
+                            type="button"
+                            onClick={() => handleSort("remaining")}
+                            title="Units left to produce on this line: ordered quantity minus production recorded on in-progress or completed batches."
+                            className="mx-auto inline-flex items-center gap-1 hover:text-slate-700"
+                          >
                             Remaining
                             {queueSortKey === "remaining" ? (
                               queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
