@@ -71,7 +71,7 @@ function RemainingQuantityDisplay({
           pill,
           getRemainingBadgeClass(row)
         )}
-        title="Units still to produce on this line (ordered minus produced on started batches)."
+        title="Ordered − Produced. Produced includes quantities on in-progress and completed batches, so this can be 0 while the batch is still open."
       >
         {n}
       </span>
@@ -130,7 +130,7 @@ interface ProductionRecord {
 }
 
 type QueueStatusFilter = "All" | "Pending" | "In Progress" | "Completed"
-type QueueSortKey = "orderNumber" | "customerName" | "itemName" | "ordered" | "remaining"
+type QueueSortKey = "orderNumber" | "customerName" | "itemName" | "ordered" | "produced" | "remaining"
 type QueueSortDirection = "asc" | "desc"
 type KpiFilter = "none" | "pending" | "units" | "delayed" | "completedMonth" | "noProduction"
 
@@ -387,6 +387,8 @@ export default function ProductionPage() {
           return row.itemName
         case "ordered":
           return row.ordered
+        case "produced":
+          return row.produced
         case "remaining":
           return row.remaining
       }
@@ -669,6 +671,7 @@ export default function ProductionPage() {
         "Customer": row.customerName,
         "Item": row.itemName,
         "Ordered Qty": row.ordered,
+        "Produced Qty": row.produced,
         "Remaining Qty": row.remaining,
         "Status": status,
         "Active batch(es)": formatActiveBatches(row),
@@ -851,6 +854,9 @@ export default function ProductionPage() {
             <div className="flex flex-col gap-3 lg:gap-4">
               <div>
                 <CardTitle className="text-sm font-semibold text-slate-900">Production queue – complete orders, item-wise</CardTitle>
+                <p className="mt-1 text-xs text-slate-500">
+                  Remaining is ordered minus produced. Produced counts in-progress and completed batches, so a line on an open batch can show 0 remaining until that batch is marked DONE on the order.
+                </p>
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
@@ -1032,6 +1038,7 @@ export default function ProductionPage() {
                           </div>
                           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                             <span>Ordered: {row.ordered}</span>
+                            <span>Produced: {row.produced}</span>
                             <span className="font-semibold text-slate-700">Remaining:</span>
                             <RemainingQuantityDisplay row={row} size="sm" />
                           </div>
@@ -1097,7 +1104,11 @@ export default function ProductionPage() {
                           </button>
                         </th>
                         <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
-                          <button type="button" onClick={() => handleSort("ordered")} className="mx-auto inline-flex items-center gap-1 hover:text-slate-700">
+                          <button
+                            type="button"
+                            onClick={() => handleSort("ordered")}
+                            className="mx-auto inline-flex items-center gap-1 hover:text-slate-700"
+                          >
                             Ordered
                             {queueSortKey === "ordered" ? (
                               queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
@@ -1109,8 +1120,23 @@ export default function ProductionPage() {
                         <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <button
                             type="button"
+                            onClick={() => handleSort("produced")}
+                            title="Quantity already allocated on in-progress or completed production batches for this line (partial selections or full line per batch rules)."
+                            className="mx-auto inline-flex items-center gap-1 hover:text-slate-700"
+                          >
+                            Produced
+                            {queueSortKey === "produced" ? (
+                              queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+                            ) : (
+                              <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                            )}
+                          </button>
+                        </th>
+                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                          <button
+                            type="button"
                             onClick={() => handleSort("remaining")}
-                            title="Units left to produce on this line: ordered quantity minus production recorded on in-progress or completed batches."
+                            title="Ordered − Produced. If 0 while a batch is still open, the full line quantity is already allocated to that batch (not yet marked DONE)."
                             className="mx-auto inline-flex items-center gap-1 hover:text-slate-700"
                           >
                             Remaining
@@ -1173,6 +1199,12 @@ export default function ProductionPage() {
                               </div>
                             </td>
                             <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.ordered}</td>
+                            <td
+                              className="px-4 py-0 text-center text-[13px] font-medium tabular-nums text-slate-700"
+                              title="Allocated on production batches (in progress + completed) for this line."
+                            >
+                              {row.produced}
+                            </td>
                             <td className="px-4 py-0 text-center">
                               <RemainingQuantityDisplay row={row} />
                             </td>
