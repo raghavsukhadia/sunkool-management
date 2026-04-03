@@ -27,6 +27,43 @@ import {
 } from "@/app/actions/inventory-health"
 import { OrderJourneySheet } from "@/components/production/OrderJourneySheet"
 
+/** Remaining qty pill: orange/amber for normal backlog; red only for very large remaining. */
+function getRemainingBadgeClass(row: ProductionQueueRow): string {
+  if (row.remaining === 0) return "px-0 text-slate-300"
+  if (row.remaining <= 10) return "bg-amber-100 text-amber-800"
+  if (row.remaining > 200) return "bg-red-100 text-red-700"
+  return "bg-orange-100 text-orange-800"
+}
+
+function getRemainingZeroDisplayClass(row: ProductionQueueRow): string {
+  if (row.needsBatchClosure) return "text-slate-400"
+  if (!row.hasInProductionRecord) return "text-emerald-700"
+  return "text-slate-300"
+}
+
+function formatActiveBatches(row: ProductionQueueRow): string {
+  const labels = row.activeBatchLabels ?? []
+  return labels.length ? labels.join(", ") : "—"
+}
+
+/** Order column: prefer single active batch id (e.g. SK36C); otherwise base + batch list. */
+function getQueueOrderDisplayLabel(row: ProductionQueueRow): string {
+  const base = row.orderNumber
+  const active = row.activeBatchLabels ?? []
+  const completed = row.completedBatchLabels ?? []
+  const labels = active.length > 0 ? active : completed
+  if (labels.length === 1) return labels[0]!
+  if (labels.length > 1) return `${base} (${labels.join(", ")})`
+  return base
+}
+
+function getQueueOrderNumberClass(row: ProductionQueueRow): string {
+  if (row.remaining === 0 && !row.needsBatchClosure) {
+    return "text-slate-600 hover:text-slate-800"
+  }
+  return "text-orange-500 hover:text-orange-600"
+}
+
 interface ProductionRecord {
   id: string
   production_number: string
@@ -42,7 +79,7 @@ interface ProductionRecord {
 }
 
 type QueueStatusFilter = "All" | "Pending" | "In Progress" | "Completed"
-type QueueSortKey = "orderNumber" | "customerName" | "itemName" | "ordered" | "produced" | "progress" | "remaining"
+type QueueSortKey = "orderNumber" | "customerName" | "itemName" | "ordered" | "remaining"
 type QueueSortDirection = "asc" | "desc"
 type KpiFilter = "none" | "pending" | "units" | "delayed" | "completedMonth" | "noProduction"
 
@@ -73,6 +110,8 @@ export default function ProductionPage() {
   const [queueSortDirection, setQueueSortDirection] = useState<QueueSortDirection>("asc")
   const [kpiFilter, setKpiFilter] = useState<KpiFilter>("none")
   const [useDefaultOpenOnlyFilter, setUseDefaultOpenOnlyFilter] = useState(true)
+  /** When false (default), hide line items with 0 remaining (fully allocated on an open batch until DONE on the order). */
+  const [showLinesAwaitingClosure, setShowLinesAwaitingClosure] = useState(true)
   const [selectedRow, setSelectedRow] = useState<ProductionQueueRow | null>(null)
   const [journeyOpen, setJourneyOpen] = useState(false)
   const neededFullscreenRef = useRef<HTMLDivElement>(null)
@@ -160,9 +199,9 @@ export default function ProductionPage() {
   }, [queueItemSearch, uniqueQueueItems])
 
   const getQueueRowStatus = (row: ProductionQueueRow): QueueStatusFilter => {
-    // Queue now contains only actively started rows (in progress), not done rows.
-    if (row.hasInProductionRecord) return "In Progress"
-    return row.produced > 0 ? "In Progress" : "Pending"
+    if (row.remaining === 0 && !row.needsBatchClosure) return "Completed"
+    if (row.hasInProductionRecord || row.produced > 0) return "In Progress"
+    return "Pending"
   }
 
   const deferredQueueSearch = useDeferredValue(queueSearch)
@@ -233,9 +272,13 @@ export default function ProductionPage() {
         if (kpiFilter === "noProduction" && !isNoProductionRow) return false
 
         if (normalizedQueueSearch) {
-          const matchesSearch = [row.orderNumber, row.customerName, row.itemName].some((value) =>
+          const displayLabel = getQueueOrderDisplayLabel(row)
+          const batchHaystack = [...(row.activeBatchLabels ?? []), ...(row.completedBatchLabels ?? [])]
+            .join(" ")
+            .toLowerCase()
+          const matchesSearch = [row.orderNumber, displayLabel, row.customerName, row.itemName].some((value) =>
             value.toLowerCase().includes(normalizedQueueSearch)
-          )
+          ) || batchHaystack.includes(normalizedQueueSearch)
           if (!matchesSearch) return false
         }
 
@@ -243,9 +286,14 @@ export default function ProductionPage() {
         if (queueItemFilter && row.itemName !== queueItemFilter) return false
 
         if (kpiFilter !== "noProduction") {
+          if (useDefaultOpenOnlyFilter && !showLinesAwaitingClosure && row.remaining === 0 && !isNoProductionRow) {
+            return false
+          }
           const rowStatus = getQueueRowStatus(row)
           if (queueStatusFilter === "All") {
-            if (useDefaultOpenOnlyFilter && rowStatus === "Completed") return false
+            if (useDefaultOpenOnlyFilter && rowStatus === "Completed") {
+              return false
+            }
           } else if (rowStatus !== queueStatusFilter) {
             return false
           }
@@ -271,30 +319,23 @@ export default function ProductionPage() {
       queueData?.rows,
       queueItemFilter,
       queueStatusFilter,
+      showLinesAwaitingClosure,
       useDefaultOpenOnlyFilter,
     ]
   )
 
   const sortedQueueRows = useMemo(() => {
     const rows = [...filteredQueueRows]
-    const getProgress = (row: ProductionQueueRow) => {
-      if (row.ordered <= 0) return 0
-      return Math.min(100, Math.round((row.produced / row.ordered) * 100))
-    }
     const getSortValue = (row: ProductionQueueRow) => {
       switch (queueSortKey) {
         case "orderNumber":
-          return row.orderNumber
+          return getQueueOrderDisplayLabel(row)
         case "customerName":
           return row.customerName
         case "itemName":
           return row.itemName
         case "ordered":
           return row.ordered
-        case "produced":
-          return row.produced
-        case "progress":
-          return getProgress(row)
         case "remaining":
           return row.remaining
       }
@@ -330,22 +371,27 @@ export default function ProductionPage() {
     queueCustomerFilter.length > 0 ||
     queueItemFilter.length > 0 ||
     queueStatusFilter !== "All" ||
-    !useDefaultOpenOnlyFilter
+    !useDefaultOpenOnlyFilter ||
+    showLinesAwaitingClosure
 
-  // Needed: aggregate by item name, sum remaining (only in-production rows with remaining > 0)
-  // Excludes "Not Started" orders so the total matches the KPI "Total Units to Produce".
+  // Needed: lines awaiting batch closure — 0 remaining until DONE on order (needsBatchClosure).
   const neededList = useMemo(() => {
     if (!queueData?.rows?.length) return []
     const byName: Record<string, number> = {}
     for (const row of queueData.rows) {
-      if (row.remaining <= 0) continue
+      if (!row.needsBatchClosure) continue
       if (noProductionOrderIdsSet.has(row.orderId)) continue
-      byName[row.itemName] = (byName[row.itemName] ?? 0) + row.remaining
+      byName[row.itemName] = (byName[row.itemName] ?? 0) + 1
     }
     return Object.entries(byName)
-      .map(([itemName, remaining]) => ({ itemName, remaining }))
+      .map(([itemName, lineCount]) => ({ itemName, lineCount }))
       .sort((a, b) => a.itemName.localeCompare(b.itemName))
   }, [queueData?.rows, noProductionOrderIdsSet])
+
+  const neededLineTotal = useMemo(
+    () => neededList.reduce((s, r) => s + r.lineCount, 0),
+    [neededList]
+  )
 
   const handleFullscreenNeeded = () => {
     neededFullscreenRef.current?.requestFullscreen()
@@ -359,8 +405,8 @@ export default function ProductionPage() {
     const printWindow = window.open("", "_blank")
     if (!printWindow) return
 
-    const sorted = [...neededList].sort((a, b) => b.remaining - a.remaining)
-    const totalUnits = sorted.reduce((s, r) => s + r.remaining, 0)
+    const sorted = [...neededList].sort((a, b) => b.lineCount - a.lineCount)
+    const totalLines = sorted.reduce((s, r) => s + r.lineCount, 0)
     const now = new Date()
     const dateStr = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
@@ -377,13 +423,13 @@ export default function ProductionPage() {
       const cellA = a
         ? `<td class="sn">${i + 1}</td>
            <td class="item">${escapeHtml(a.itemName)}</td>
-           <td class="qty">${a.remaining}</td>
+           <td class="qty">${a.lineCount}</td>
            <td class="cb">□</td>`
         : `<td colspan="4" class="empty"></td>`
       const cellB = b
         ? `<td class="sn">${mid + i + 1}</td>
            <td class="item">${escapeHtml(b.itemName)}</td>
-           <td class="qty">${b.remaining}</td>
+           <td class="qty">${b.lineCount}</td>
            <td class="cb">□</td>`
         : `<td colspan="4" class="empty"></td>`
       return `<tr>${cellA}<td class="divider"></td>${cellB}</tr>`
@@ -393,7 +439,7 @@ export default function ProductionPage() {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Production Work Order – ${dateStr}</title>
+  <title>Batch closure work list – ${dateStr}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     @page { size: A4; margin: 14mm 12mm; }
@@ -446,8 +492,8 @@ export default function ProductionPage() {
       <div class="brand-sub">Production Management System</div>
     </div>
     <div class="doc-title">
-      <h2>Production Work Order</h2>
-      <p>Items to produce — sorted by urgency</p>
+      <h2>Batch closure — work list</h2>
+      <p>Order lines with 0 remaining until DONE — sorted by line count</p>
     </div>
   </div>
 
@@ -455,7 +501,7 @@ export default function ProductionPage() {
     <div class="meta-cell"><div class="meta-label">Date</div><div class="meta-value">${dateStr}</div></div>
     <div class="meta-cell"><div class="meta-label">Time</div><div class="meta-value">${timeStr}</div></div>
     <div class="meta-cell"><div class="meta-label">Total Items</div><div class="meta-value">${sorted.length}</div></div>
-    <div class="meta-cell"><div class="meta-label">Total Units</div><div class="meta-value">${totalUnits.toLocaleString()}</div></div>
+    <div class="meta-cell"><div class="meta-label">Total lines</div><div class="meta-value">${totalLines.toLocaleString()}</div></div>
   </div>
 
   <table>
@@ -463,20 +509,20 @@ export default function ProductionPage() {
       <tr>
         <th class="sn">#</th>
         <th class="item">Item Name</th>
-        <th class="qty">Qty</th>
+        <th class="qty">Lines</th>
         <th class="cb">✓</th>
         <th class="divider"></th>
         <th class="sn">#</th>
         <th class="item">Item Name</th>
-        <th class="qty">Qty</th>
+        <th class="qty">Lines</th>
         <th class="cb">✓</th>
       </tr>
     </thead>
     <tbody>
       ${tableRows}
       <tr class="totals-row">
-        <td colspan="2" class="totals-label">Total Units to Produce</td>
-        <td class="qty" style="color:#1e293b">${totalUnits.toLocaleString()}</td>
+        <td colspan="2" class="totals-label">Total lines awaiting closure</td>
+        <td class="qty" style="color:#1e293b">${totalLines.toLocaleString()}</td>
         <td class="cb"></td>
         <td class="divider"></td>
         <td colspan="3" style="background:#f1f5f9"></td>
@@ -505,6 +551,8 @@ export default function ProductionPage() {
   const handleNeededItemClick = (itemName: string) => {
     setFilter("pending")
     setQueueSearch(itemName)
+    setShowLinesAwaitingClosure(true)
+    setUseDefaultOpenOnlyFilter(true)
   }
 
   const handleQueueStatusChange = (value: QueueStatusFilter) => {
@@ -519,6 +567,7 @@ export default function ProductionPage() {
     setQueueItemFilter("")
     setKpiFilter("none")
     setUseDefaultOpenOnlyFilter(true)
+    setShowLinesAwaitingClosure(false)
   }
 
   const applyKpiFilter = (next: KpiFilter) => {
@@ -527,13 +576,9 @@ export default function ProductionPage() {
     setQueueCustomerFilter("")
     setQueueItemFilter("")
     setUseDefaultOpenOnlyFilter(false)
+    setShowLinesAwaitingClosure(false)
     if (next === "completedMonth") setQueueStatusFilter("Completed")
     else setQueueStatusFilter("All")
-  }
-
-  const getProgressPercent = (row: ProductionQueueRow) => {
-    if (row.ordered <= 0) return 0
-    return Math.min(100, Math.round((row.produced / row.ordered) * 100))
   }
 
   const isAllChecked = sortedQueueRows.length > 0 && sortedQueueRows.every((r) => checkedItemIds.has(r.itemId))
@@ -566,18 +611,17 @@ export default function ProductionPage() {
     }
 
     const data = rowsToExport.map((row) => {
-      const progress = getProgressPercent(row)
       const status = getQueueRowStatus(row)
       return {
-        "Order #": row.orderNumber,
+        "Order #": getQueueOrderDisplayLabel(row),
         "Order Date": formatDate(row.orderDate),
         "Customer": row.customerName,
         "Item": row.itemName,
         "Ordered Qty": row.ordered,
-        "Produced Qty": row.produced,
         "Remaining Qty": row.remaining,
-        "Progress %": progress,
         "Status": status,
+        "Active batch(es)": formatActiveBatches(row),
+        "Batch count": row.activeBatchCount ?? row.activeBatchLabels?.length ?? 0,
       }
     })
 
@@ -756,7 +800,6 @@ export default function ProductionPage() {
             <div className="flex flex-col gap-3 lg:gap-4">
               <div>
                 <CardTitle className="text-sm font-semibold text-slate-900">Production queue – complete orders, item-wise</CardTitle>
-                <p className="mt-1 text-xs text-slate-400">Single sheet: started production orders with item breakdown (Ordered / Produced / Remaining).</p>
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
@@ -885,6 +928,21 @@ export default function ProductionPage() {
                   </Button>
                 ) : null}
               </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
+                <label
+                  htmlFor="show-awaiting-closure"
+                  className="flex cursor-pointer items-center gap-2 text-xs text-slate-600"
+                >
+                  <input
+                    id="show-awaiting-closure"
+                    type="checkbox"
+                    checked={showLinesAwaitingClosure}
+                    onChange={(e) => setShowLinesAwaitingClosure(e.target.checked)}
+                    className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 accent-orange-500"
+                  />
+                  <span>Show lines awaiting batch closure (0 remaining until DONE on order)</span>
+                </label>
+              </div>
               </div>
             </div>
           </CardHeader>
@@ -900,8 +958,6 @@ export default function ProductionPage() {
                 {/* Mobile: card list */}
                 <div className="space-y-3 p-4 lg:hidden">
                   {sortedQueueRows.map((row) => {
-                    const progressPercent = getProgressPercent(row)
-
                     return (
                     <button
                       key={row.itemId}
@@ -911,30 +967,29 @@ export default function ProductionPage() {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-orange-500">{row.orderNumber}</p>
+                          <p className={cn("truncate text-sm font-semibold", getQueueOrderNumberClass(row))}>
+                            {getQueueOrderDisplayLabel(row)}
+                          </p>
+                          {(row.activeBatchLabels?.length ?? 0) > 0 ? (
+                            <p className="mt-0.5 truncate text-[11px] font-medium text-slate-500">
+                              Batch: {formatActiveBatches(row)}
+                            </p>
+                          ) : null}
                           <p className="mt-0.5 truncate text-sm text-slate-600">{row.customerName}</p>
-                          <p className="mt-1 text-sm font-medium text-slate-800">{row.itemName}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-medium text-slate-800">{row.itemName}</p>
+                          </div>
                           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                             <span>Ordered: {row.ordered}</span>
-                            <span>Produced: {row.produced}</span>
                             <span className="font-semibold text-slate-700">Remaining:</span>
-                            <span className={cn(
-                              "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
-                              row.remaining === 0
-                                ? "px-0 text-slate-300"
-                                : row.remaining <= 10
-                                  ? "bg-amber-100 text-amber-800"
-                                  : "bg-red-100 text-red-600"
-                            )}>{row.remaining === 0 ? "—" : row.remaining}</span>
-                          </div>
-                          <div className="mt-3">
-                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-                              <div
-                                className={cn("h-full rounded-full", progressPercent >= 100 ? "bg-green-500" : "bg-orange-500")}
-                                style={{ width: `${progressPercent}%` }}
-                              />
-                            </div>
-                            <p className="mt-1 text-[11px] font-medium text-slate-400">{progressPercent}% complete</p>
+                            {row.remaining === 0 ? (
+                              <span className={cn("text-[11px] font-medium", getRemainingZeroDisplayClass(row))}>—</span>
+                            ) : (
+                              <span className={cn(
+                                "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+                                getRemainingBadgeClass(row)
+                              )}>{row.remaining}</span>
+                            )}
                           </div>
                         </div>
                         <Link
@@ -973,6 +1028,9 @@ export default function ProductionPage() {
                             )}
                           </button>
                         </th>
+                        <th className="h-10 max-w-[140px] px-3 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                          Active batch
+                        </th>
                         <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <button type="button" onClick={() => handleSort("customerName")} className="inline-flex items-center gap-1 hover:text-slate-700">
                             Customer
@@ -1005,26 +1063,6 @@ export default function ProductionPage() {
                           </button>
                         </th>
                         <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
-                          <button type="button" onClick={() => handleSort("produced")} className="mx-auto inline-flex items-center gap-1 hover:text-slate-700">
-                            Produced
-                            {queueSortKey === "produced" ? (
-                              queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                            )}
-                          </button>
-                        </th>
-                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
-                          <button type="button" onClick={() => handleSort("progress")} className="mx-auto inline-flex items-center gap-1 hover:text-slate-700">
-                            Progress
-                            {queueSortKey === "progress" ? (
-                              queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                            )}
-                          </button>
-                        </th>
-                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <button type="button" onClick={() => handleSort("remaining")} className="mx-auto inline-flex items-center gap-1 hover:text-slate-700">
                             Remaining
                             {queueSortKey === "remaining" ? (
@@ -1040,7 +1078,6 @@ export default function ProductionPage() {
                     <tbody>
                       {sortedQueueRows.map((row, index) => {
                         const isFirstInGroup = index === 0 || sortedQueueRows[index - 1].orderId !== row.orderId
-                        const progressPercent = getProgressPercent(row)
 
                         return (
                           <tr
@@ -1069,36 +1106,31 @@ export default function ProductionPage() {
                                   event.stopPropagation()
                                   handleRowClick(row)
                                 }}
-                                className="inline-flex items-center text-xs font-medium text-orange-500 hover:text-orange-600"
+                                className={cn("inline-flex items-center text-xs font-medium", getQueueOrderNumberClass(row))}
                               >
-                                {row.orderNumber}
+                                {getQueueOrderDisplayLabel(row)}
                               </button>
+                            </td>
+                            <td className="max-w-[140px] truncate px-3 py-0 text-[12px] text-slate-600" title={formatActiveBatches(row)}>
+                              {formatActiveBatches(row)}
                             </td>
                             <td className="max-w-[180px] truncate px-4 py-0 text-[13px] text-slate-600">{row.customerName}</td>
                             <td className="whitespace-nowrap px-4 py-0 text-[12px] text-slate-400">
                               {row.orderDate ? new Date(row.orderDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                             </td>
-                            <td className="max-w-[200px] truncate px-4 py-0 text-[13px] font-medium text-slate-900">{row.itemName}</td>
-                            <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.ordered}</td>
-                            <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.produced}</td>
-                            <td className="px-4 py-0 align-middle">
-                              <div className="mx-auto w-[90px]">
-                                <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
-                                  <div
-                                    className={cn("h-full rounded-full", progressPercent >= 100 ? "bg-green-500" : "bg-orange-500")}
-                                    style={{ width: `${progressPercent}%` }}
-                                  />
-                                </div>
-                                <p className="mt-1 text-center text-[11px] text-slate-400">{progressPercent}%</p>
+                            <td className="max-w-[240px] px-4 py-0 text-[13px] font-medium text-slate-900">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className="truncate">{row.itemName}</span>
                               </div>
                             </td>
+                            <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.ordered}</td>
                             <td className="px-4 py-0 text-center">
                               {row.remaining === 0 ? (
-                                <span className="text-[13px] font-medium text-slate-300">—</span>
+                                <span className={cn("text-[13px] font-medium", getRemainingZeroDisplayClass(row))}>—</span>
                               ) : (
                                 <span className={cn(
                                   "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
-                                  row.remaining <= 10 ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-600"
+                                  getRemainingBadgeClass(row)
                                 )}>
                                   {row.remaining}
                                 </span>
@@ -1160,7 +1192,7 @@ export default function ProductionPage() {
                 </span>
               </div>
               <p className="mt-0.5 text-xs text-slate-400">
-                {neededList.reduce((s, r) => s + r.remaining, 0).toLocaleString()} total units to produce
+                {neededLineTotal.toLocaleString()} order line{neededLineTotal === 1 ? "" : "s"} awaiting batch closure (0 remaining until DONE)
                 {neededLastUpdated && <span className="ml-2">· Updated {neededLastUpdated.toLocaleTimeString()}</span>}
               </p>
             </div>
@@ -1171,7 +1203,7 @@ export default function ProductionPage() {
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-[13px] font-medium text-slate-600 shadow-sm transition-colors hover:border-orange-300 hover:bg-orange-50 hover:text-orange-600"
               >
                 <Printer className="h-4 w-4" />
-                Print Work Order
+                Print closure list
               </button>
               <button
                 type="button"
@@ -1194,30 +1226,30 @@ export default function ProductionPage() {
               <div className="py-16 text-center">
                 <CheckCircle className="mx-auto mb-3 h-12 w-12 text-green-400" />
                 <p className="font-medium text-slate-600">All clear!</p>
-                <p className="mt-1 text-sm text-slate-400">All production order items are fully produced.</p>
+                <p className="mt-1 text-sm text-slate-400">No order lines are waiting for batch closure.</p>
               </div>
             ) : (
               (() => {
-                const sorted = [...neededList].sort((a, b) => b.remaining - a.remaining)
+                const sorted = [...neededList].sort((a, b) => b.lineCount - a.lineCount)
                 const mid = Math.ceil(sorted.length / 2)
                 const col1 = sorted.slice(0, mid)
                 const col2 = sorted.slice(mid)
 
-                const renderCol = (rows: { itemName: string; remaining: number }[], offset: number) => (
+                const renderCol = (rows: { itemName: string; lineCount: number }[], offset: number) => (
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b-2 border-slate-200 bg-slate-50">
                           <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-8">#</th>
                           <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">Item</th>
-                          <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-24">To Produce</th>
+                          <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-28">Lines</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {rows.map(({ itemName, remaining }, i) => {
+                        {rows.map(({ itemName, lineCount }, i) => {
                           const rank = offset + i + 1
-                          const isHigh = remaining > 100
-                          const isMed = remaining > 30 && remaining <= 100
+                          const isHigh = lineCount >= 5
+                          const isMed = lineCount >= 2 && lineCount < 5
                           return (
                             <tr
                               key={itemName}
@@ -1238,7 +1270,7 @@ export default function ProductionPage() {
                                     : isMed ? "bg-amber-100 text-amber-700"
                                       : "bg-slate-100 text-slate-600"
                                 )}>
-                                  {remaining}
+                                  {lineCount}
                                 </span>
                               </td>
                             </tr>
@@ -1269,7 +1301,7 @@ export default function ProductionPage() {
                 Sorted highest to lowest · Click any item to filter the queue
               </p>
               <p className="text-xs font-semibold text-slate-600">
-                Total: {neededList.reduce((s, r) => s + r.remaining, 0).toLocaleString()} units
+                Total: {neededLineTotal.toLocaleString()} lines
               </p>
             </div>
           )}

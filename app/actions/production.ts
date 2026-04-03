@@ -19,6 +19,70 @@ function normalizeProductionStatus(status: string | null | undefined): string {
   return (status ?? "").trim().toLowerCase().replace(/[_\s]+/g, " ")
 }
 
+/** Same statuses as order detail produced math: in progress + completed. */
+function recordCountsTowardTotals(status: string): boolean {
+  const n = normalizeProductionStatus(status)
+  return n === "in production" || n === "in progress" || n === "completed"
+}
+
+/**
+ * Produced qty for one line — aligned with `app/dashboard/orders/[id]/page.tsx`
+ * (partial sums from selected_quantities; full batch adds full line qty when no per-line qty).
+ */
+function producedQtyForLineItem(
+  records: Array<{ production_type: string; selected_quantities: Record<string, number> | null; status: string }>,
+  itemId: string,
+  lineQuantity: number
+): number {
+  return records.reduce((sum, rec) => {
+    if (!recordCountsTowardTotals(rec.status)) return sum
+    if (rec.selected_quantities && rec.selected_quantities[itemId]) {
+      return sum + (Number(rec.selected_quantities[itemId]) || 0)
+    }
+    if ((rec.production_type || "full").toLowerCase() === "full") {
+      return sum + lineQuantity
+    }
+    return sum
+  }, 0)
+}
+
+type QueueRecordRow = {
+  production_type: string
+  selected_quantities: Record<string, number> | null
+  status: string
+  updated_at: string | null
+  created_at: string | null
+  production_number: string | null
+}
+
+function completedBatchLabelsForLine(
+  records: Array<{
+    production_type: string
+    selected_quantities: Record<string, number> | null
+    production_number: string | null
+    status: string
+  }>,
+  itemId: string
+): string[] {
+  const labels = new Set<string>()
+  for (const rec of records) {
+    const normalizedStatus = normalizeProductionStatus(rec.status)
+    if (normalizedStatus !== "completed") continue
+    const pnum = (rec.production_number ?? "").trim()
+    if (!pnum) continue
+    const ptype = (rec.production_type || "full").toLowerCase()
+    if (ptype === "full") {
+      labels.add(pnum)
+      continue
+    }
+    const sq = rec.selected_quantities?.[itemId]
+    if (sq != null && Number(sq) > 0) labels.add(pnum)
+  }
+  return Array.from(labels).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+  )
+}
+
 export type ProductionQueueRow = {
   orderId: string
   orderNumber: string
@@ -32,6 +96,14 @@ export type ProductionQueueRow = {
   remaining: number
   hasInProductionRecord: boolean
   hasCompletedRecord: boolean
+  /** True when quantities are fully allocated on an open batch but the record is not marked completed yet (DONE on order). */
+  needsBatchClosure?: boolean
+  /** Active in-progress batch IDs (e.g. SK36A, SK36C) that include this line. */
+  activeBatchLabels: string[]
+  /** Number of distinct active batches referencing this line. */
+  activeBatchCount: number
+  /** Completed batch IDs that allocated this line (for display when no active batch). */
+  completedBatchLabels: string[]
 }
 
 export type JourneyProductionRecord = {
@@ -90,7 +162,7 @@ export async function getProductionQueue(): Promise<
   const [productionRecordsResult, newOrdersResult] = await Promise.all([
     supabase
       .from("production_records")
-      .select("order_id, production_type, selected_quantities, status, updated_at, created_at")
+      .select("order_id, production_type, selected_quantities, status, updated_at, created_at, production_number")
       .in("status", [...QUEUE_VISIBLE_PRODUCTION_STATUSES]),
     supabase
       .from("orders")
@@ -103,6 +175,21 @@ export async function getProductionQueue(): Promise<
 
   const allProductionRecords = productionRecordsResult.data || []
   const orderIds = Array.from(new Set(allProductionRecords.map((r) => r.order_id).filter(Boolean)))
+
+  const now = new Date()
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+
+  const { data: completedThisMonthRecords, error: completedMonthError } = await supabase
+    .from("production_records")
+    .select("order_id, updated_at, created_at")
+    .in("status", ["completed", "Completed"])
+    .gte("updated_at", monthStart.toISOString())
+
+  if (completedMonthError) return { success: false, error: completedMonthError.message }
+
+  const completedThisMonthOrderIdSet = new Set(
+    (completedThisMonthRecords || []).map((r) => r.order_id).filter(Boolean) as string[]
+  )
 
   // "New Order" orders with zero production records — the untouched backlog.
   const orderIdsWithProduction = new Set(orderIds)
@@ -135,13 +222,24 @@ export async function getProductionQueue(): Promise<
         .range(0, 9999)
     : Promise.resolve({ data: [] as Array<{ id: string; order_id: string; quantity: number; inventory_item_id: string | null; product_id: string | null }>, error: null })
 
-  const [[ordersResult, itemsResult], noProductionItemsResult] = await Promise.all([
+  const fetchTotalsForQueueOrders =
+    orderIds.length > 0
+      ? supabase
+          .from("production_records")
+          .select("order_id, production_type, selected_quantities, status, updated_at, created_at, production_number")
+          .in("order_id", orderIds)
+          .in("status", [...QUEUE_VISIBLE_PRODUCTION_STATUSES, "completed", "Completed"])
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null })
+
+  const [[ordersResult, itemsResult], noProductionItemsResult, totalsResult] = await Promise.all([
     fetchInProduction,
     fetchNoProductionItems,
+    fetchTotalsForQueueOrders,
   ])
 
   if (ordersResult.error) return { success: false, error: ordersResult.error.message }
   if (itemsResult.error) return { success: false, error: itemsResult.error.message }
+  if (totalsResult.error) return { success: false, error: totalsResult.error.message }
 
   const orders = ordersResult.data || []
   const orderItems = itemsResult.data || []
@@ -172,16 +270,7 @@ export async function getProductionQueue(): Promise<
     nameById[p.id] = (p as { name?: string }).name || "Product"
   }
 
-  const recordsByOrderId: Record<
-    string,
-    Array<{
-      production_type: string
-      selected_quantities: Record<string, number> | null
-      status: string
-      updated_at: string | null
-      created_at: string | null
-    }>
-  > = {}
+  const recordsByOrderId: Record<string, QueueRecordRow[]> = {}
   for (const rec of allProductionRecords || []) {
     if (!recordsByOrderId[rec.order_id]) {
       recordsByOrderId[rec.order_id] = []
@@ -192,7 +281,55 @@ export async function getProductionQueue(): Promise<
       status: rec.status || "pending",
       updated_at: rec.updated_at || null,
       created_at: rec.created_at || null,
+      production_number: (rec as { production_number?: string | null }).production_number ?? null,
     })
+  }
+
+  const recordsByOrderIdForTotals: Record<string, QueueRecordRow[]> = {}
+  for (const rec of (totalsResult.data || []) as Array<{
+    order_id: string
+    production_type?: string | null
+    selected_quantities?: Record<string, number> | null
+    status?: string | null
+    updated_at?: string | null
+    created_at?: string | null
+    production_number?: string | null
+  }>) {
+    if (!rec.order_id) continue
+    if (!recordsByOrderIdForTotals[rec.order_id]) {
+      recordsByOrderIdForTotals[rec.order_id] = []
+    }
+    recordsByOrderIdForTotals[rec.order_id].push({
+      production_type: rec.production_type || "full",
+      selected_quantities: rec.selected_quantities ?? null,
+      status: rec.status || "pending",
+      updated_at: rec.updated_at ?? null,
+      created_at: rec.created_at ?? null,
+      production_number: rec.production_number ?? null,
+    })
+  }
+
+  function activeBatchLabelsForLine(
+    records: Array<{
+      production_type: string
+      selected_quantities: Record<string, number> | null
+      production_number: string | null
+    }>,
+    itemId: string
+  ): string[] {
+    const labels = new Set<string>()
+    for (const rec of records) {
+      const pnum = (rec.production_number ?? "").trim()
+      if (!pnum) continue
+      const ptype = (rec.production_type || "full").toLowerCase()
+      if (ptype === "full") {
+        labels.add(pnum)
+      } else {
+        const sq = rec.selected_quantities?.[itemId]
+        if (sq != null && Number(sq) > 0) labels.add(pnum)
+      }
+    }
+    return Array.from(labels).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
   }
 
   const orderMap = new Map(orders.map((o) => [o.id, o]))
@@ -205,29 +342,28 @@ export async function getProductionQueue(): Promise<
     if (!order) continue
 
     const records = recordsByOrderId[item.order_id] || []
-    const hasInProductionRecord = records.some((r) => {
-      const normalized = normalizeProductionStatus(r.status)
-      return normalized === "in production" || normalized === "in progress"
-    })
-    const hasCompletedRecord = records.some((r) => normalizeProductionStatus(r.status) === "completed")
-    let produced = 0
-    for (const rec of records) {
-      const normalizedStatus = normalizeProductionStatus(rec.status)
-      const isCompleted = normalizedStatus === "completed"
-      if (rec.production_type === "full" && isCompleted) {
-        produced += item.quantity
-      } else if (rec.selected_quantities && rec.selected_quantities[item.id] != null) {
-        produced += Number(rec.selected_quantities[item.id]) || 0
-      }
-    }
+    const totalsRecords = recordsByOrderIdForTotals[item.order_id] || []
+    const hasCompletedRecord = totalsRecords.some((r) => normalizeProductionStatus(r.status) === "completed")
+    const produced = producedQtyForLineItem(totalsRecords, item.id, item.quantity)
     const ordered = item.quantity
     const remaining = Math.max(0, ordered - produced)
     const itemName = nameById[item.inventory_item_id || ""] || nameById[item.product_id || ""] || "Product"
     const customerName = (order.customers as { name?: string } | null)?.name ?? "—"
+    const activeBatchLabels = activeBatchLabelsForLine(records, item.id)
+    const queueOrderNumber = order.internal_order_number || order.sales_order_number || item.order_id.slice(0, 8)
+    const hasAllocatingInProductionRecord = records.some((r) => {
+      const normalized = normalizeProductionStatus(r.status)
+      if (normalized !== "in production" && normalized !== "in progress") return false
+      const ptype = (r.production_type || "full").toLowerCase()
+      if (ptype === "full") return true
+      const sq = r.selected_quantities?.[item.id]
+      return sq != null && Number(sq) > 0
+    })
+    const completedBatchLabels = completedBatchLabelsForLine(totalsRecords, item.id)
 
     rows.push({
       orderId: item.order_id,
-      orderNumber: order.internal_order_number || order.sales_order_number || item.order_id.slice(0, 8),
+      orderNumber: queueOrderNumber,
       orderDate: (order as { created_at?: string | null }).created_at ?? null,
       customerName,
       itemId: item.id,
@@ -236,8 +372,12 @@ export async function getProductionQueue(): Promise<
       ordered,
       produced,
       remaining,
-      hasInProductionRecord,
+      hasInProductionRecord: hasAllocatingInProductionRecord,
       hasCompletedRecord,
+      needsBatchClosure: remaining === 0 && hasAllocatingInProductionRecord,
+      activeBatchLabels,
+      activeBatchCount: activeBatchLabels.length,
+      completedBatchLabels,
     })
   }
 
@@ -261,6 +401,10 @@ export async function getProductionQueue(): Promise<
       remaining: item.quantity,
       hasInProductionRecord: false,
       hasCompletedRecord: false,
+      needsBatchClosure: false,
+      activeBatchLabels: [],
+      activeBatchCount: 0,
+      completedBatchLabels: [],
     })
   }
 
@@ -271,9 +415,7 @@ export async function getProductionQueue(): Promise<
     return sum + r.remaining
   }, 0)
 
-  // Compute KPI data inline — no extra DB query needed.
-  const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  // Compute KPI data inline (now/monthStart already set above; completed month uses separate query).
   const delayedThreshold = new Date(now)
   delayedThreshold.setDate(delayedThreshold.getDate() - 5)
 
@@ -281,65 +423,54 @@ export async function getProductionQueue(): Promise<
     hasStarted: boolean
     hasCompleted: boolean
     lastActivityAt: Date | null
-    hasCompletedThisMonth: boolean
   }
   const aggByOrder: Record<string, OrderAgg> = {}
   for (const orderId of orderIds) {
-    aggByOrder[orderId] = { hasStarted: false, hasCompleted: false, lastActivityAt: null, hasCompletedThisMonth: false }
+    aggByOrder[orderId] = { hasStarted: false, hasCompleted: false, lastActivityAt: null }
   }
-  for (const rec of allProductionRecords || []) {
-    const agg = aggByOrder[rec.order_id]
-    if (!agg) continue
-    const normalized = normalizeProductionStatus(rec.status)
-    const isCompleted = normalized === "completed"
-    const isStarted = normalized === "in production" || normalized === "in progress" || isCompleted
-    if (isStarted) agg.hasStarted = true
-    if (isCompleted) agg.hasCompleted = true
-    const activity = new Date(rec.updated_at || rec.created_at || now.toISOString())
-    if (!agg.lastActivityAt || activity > agg.lastActivityAt) agg.lastActivityAt = activity
-    if (isCompleted && activity >= monthStart) agg.hasCompletedThisMonth = true
+  for (const orderId of orderIds) {
+    for (const rec of recordsByOrderIdForTotals[orderId] || []) {
+      const agg = aggByOrder[orderId]
+      if (!agg) continue
+      const normalized = normalizeProductionStatus(rec.status)
+      const isCompleted = normalized === "completed"
+      const isStarted = normalized === "in production" || normalized === "in progress" || isCompleted
+      if (isStarted) agg.hasStarted = true
+      if (isCompleted) agg.hasCompleted = true
+      const activity = new Date(rec.updated_at || rec.created_at || now.toISOString())
+      if (!agg.lastActivityAt || activity > agg.lastActivityAt) agg.lastActivityAt = activity
+    }
   }
 
   // Only include in-production order IDs that have queue rows — KPI counts must match what filter shows.
   const queueOrderIds = Array.from(new Set(orderItems.map((i) => i.order_id).filter((id) => orderMap.has(id))))
   const noProductionQueueOrderIds = Array.from(new Set(noProductionItems.map((i) => i.order_id).filter((id) => noProductionOrderMap.has(id))))
 
-  // "Pending" = in-production orders that still have remaining units to produce.
-  // Using remaining > 0 from actual rows (not hasCompleted) so the count matches
-  // exactly what the user sees when they click the card.
-  const ordersWithRemainingWork = new Set(
-    orderItems
-      .filter((item) => {
-        const records = recordsByOrderId[item.order_id] || []
-        let produced = 0
-        for (const rec of records) {
-          const normalized = normalizeProductionStatus(rec.status)
-          if (rec.production_type === "full" && normalized === "completed") {
-            produced += item.quantity
-          } else if (rec.selected_quantities && rec.selected_quantities[item.id] != null) {
-            produced += Number(rec.selected_quantities[item.id]) || 0
-          }
-        }
-        return Math.max(0, item.quantity - produced) > 0
-      })
-      .map((item) => item.order_id)
+  // "Pending" = in-production orders with either:
+  // - remaining units to produce, OR
+  // - lines awaiting batch closure (0 remaining until DONE on order).
+  // This keeps the Pending KPI aligned with both queue work and closure work.
+  const pendingOrderIds = queueOrderIds.filter((orderId) =>
+    rows.some(
+      (row) =>
+        row.orderId === orderId &&
+        !noProductionOrderIdsSet_raw.has(row.orderId) &&
+        (row.remaining > 0 || !!row.needsBatchClosure)
+    )
   )
-  const pendingOrderIds = queueOrderIds.filter((id) => ordersWithRemainingWork.has(id))
   const delayedOrderIds = queueOrderIds.filter((id) => {
     const a = aggByOrder[id]
     return a?.hasStarted && !a?.hasCompleted && !!a?.lastActivityAt && a.lastActivityAt < delayedThreshold
   })
-  const completedThisMonthOrderIds = queueOrderIds.filter((id) => aggByOrder[id]?.hasCompletedThisMonth)
-
   const kpiData: ProductionKpiData = {
     pendingOrdersCount: pendingOrderIds.length,
     totalUnitsToProduce: totalUnitsRemaining,
     productionDelayedCount: delayedOrderIds.length,
-    completedThisMonthCount: completedThisMonthOrderIds.length,
+    completedThisMonthCount: completedThisMonthOrderIdSet.size,
     noProductionOrdersCount: noProductionQueueOrderIds.length,
     pendingOrderIds,
     delayedOrderIds,
-    completedThisMonthOrderIds,
+    completedThisMonthOrderIds: Array.from(completedThisMonthOrderIdSet),
     noProductionOrderIds: noProductionQueueOrderIds,
   }
 
