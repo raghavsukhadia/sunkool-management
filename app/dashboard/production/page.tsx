@@ -41,6 +41,47 @@ function getRemainingZeroDisplayClass(row: ProductionQueueRow): string {
   return "text-slate-300"
 }
 
+/** Remaining is hidden as "—" only when it is zero; for closure lines we show 0 so it is not mistaken for missing data. */
+function RemainingQuantityDisplay({
+  row,
+  size = "md",
+}: {
+  row: ProductionQueueRow
+  size?: "sm" | "md"
+}) {
+  if (row.remaining > 0) {
+    const pill = size === "sm" ? "text-[11px]" : "text-[11px]"
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center rounded-full px-2.5 py-0.5 font-medium",
+          pill,
+          getRemainingBadgeClass(row)
+        )}
+      >
+        {row.remaining}
+      </span>
+    )
+  }
+  if (row.needsBatchClosure) {
+    const n = size === "sm" ? "text-[11px] font-semibold tabular-nums" : "text-[13px] font-semibold tabular-nums"
+    return (
+      <span
+        className="inline-flex items-baseline gap-1.5 whitespace-nowrap"
+        title="All ordered quantity is allocated on the open batch, so nothing is left to produce until this batch is marked DONE on the order."
+      >
+        <span className={cn(n, getRemainingZeroDisplayClass(row))}>0</span>
+        <span className="text-[10px] font-medium text-slate-400">closure</span>
+      </span>
+    )
+  }
+  return (
+    <span className={cn(size === "sm" ? "text-[11px]" : "text-[13px]", "font-medium", getRemainingZeroDisplayClass(row))}>
+      —
+    </span>
+  )
+}
+
 function formatActiveBatches(row: ProductionQueueRow): string {
   const labels = row.activeBatchLabels ?? []
   return labels.length ? labels.join(", ") : "—"
@@ -982,14 +1023,7 @@ export default function ProductionPage() {
                           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                             <span>Ordered: {row.ordered}</span>
                             <span className="font-semibold text-slate-700">Remaining:</span>
-                            {row.remaining === 0 ? (
-                              <span className={cn("text-[11px] font-medium", getRemainingZeroDisplayClass(row))}>—</span>
-                            ) : (
-                              <span className={cn(
-                                "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
-                                getRemainingBadgeClass(row)
-                              )}>{row.remaining}</span>
-                            )}
+                            <RemainingQuantityDisplay row={row} size="sm" />
                           </div>
                         </div>
                         <Link
@@ -1125,16 +1159,7 @@ export default function ProductionPage() {
                             </td>
                             <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.ordered}</td>
                             <td className="px-4 py-0 text-center">
-                              {row.remaining === 0 ? (
-                                <span className={cn("text-[13px] font-medium", getRemainingZeroDisplayClass(row))}>—</span>
-                              ) : (
-                                <span className={cn(
-                                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
-                                  getRemainingBadgeClass(row)
-                                )}>
-                                  {row.remaining}
-                                </span>
-                              )}
+                              <RemainingQuantityDisplay row={row} />
                             </td>
                             <td className="px-4 py-0 text-center">
                               <Link
