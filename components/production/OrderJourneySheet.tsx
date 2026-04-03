@@ -96,7 +96,7 @@ export function OrderJourneySheet({ open, onOpenChange, row }: OrderJourneySheet
 
   const ordered = row?.ordered ?? 0
   const produced = row?.produced ?? 0
-  const remaining = row?.remaining ?? 0
+  const remainingUntilDone = row?.remainingUntilDone ?? row?.remaining ?? 0
   const progressPercent = ordered > 0 ? Math.min(100, Math.round((produced / ordered) * 100)) : 0
 
   return (
@@ -130,7 +130,7 @@ export function OrderJourneySheet({ open, onOpenChange, row }: OrderJourneySheet
                     <h3 className="mt-2 text-lg font-semibold text-slate-900">{row.itemName}</h3>
                     <p className="mt-1 text-sm text-slate-500">{produced} of {ordered} units produced</p>
                   </div>
-                  <Badge className="bg-white text-slate-700 border-slate-200">Remaining: {remaining}</Badge>
+                  <Badge className="border-slate-200 bg-white text-slate-700">Until DONE: {remainingUntilDone}</Badge>
                 </div>
                 <div className="mt-4">
                   <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200">

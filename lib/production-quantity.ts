@@ -39,3 +39,21 @@ export function producedQtyForLineItem(
     return sum
   }, 0)
 }
+
+/** Produced qty counting only completed batches (excludes in-progress allocation). */
+export function producedQtyForLineItemCompletedOnly(
+  records: ProductionRecordForQty[],
+  itemId: string,
+  lineQuantity: number
+): number {
+  return records.reduce((sum, rec) => {
+    if (normalizeProductionStatus(rec.status) !== "completed") return sum
+    if (rec.selected_quantities && rec.selected_quantities[itemId] != null) {
+      return sum + (Number(rec.selected_quantities[itemId]) || 0)
+    }
+    if ((rec.production_type || "full").toLowerCase() === "full") {
+      return sum + lineQuantity
+    }
+    return sum
+  }, 0)
+}

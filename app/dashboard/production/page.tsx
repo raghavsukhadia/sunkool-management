@@ -27,29 +27,18 @@ import {
 } from "@/app/actions/inventory-health"
 import { OrderJourneySheet } from "@/components/production/OrderJourneySheet"
 
+/** Remaining (until DONE) — uses `remainingUntilDone` from the server. */
+function getRemainingUntilDone(row: ProductionQueueRow): number {
+  return row.remainingUntilDone ?? row.remaining
+}
+
 /** Remaining qty pill: orange/amber for normal backlog; red only for very large remaining. */
 function getRemainingBadgeClass(row: ProductionQueueRow): string {
-  if (row.remaining === 0) return "px-0 text-slate-300"
-  if (row.remaining <= 10) return "bg-amber-100 text-amber-800"
-  if (row.remaining > 200) return "bg-red-100 text-red-700"
+  const n = getRemainingUntilDone(row)
+  if (n === 0) return "bg-slate-100 text-slate-700 border border-slate-200"
+  if (n <= 10) return "bg-amber-100 text-amber-800"
+  if (n > 200) return "bg-red-100 text-red-700"
   return "bg-orange-100 text-orange-800"
-}
-
-/** Exact units left to produce = ordered − produced on in-progress/completed batches (same as order screen). */
-function remainingZeroBadgeClass(row: ProductionQueueRow): string {
-  if (row.needsBatchClosure) return "bg-slate-100 text-slate-700 border border-slate-200"
-  if (!row.hasInProductionRecord) return "bg-emerald-50 text-emerald-800 border border-emerald-100"
-  return "bg-slate-50 text-slate-500 border border-slate-100"
-}
-
-function remainingZeroTitle(row: ProductionQueueRow): string {
-  if (row.needsBatchClosure) {
-    return "0 units left to produce (fully allocated on an open batch — mark the batch DONE on the order when finished)."
-  }
-  if (!row.hasInProductionRecord) {
-    return "0 units left to produce (line complete for production purposes)."
-  }
-  return "0 units left to produce."
 }
 
 function RemainingQuantityDisplay({
@@ -60,35 +49,18 @@ function RemainingQuantityDisplay({
   size?: "sm" | "md"
 }) {
   const pill = size === "sm" ? "text-[11px]" : "text-[11px]"
-  const numCls = size === "sm" ? "text-[11px]" : "text-[13px]"
-  const n = row.remaining
-
-  if (n > 0) {
-    return (
-      <span
-        className={cn(
-          "inline-flex min-w-[2rem] items-center justify-center rounded-full px-2.5 py-0.5 font-semibold tabular-nums",
-          pill,
-          getRemainingBadgeClass(row)
-        )}
-        title="Ordered − Produced. Produced includes quantities on in-progress and completed batches, so this can be 0 while the batch is still open."
-      >
-        {n}
-      </span>
-    )
-  }
+  const n = getRemainingUntilDone(row)
 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-semibold tabular-nums",
-        numCls,
-        remainingZeroBadgeClass(row)
+        "inline-flex min-w-[2rem] items-center justify-center rounded-full px-2.5 py-0.5 font-semibold tabular-nums",
+        pill,
+        getRemainingBadgeClass(row)
       )}
-      title={remainingZeroTitle(row)}
+      title="Units left until production is marked DONE on completed batches: ordered minus produced on completed batches only (in-progress allocation does not reduce this)."
     >
-      <span>0</span>
-      <span className="text-[10px] font-medium normal-case text-slate-500">of {row.ordered} ordered</span>
+      {n}
     </span>
   )
 }
@@ -110,7 +82,7 @@ function getQueueOrderDisplayLabel(row: ProductionQueueRow): string {
 }
 
 function getQueueOrderNumberClass(row: ProductionQueueRow): string {
-  if (row.remaining === 0 && !row.needsBatchClosure) {
+  if (getRemainingUntilDone(row) === 0 && !row.needsBatchClosure) {
     return "text-slate-600 hover:text-slate-800"
   }
   return "text-orange-500 hover:text-orange-600"
@@ -251,7 +223,7 @@ export default function ProductionPage() {
   }, [queueItemSearch, uniqueQueueItems])
 
   const getQueueRowStatus = (row: ProductionQueueRow): QueueStatusFilter => {
-    if (row.remaining === 0 && !row.needsBatchClosure) return "Completed"
+    if (getRemainingUntilDone(row) === 0 && !row.needsBatchClosure) return "Completed"
     if (row.hasInProductionRecord || row.produced > 0) return "In Progress"
     return "Pending"
   }
@@ -352,8 +324,13 @@ export default function ProductionPage() {
         }
 
         if (kpiFilter !== "none" && kpiFilter !== "noProduction") {
-          if (kpiFilter === "pending" && (!pendingOrderIdsSet.has(row.orderId) || row.remaining <= 0)) return false
-          if (kpiFilter === "units" && row.remaining <= 0) return false
+          if (
+            kpiFilter === "pending" &&
+            (!pendingOrderIdsSet.has(row.orderId) || (getRemainingUntilDone(row) <= 0 && !row.needsBatchClosure))
+          ) {
+            return false
+          }
+          if (kpiFilter === "units" && getRemainingUntilDone(row) <= 0) return false
           if (kpiFilter === "delayed" && !delayedOrderIdsSet.has(row.orderId)) return false
           if (kpiFilter === "completedMonth" && !completedMonthOrderIdsSet.has(row.orderId)) return false
         }
@@ -391,7 +368,7 @@ export default function ProductionPage() {
         case "produced":
           return row.produced
         case "remaining":
-          return row.remaining
+          return getRemainingUntilDone(row)
       }
     }
     rows.sort((a, b) => {
@@ -673,7 +650,7 @@ export default function ProductionPage() {
         "Item": row.itemName,
         "Ordered Qty": row.ordered,
         "Produced Qty": row.produced,
-        "Remaining Qty": row.remaining,
+        "Remaining (until DONE)": getRemainingUntilDone(row),
         "Status": status,
         "Active batch(es)": formatActiveBatches(row),
         "Batch count": row.activeBatchCount ?? row.activeBatchLabels?.length ?? 0,
@@ -856,7 +833,8 @@ export default function ProductionPage() {
               <div>
                 <CardTitle className="text-sm font-semibold text-slate-900">Production queue – complete orders, item-wise</CardTitle>
                 <p className="mt-1 text-xs text-slate-500">
-                  Remaining is ordered minus produced. Produced counts in-progress and completed batches, so a line on an open batch can show 0 remaining until that batch is marked DONE on the order.
+                  <span className="font-medium text-slate-600">Remaining</span> is units left until batches are marked DONE: ordered minus produced on{" "}
+                  <span className="font-medium text-slate-600">completed</span> batches only. The Produced column still includes in-progress allocation.
                 </p>
               </div>
 
@@ -1137,7 +1115,7 @@ export default function ProductionPage() {
                           <button
                             type="button"
                             onClick={() => handleSort("remaining")}
-                            title="Ordered − Produced. If 0 while a batch is still open, the full line quantity is already allocated to that batch (not yet marked DONE)."
+                            title="Ordered minus produced on completed batches only. In-progress batches do not reduce this until marked DONE."
                             className="mx-auto inline-flex items-center gap-1 hover:text-slate-700"
                           >
                             Remaining

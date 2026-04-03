@@ -1,7 +1,11 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
-import { normalizeProductionStatus, producedQtyForLineItem } from "@/lib/production-quantity"
+import {
+  normalizeProductionStatus,
+  producedQtyForLineItem,
+  producedQtyForLineItemCompletedOnly,
+} from "@/lib/production-quantity"
 
 const QUEUE_VISIBLE_PRODUCTION_STATUSES = [
   "in_production",
@@ -63,7 +67,10 @@ export type ProductionQueueRow = {
   itemName: string
   ordered: number
   produced: number
+  /** Allocation balance: ordered − produced (in-progress + completed). Used for batch-closure detection. */
   remaining: number
+  /** Units left until production is marked Done: ordered − produced on completed batches only (excludes in-progress allocation). */
+  remainingUntilDone: number
   hasInProductionRecord: boolean
   hasCompletedRecord: boolean
   /** True when quantities are fully allocated on an open batch but the record is not marked completed yet (DONE on order). */
@@ -317,6 +324,8 @@ export async function getProductionQueue(): Promise<
     const produced = producedQtyForLineItem(totalsRecords, item.id, item.quantity)
     const ordered = item.quantity
     const remaining = Math.max(0, ordered - produced)
+    const producedCompleted = producedQtyForLineItemCompletedOnly(totalsRecords, item.id, item.quantity)
+    const remainingUntilDone = Math.max(0, ordered - producedCompleted)
     const itemName = nameById[item.inventory_item_id || ""] || nameById[item.product_id || ""] || "Product"
     const customerName = (order.customers as { name?: string } | null)?.name ?? "—"
     const activeBatchLabels = activeBatchLabelsForLine(records, item.id)
@@ -342,6 +351,7 @@ export async function getProductionQueue(): Promise<
       ordered,
       produced,
       remaining,
+      remainingUntilDone,
       hasInProductionRecord: hasAllocatingInProductionRecord,
       hasCompletedRecord,
       needsBatchClosure: remaining === 0 && hasAllocatingInProductionRecord,
@@ -369,6 +379,7 @@ export async function getProductionQueue(): Promise<
       ordered: item.quantity,
       produced: 0,
       remaining: item.quantity,
+      remainingUntilDone: item.quantity,
       hasInProductionRecord: false,
       hasCompletedRecord: false,
       needsBatchClosure: false,
@@ -382,7 +393,7 @@ export async function getProductionQueue(): Promise<
   const noProductionOrderIdsSet_raw = new Set(noProductionOrderIds_raw)
   const totalUnitsRemaining = rows.reduce((sum, r) => {
     if (noProductionOrderIdsSet_raw.has(r.orderId)) return sum
-    return sum + r.remaining
+    return sum + r.remainingUntilDone
   }, 0)
 
   // Compute KPI data inline (now/monthStart already set above; completed month uses separate query).
@@ -425,7 +436,7 @@ export async function getProductionQueue(): Promise<
       (row) =>
         row.orderId === orderId &&
         !noProductionOrderIdsSet_raw.has(row.orderId) &&
-        (row.remaining > 0 || !!row.needsBatchClosure)
+        (row.remainingUntilDone > 0 || !!row.needsBatchClosure)
     )
   )
   const delayedOrderIds = queueOrderIds.filter((id) => {
