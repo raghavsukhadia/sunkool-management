@@ -335,7 +335,7 @@ export function generateProductionChecklistPDF(
     xPos += COLS.INDEX
     doc.text('MAIN ITEM', xPos + 2, currentY + 5.5)
     xPos += COLS.MAIN
-    doc.text('SUB ITEM', xPos + 2, currentY + 5.5)
+    doc.text('SUB ITEM / QTY', xPos + 2, currentY + 5.5)
     xPos += COLS.SUB
     doc.text('ORDERED', xPos + COLS.ORDERED / 2, currentY + 5.5, { align: 'center' })
     xPos += COLS.ORDERED
@@ -492,16 +492,18 @@ export function generateProductionChecklistPDF(
         const subLines = doc.splitTextToSize(row.subName, COLS.SUB - 4)
         doc.text(subLines[0], x + 2, currentY + 5.5)
       } else {
-        doc.setTextColor(COLORS.GRAY_TEXT[0], COLORS.GRAY_TEXT[1], COLORS.GRAY_TEXT[2])
-        doc.setFontSize(8)
-        doc.text('-', x + COLS.SUB / 2, currentY + 5.5, { align: 'center' })
         doc.setTextColor(COLORS.DARK_TEXT[0], COLORS.DARK_TEXT[1], COLORS.DARK_TEXT[2])
+        doc.setFontSize(9)
+        doc.setFont('helvetica', 'bold')
+        doc.text(String(row.qty), x + COLS.SUB / 2, currentY + 5.5, { align: 'center' })
+        doc.setFont('helvetica', 'normal')
       }
 
       x += COLS.SUB
-      doc.setFont('helvetica', 'normal')
       doc.setFontSize(9)
+      doc.setFont('helvetica', 'bold')
       doc.text(String(row.qty), x + COLS.ORDERED / 2, currentY + 5.5, { align: 'center' })
+      doc.setFont('helvetica', 'normal')
 
       x += COLS.ORDERED
       doc.setDrawColor(180, 180, 180)

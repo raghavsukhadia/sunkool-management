@@ -81,13 +81,14 @@ function RemainingQuantityDisplay({
   return (
     <span
       className={cn(
-        "inline-flex min-w-[2rem] items-center justify-center rounded-full px-2.5 py-0.5 font-semibold tabular-nums",
+        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-semibold tabular-nums",
         numCls,
         remainingZeroBadgeClass(row)
       )}
       title={remainingZeroTitle(row)}
     >
-      0
+      <span>0</span>
+      <span className="text-[10px] font-medium normal-case text-slate-500">of {row.ordered} ordered</span>
     </span>
   )
 }
