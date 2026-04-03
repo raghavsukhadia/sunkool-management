@@ -32,6 +32,12 @@ function getRemainingUntilDone(row: ProductionQueueRow): number {
   return row.remainingUntilDone ?? row.remaining
 }
 
+/** Produced for display = Ordered − Remaining (until DONE); matches completed batches only. */
+function getProducedForDisplay(row: ProductionQueueRow): number {
+  if (row.producedCompleted != null) return row.producedCompleted
+  return Math.max(0, row.ordered - getRemainingUntilDone(row))
+}
+
 /** Remaining qty pill: orange/amber for normal backlog; red only for very large remaining. */
 function getRemainingBadgeClass(row: ProductionQueueRow): string {
   const n = getRemainingUntilDone(row)
@@ -366,7 +372,7 @@ export default function ProductionPage() {
         case "ordered":
           return row.ordered
         case "produced":
-          return row.produced
+          return getProducedForDisplay(row)
         case "remaining":
           return getRemainingUntilDone(row)
       }
@@ -649,7 +655,7 @@ export default function ProductionPage() {
         "Customer": row.customerName,
         "Item": row.itemName,
         "Ordered Qty": row.ordered,
-        "Produced Qty": row.produced,
+        "Produced Qty": getProducedForDisplay(row),
         "Remaining (until DONE)": getRemainingUntilDone(row),
         "Status": status,
         "Active batch(es)": formatActiveBatches(row),
@@ -834,7 +840,7 @@ export default function ProductionPage() {
                 <CardTitle className="text-sm font-semibold text-slate-900">Production queue – complete orders, item-wise</CardTitle>
                 <p className="mt-1 text-xs text-slate-500">
                   <span className="font-medium text-slate-600">Remaining</span> is units left until batches are marked DONE: ordered minus produced on{" "}
-                  <span className="font-medium text-slate-600">completed</span> batches only. The Produced column still includes in-progress allocation.
+                  <span className="font-medium text-slate-600">completed</span> batches only. Produced = Ordered − Remaining (until DONE).
                 </p>
               </div>
 
@@ -1017,7 +1023,7 @@ export default function ProductionPage() {
                           </div>
                           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                             <span>Ordered: {row.ordered}</span>
-                            <span>Produced: {row.produced}</span>
+                            <span>Produced: {getProducedForDisplay(row)}</span>
                             <span className="font-semibold text-slate-700">Remaining:</span>
                             <RemainingQuantityDisplay row={row} size="sm" />
                           </div>
@@ -1100,7 +1106,7 @@ export default function ProductionPage() {
                           <button
                             type="button"
                             onClick={() => handleSort("produced")}
-                            title="Quantity already allocated on in-progress or completed production batches for this line (partial selections or full line per batch rules)."
+                            title="Produced on completed batches = Ordered − Remaining (until DONE)."
                             className="mx-auto inline-flex items-center gap-1 hover:text-slate-700"
                           >
                             Produced
@@ -1180,9 +1186,9 @@ export default function ProductionPage() {
                             <td className="px-4 py-0 text-center text-[13px] font-medium text-slate-900">{row.ordered}</td>
                             <td
                               className="px-4 py-0 text-center text-[13px] font-medium tabular-nums text-slate-700"
-                              title="Allocated on production batches (in progress + completed) for this line."
+                              title="Completed batches only: Ordered − Remaining (until DONE)."
                             >
-                              {row.produced}
+                              {getProducedForDisplay(row)}
                             </td>
                             <td className="px-4 py-0 text-center">
                               <RemainingQuantityDisplay row={row} />

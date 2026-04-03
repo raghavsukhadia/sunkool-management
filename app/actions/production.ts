@@ -66,7 +66,10 @@ export type ProductionQueueRow = {
   inventoryItemId?: string
   itemName: string
   ordered: number
+  /** Allocated on in-progress + completed batches (internal; batch-closure uses `remaining`). */
   produced: number
+  /** Produced on completed batches only; equals Ordered − Remaining (until DONE). */
+  producedCompleted: number
   /** Allocation balance: ordered − produced (in-progress + completed). Used for batch-closure detection. */
   remaining: number
   /** Units left until production is marked Done: ordered − produced on completed batches only (excludes in-progress allocation). */
@@ -350,6 +353,7 @@ export async function getProductionQueue(): Promise<
       itemName,
       ordered,
       produced,
+      producedCompleted,
       remaining,
       remainingUntilDone,
       hasInProductionRecord: hasAllocatingInProductionRecord,
@@ -378,6 +382,7 @@ export async function getProductionQueue(): Promise<
       itemName,
       ordered: item.quantity,
       produced: 0,
+      producedCompleted: 0,
       remaining: item.quantity,
       remainingUntilDone: item.quantity,
       hasInProductionRecord: false,

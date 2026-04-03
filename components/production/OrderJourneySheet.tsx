@@ -95,9 +95,12 @@ export function OrderJourneySheet({ open, onOpenChange, row }: OrderJourneySheet
   }, [open, row])
 
   const ordered = row?.ordered ?? 0
-  const produced = row?.produced ?? 0
   const remainingUntilDone = row?.remainingUntilDone ?? row?.remaining ?? 0
-  const progressPercent = ordered > 0 ? Math.min(100, Math.round((produced / ordered) * 100)) : 0
+  const producedCompleted =
+    row?.producedCompleted != null
+      ? row.producedCompleted
+      : Math.max(0, ordered - remainingUntilDone)
+  const progressPercent = ordered > 0 ? Math.min(100, Math.round((producedCompleted / ordered) * 100)) : 0
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -128,7 +131,9 @@ export function OrderJourneySheet({ open, onOpenChange, row }: OrderJourneySheet
                   <div>
                     <p className="text-xs font-medium uppercase tracking-[0.08em] text-slate-400">Selected item</p>
                     <h3 className="mt-2 text-lg font-semibold text-slate-900">{row.itemName}</h3>
-                    <p className="mt-1 text-sm text-slate-500">{produced} of {ordered} units produced</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {producedCompleted} of {ordered} units produced (completed batches)
+                    </p>
                   </div>
                   <Badge className="border-slate-200 bg-white text-slate-700">Until DONE: {remainingUntilDone}</Badge>
                 </div>
