@@ -82,6 +82,7 @@ import {
   CreditCard,
   Receipt,
 } from "lucide-react"
+import { producedQtyForLineItem } from "@/lib/production-quantity"
 
 interface SubItem {
   id: string
@@ -261,12 +262,7 @@ export default function OrderDetailsPage() {
     let productionRemaining = 0
     let shipmentItemsRemaining = 0
     items.forEach(item => {
-      const producedQty = (productionRecords || []).reduce((sum, record) => {
-        if (record.status !== "in_production" && record.status !== "completed") return sum
-        if (record.selected_quantities?.[item.id]) return sum + (record.selected_quantities[item.id] as number)
-        if (record.production_type === "full") return item.quantity
-        return sum
-      }, 0)
+      const producedQty = producedQtyForLineItem(productionRecords || [], item.id, item.quantity)
       if (item.quantity - producedQty > 0) productionRemaining += 1
       const dispatchedQty = dispatches.reduce((sum, d) => {
         const q = d.dispatch_items?.reduce((s: number, di: any) => {
@@ -741,14 +737,7 @@ export default function OrderDetailsPage() {
         order.items.forEach((item) => {
           // Calculate produced quantity up to now for this item.
           // Pending records should not reduce remaining until work is started.
-          const producedQty = productionRecords.reduce((sum, record) => {
-            if (record.status !== "in_production" && record.status !== "completed") return sum
-            if (record.selected_quantities && record.selected_quantities[item.id]) {
-              return sum + (record.selected_quantities[item.id] as number)
-            }
-            if (record.production_type === "full") return item.quantity
-            return sum
-          }, 0)
+          const producedQty = producedQtyForLineItem(productionRecords, item.id, item.quantity)
 
           const remainingQty = Math.max(0, item.quantity - producedQty)
 
@@ -1987,19 +1976,7 @@ export default function OrderDetailsPage() {
                         const srNo = inventoryItem?.sr_no
 
                         // Calculate produced quantity from started/completed production records only.
-                        const producedQty = productionRecords.reduce((sum, record) => {
-                          if (record.status !== "in_production" && record.status !== "completed") {
-                            return sum
-                          }
-                          if (record.selected_quantities && record.selected_quantities[item.id]) {
-                            return sum + (record.selected_quantities[item.id] as number)
-                          }
-                          // For full production, use the full item quantity
-                          if (record.production_type === "full") {
-                            return item.quantity
-                          }
-                          return sum
-                        }, 0)
+                        const producedQty = producedQtyForLineItem(productionRecords, item.id, item.quantity)
 
                         const remainingQty = Math.max(0, item.quantity - producedQty)
                         const isComplete = remainingQty <= 0

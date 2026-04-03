@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { normalizeProductionStatus, producedQtyForLineItem } from "@/lib/production-quantity"
 
 const QUEUE_VISIBLE_PRODUCTION_STATUSES = [
   "in_production",
@@ -14,37 +15,6 @@ const KPI_PRODUCTION_STATUSES = [
   "completed",
   "Completed",
 ] as const
-
-function normalizeProductionStatus(status: string | null | undefined): string {
-  return (status ?? "").trim().toLowerCase().replace(/[_\s]+/g, " ")
-}
-
-/** Same statuses as order detail produced math: in progress + completed. */
-function recordCountsTowardTotals(status: string): boolean {
-  const n = normalizeProductionStatus(status)
-  return n === "in production" || n === "in progress" || n === "completed"
-}
-
-/**
- * Produced qty for one line — aligned with `app/dashboard/orders/[id]/page.tsx`
- * (partial sums from selected_quantities; full batch adds full line qty when no per-line qty).
- */
-function producedQtyForLineItem(
-  records: Array<{ production_type: string; selected_quantities: Record<string, number> | null; status: string }>,
-  itemId: string,
-  lineQuantity: number
-): number {
-  return records.reduce((sum, rec) => {
-    if (!recordCountsTowardTotals(rec.status)) return sum
-    if (rec.selected_quantities && rec.selected_quantities[itemId]) {
-      return sum + (Number(rec.selected_quantities[itemId]) || 0)
-    }
-    if ((rec.production_type || "full").toLowerCase() === "full") {
-      return sum + lineQuantity
-    }
-    return sum
-  }, 0)
-}
 
 type QueueRecordRow = {
   production_type: string
