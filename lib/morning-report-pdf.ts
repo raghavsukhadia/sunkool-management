@@ -1,513 +1,326 @@
+/**
+ * Morning Production Report PDF
+ *
+ * Mirrors the Production Queue Excel export exactly:
+ *   Columns : # | Order # | Order Date | Customer | Item | Active Batch |
+ *             Ordered | Produced | RP | Remaining | Status
+ *   Status  : "In Progress" or "Pending"  (same as getQueueRowStatus in the app)
+ *   Data    : Produced  = row.producedCompleted    (= getProducedForDisplay)
+ *             RP        = produced − producedCompleted (= getRequestedProduction)
+ *             Remaining = row.remainingUntilDone   (= getRemainingUntilDone)
+ */
 import jsPDF from 'jspdf'
 import type { ProductionQueueRow } from '@/app/actions/production'
 
-// --- Colors ---
-const ORANGE: [number, number, number] = [234, 88, 12]
-const SLATE: [number, number, number] = [30, 41, 59]
-const GRAY: [number, number, number] = [100, 116, 139]
-const LIGHT_BG: [number, number, number] = [248, 250, 252]
-const BORDER: [number, number, number] = [226, 232, 240]
-const RED: [number, number, number] = [220, 38, 38]
-const AMBER: [number, number, number] = [217, 119, 6]
-const GREEN: [number, number, number] = [22, 163, 74]
-const WHITE: [number, number, number] = [255, 255, 255]
-const ORANGE_LIGHT: [number, number, number] = [255, 237, 213]
-const RED_LIGHT: [number, number, number] = [254, 226, 226]
-const GREEN_LIGHT: [number, number, number] = [220, 252, 231]
+// ─── Palette — matches Excel export (xlsx-js-style colours in production page) ──
+const BRAND_DARK:  [number,number,number] = [ 30,  41,  59]   // #1E293B slate-900
+const BRAND_ORA:   [number,number,number] = [234,  88,  12]   // #EA580C orange-600
+const ORA_50:      [number,number,number] = [255, 247, 237]   // #FFF7ED orange-50 (alt row)
+const WHITE:       [number,number,number] = [255, 255, 255]
+const BORDER:      [number,number,number] = [226, 232, 240]   // #E2E8F0 slate-200
+const TEXT_DARK:   [number,number,number] = [ 15,  23,  42]   // #0F172A slate-950
+const TEXT_MUTED:  [number,number,number] = [100, 116, 139]   // #64748B slate-500
+// Status badges
+const BLUE_FG:     [number,number,number] = [ 30,  64, 175]   // #1E40AF blue-800
+const BLUE_BG:     [number,number,number] = [219, 234, 254]   // #DBEAFE blue-100
+const AMBER_FG:    [number,number,number] = [146,  64,  14]   // #92400E amber-800
+const AMBER_BG:    [number,number,number] = [254, 243, 199]   // #FEF3C7 amber-100
+// Remaining colours (same thresholds as sRemaining in the app)
+const REM_GREEN:   [number,number,number] = [ 22, 101,  52]   // #166534 green-800
+const REM_AMBER:   [number,number,number] = [146,  64,  14]   // #92400E amber-800
+const REM_RED:     [number,number,number] = [153,  27,  27]   // #991B1B red-800
 
-// --- Aggregated order row ---
-type OrderSummaryRow = {
-  orderId: string
-  orderNumber: string
-  customerName: string
-  itemCount: number
-  itemNames: string
-  ordered: number
-  produced: number
-  remaining: number
-  status: string
-  ageDays: number
-  orderDate: string | null
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+/** Mirrors getQueueRowStatus — exactly two values used in the app */
+function queueStatus(row: ProductionQueueRow): 'In Progress' | 'Pending' {
+  if (row.hasInProductionRecord || row.produced > 0) return 'In Progress'
+  return 'Pending'
 }
 
-function daysSince(dateStr: string | null): number {
-  if (!dateStr) return 0
-  const d = new Date(dateStr)
-  const now = new Date()
-  const diff = now.getTime() - d.getTime()
-  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
+function remColor(val: number): [number,number,number] {
+  if (val === 0)   return REM_GREEN
+  if (val > 100)   return REM_RED
+  if (val > 20)    return REM_AMBER
+  return TEXT_DARK
 }
 
-function statusLabel(row: OrderSummaryRow): string {
-  if (row.status === 'needs_closure') return 'Needs Closure'
-  if (row.status === 'in_progress') return 'In Progress'
-  return 'Not Started'
+function fmtDate(d: string | null): string {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-function aggregateRows(rows: ProductionQueueRow[]): OrderSummaryRow[] {
-  const map = new Map<string, OrderSummaryRow>()
-
-  for (const r of rows) {
-    if (map.has(r.orderId)) {
-      const existing = map.get(r.orderId)!
-      existing.ordered += r.ordered
-      existing.produced += r.producedCompleted
-      existing.remaining += r.remainingUntilDone
-      existing.itemCount += 1
-      if (!existing.itemNames.includes(r.itemName)) {
-        existing.itemNames = existing.itemNames
-          ? `${existing.itemNames}, ${r.itemName}`
-          : r.itemName
-      }
-      // Upgrade status
-      if (r.needsBatchClosure && existing.status !== 'in_progress') {
-        existing.status = 'needs_closure'
-      } else if (r.hasInProductionRecord && existing.status === 'not_started') {
-        existing.status = 'in_progress'
-      }
-    } else {
-      let status = 'not_started'
-      if (r.needsBatchClosure) status = 'needs_closure'
-      else if (r.hasInProductionRecord) status = 'in_progress'
-
-      map.set(r.orderId, {
-        orderId: r.orderId,
-        orderNumber: r.orderNumber,
-        customerName: r.customerName,
-        itemCount: 1,
-        itemNames: r.itemName,
-        ordered: r.ordered,
-        produced: r.producedCompleted,
-        remaining: r.remainingUntilDone,
-        status,
-        ageDays: daysSince(r.orderDate),
-        orderDate: r.orderDate,
-      })
-    }
-  }
-
-  // Sort: not_started + oldest first, then in_progress, then needs_closure
-  return Array.from(map.values()).sort((a, b) => {
-    const priorityOf = (s: string) => (s === 'not_started' ? 0 : s === 'in_progress' ? 1 : 2)
-    const pa = priorityOf(a.status)
-    const pb = priorityOf(b.status)
-    if (pa !== pb) return pa - pb
-    return b.ageDays - a.ageDays
-  })
+function trunc(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + '\u2026' : s
 }
 
+// ─── PDF generator ────────────────────────────────────────────────────────────
 export function generateMorningReportPDF(
   rows: ProductionQueueRow[],
   logoDataUrl?: string
 ): { blob: Blob; filename: string } {
   const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' })
+  const PW  = doc.internal.pageSize.getWidth()   // 210 mm
+  const PH  = doc.internal.pageSize.getHeight()  // 297 mm
+  const M   = 12   // left / right margin
+  const CW  = PW - M * 2                         // 186 mm content width
 
-  const MARGIN = 14
-  const PAGE_WIDTH = doc.internal.pageSize.getWidth()
-  const PAGE_HEIGHT = doc.internal.pageSize.getHeight()
-  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2
-
-  const orders = aggregateRows(rows)
-  const now = new Date()
+  const now     = new Date()
   const dateStr = now.toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'Asia/Kolkata',
+    day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata',
   })
   const timeStr = now.toLocaleTimeString('en-IN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'Asia/Kolkata',
-    hour12: true,
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata', hour12: true,
   })
 
-  const totalOrders = orders.length
-  const totalUnits = orders.reduce((s, o) => s + o.remaining, 0)
-  const notStarted = orders.filter((o) => o.status === 'not_started').length
-  const delayed = orders.filter((o) => o.ageDays > 5).length
+  // ── Sort: In Progress first, then Pending; within each group by orderNumber ─
+  const sorted = [...rows].sort((a, b) => {
+    const sa = queueStatus(a) === 'In Progress' ? 0 : 1
+    const sb = queueStatus(b) === 'In Progress' ? 0 : 1
+    if (sa !== sb) return sa - sb
+    return a.orderNumber.localeCompare(b.orderNumber, undefined, { numeric: true, sensitivity: 'base' })
+  })
 
-  let y = 0
+  // ── Totals ────────────────────────────────────────────────────────────────
+  const totalOrdered   = sorted.reduce((s, r) => s + r.ordered, 0)
+  const totalRemaining = sorted.reduce((s, r) => s + r.remainingUntilDone, 0)
+  const inProgressCnt  = sorted.filter(r => queueStatus(r) === 'In Progress').length
+  const pendingCnt     = sorted.filter(r => queueStatus(r) === 'Pending').length
+  const orderCount     = new Set(sorted.map(r => r.orderId)).size
 
-  // ---- Helpers ----
-  const setFont = (style: 'normal' | 'bold' | 'italic' | 'bolditalic', size: number) => {
-    doc.setFont('helvetica', style)
-    doc.setFontSize(size)
+  // ── Drawing helpers ───────────────────────────────────────────────────────
+  let y    = 0
+  let page = 1
+
+  const sf = (style: 'normal' | 'bold', size: number) => {
+    doc.setFont('helvetica', style); doc.setFontSize(size)
   }
-  const setColor = (rgb: [number, number, number]) => {
-    doc.setTextColor(rgb[0], rgb[1], rgb[2])
-  }
-  const fillRect = (x: number, ry: number, w: number, h: number, rgb: [number, number, number]) => {
-    doc.setFillColor(rgb[0], rgb[1], rgb[2])
-    doc.rect(x, ry, w, h, 'F')
-  }
-  const strokeRect = (
-    x: number,
-    ry: number,
-    w: number,
-    h: number,
-    rgb: [number, number, number],
-    lw = 0.3
-  ) => {
-    doc.setDrawColor(rgb[0], rgb[1], rgb[2])
-    doc.setLineWidth(lw)
-    doc.rect(x, ry, w, h, 'S')
+  const sc = (rgb: [number,number,number]) => doc.setTextColor(rgb[0], rgb[1], rgb[2])
+  const fr = (x: number, ry: number, w: number, h: number, rgb: [number,number,number]) => {
+    doc.setFillColor(rgb[0], rgb[1], rgb[2]); doc.rect(x, ry, w, h, 'F')
   }
 
-  // ---- Draw page header ----
-  const drawPageHeader = () => {
-    y = 12
+  // ── Page header ───────────────────────────────────────────────────────────
+  const drawHeader = () => {
+    y = 0
+    // Dark slate band
+    fr(0, 0, PW, 21, BRAND_DARK)
 
-    // Logo or text brand
     if (logoDataUrl) {
-      doc.addImage(logoDataUrl, 'PNG', MARGIN, y - 7, 32, 11)
+      fr(M, 3, 44, 15, WHITE)
+      doc.addImage(logoDataUrl, 'PNG', M + 1, 3.5, 42, 14)
     } else {
-      setFont('bolditalic', 22)
-      setColor(ORANGE)
-      doc.text('Sun', MARGIN, y + 1)
-      const sunW = doc.getTextWidth('Sun')
-      setColor(SLATE)
-      doc.text('kool', MARGIN + sunW - 1, y + 1)
+      sf('bold', 18); sc(BRAND_ORA)
+      doc.text('SUNKOOL', M, 14)
+      sf('normal', 6); sc([148, 163, 184])
+      doc.text('PRODUCTION MANAGEMENT', M, 18.5)
     }
 
-    // Right: company name + report title
-    setFont('bold', 9)
-    setColor(SLATE)
-    doc.text('SUN KOOL SOLUTION', PAGE_WIDTH - MARGIN, y - 4, { align: 'right' })
-    setFont('normal', 7.5)
-    setColor(GRAY)
-    doc.text('Morning Production Report', PAGE_WIDTH - MARGIN, y, { align: 'right' })
-    doc.text(`${dateStr}  •  Generated at ${timeStr} IST`, PAGE_WIDTH - MARGIN, y + 4.5, {
-      align: 'right',
-    })
+    sf('bold', 8.5); sc(WHITE)
+    doc.text('MORNING PRODUCTION REPORT', PW - M, 10, { align: 'right' })
+    sf('normal', 6.5); sc([148, 163, 184])
+    doc.text(`${dateStr}  |  ${timeStr} IST`, PW - M, 15.5, { align: 'right' })
 
-    y += 8
-    doc.setDrawColor(ORANGE[0], ORANGE[1], ORANGE[2])
-    doc.setLineWidth(0.7)
-    doc.line(MARGIN, y, PAGE_WIDTH - MARGIN, y)
-    y += 5
+    // Orange accent line
+    fr(0, 21, PW, 2.5, BRAND_ORA)
+    y = 27
   }
 
-  // ---- PAGE 1 ----
-  drawPageHeader()
-
-  // Report title
-  setFont('bold', 14)
-  setColor(SLATE)
-  doc.text('Pending Production Orders', MARGIN, y + 1)
-  y += 8
-
-  // Summary boxes
-  const summaryItems = [
-    { label: 'Total Pending Orders', value: String(totalOrders), color: ORANGE },
-    { label: 'Total Units Remaining', value: String(totalUnits), color: SLATE },
-    { label: 'Not Started', value: String(notStarted), color: RED },
-    { label: 'Production Delayed (>5d)', value: String(delayed), color: AMBER },
-  ]
-  const boxW = (CONTENT_WIDTH - 9) / 4
-  summaryItems.forEach((item, i) => {
-    const bx = MARGIN + i * (boxW + 3)
-    fillRect(bx, y, boxW, 18, LIGHT_BG)
-    strokeRect(bx, y, boxW, 18, BORDER)
-    // top accent bar
-    fillRect(bx, y, boxW, 2, item.color)
-    setFont('bold', 14)
-    setColor(item.color)
-    doc.text(item.value, bx + boxW / 2, y + 11, { align: 'center' })
-    setFont('normal', 6.5)
-    setColor(GRAY)
-    doc.text(item.label, bx + boxW / 2, y + 16, { align: 'center' })
-  })
-  y += 24
-
-  // Table header
-  const COL = {
-    NUM: 8,
-    ORDER: 22,
-    CUSTOMER: 38,
-    ITEMS: 35,
-    ORDERED: 16,
-    PRODUCED: 16,
-    REMAINING: 18,
-    STATUS: 22,
-    AGE: 0, // fill remaining
+  // ── Page footer ───────────────────────────────────────────────────────────
+  const drawFooter = () => {
+    doc.setDrawColor(BORDER[0], BORDER[1], BORDER[2])
+    doc.setLineWidth(0.25)
+    doc.line(M, PH - 10, PW - M, PH - 10)
+    sf('normal', 6); sc(TEXT_MUTED)
+    doc.text('Sunkool Production Management System  |  Confidential', M, PH - 6.5)
+    doc.text(`Page ${page}`, PW - M, PH - 6.5, { align: 'right' })
   }
-  COL.AGE = CONTENT_WIDTH - Object.values(COL).reduce((a, b) => a + b, 0)
+
+  const addPage = () => {
+    drawFooter()
+    doc.addPage(); page++
+    drawHeader()
+  }
+  const checkBreak = (needed: number) => {
+    if (y + needed > PH - 13) addPage()
+  }
+
+  // ── Column widths (CW = 186 mm) ───────────────────────────────────────────
+  // # 6 | Order# 19 | Date 17 | Customer 31 | Item 38 | Batch 19
+  // | Ord 11 | Prod 11 | RP 9 | Rem 11 | Status 14
+  // Total = 6+19+17+31+38+19+11+11+9+11+14 = 186 ✓
+  const W = { num:6, ord:19, date:17, cust:31, item:38, batch:19, oqty:11, prod:11, rp:9, rem:11, stat:14 }
+
+  const COL_X = (() => {
+    let x = M
+    const out: Record<keyof typeof W, number> = {} as never
+    for (const [k, w] of Object.entries(W) as [keyof typeof W, number][]) {
+      out[k] = x; x += w
+    }
+    return out
+  })()
 
   const drawTableHeader = () => {
     const hh = 8
-    fillRect(MARGIN, y, CONTENT_WIDTH, hh, SLATE)
-    setFont('bold', 6.5)
-    setColor(WHITE)
-    let cx = MARGIN + 1.5
-    const headers = [
-      ['#', COL.NUM],
-      ['ORDER', COL.ORDER],
-      ['CUSTOMER', COL.CUSTOMER],
-      ['ITEMS', COL.ITEMS],
-      ['ORDERED', COL.ORDERED],
-      ['PRODUCED', COL.PRODUCED],
-      ['REMAINING', COL.REMAINING],
-      ['STATUS', COL.STATUS],
-      ['AGE (d)', COL.AGE],
-    ] as [string, number][]
+    fr(M, y, CW, hh, BRAND_ORA)
+    sf('bold', 6); sc(WHITE)
 
-    for (const [label, w] of headers) {
-      doc.text(label, cx + w / 2, y + 5.2, { align: 'center' })
-      cx += w
+    const headers: [keyof typeof W, string, 'l'|'c'][] = [
+      ['num',   '#',            'c'],
+      ['ord',   'Order #',      'l'],
+      ['date',  'Order Date',   'c'],
+      ['cust',  'Customer',     'l'],
+      ['item',  'Item',         'l'],
+      ['batch', 'Active Batch', 'c'],
+      ['oqty',  'Ordered',      'c'],
+      ['prod',  'Produced',     'c'],
+      ['rp',    'RP',           'c'],
+      ['rem',   'Remaining',    'c'],
+      ['stat',  'Status',       'c'],
+    ]
+    for (const [col, lbl, align] of headers) {
+      const x = COL_X[col]; const w = W[col]
+      if (align === 'c') doc.text(lbl, x + w / 2, y + 5.5, { align: 'center' })
+      else               doc.text(lbl, x + 2,     y + 5.5)
     }
     y += hh
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // PAGE 1 — header + meta strip + table
+  // ─────────────────────────────────────────────────────────────────────────
+  drawHeader()
+
+  // ── Meta strip (matches Excel title/meta rows) ────────────────────────────
+  fr(M, y, CW, 14, [248, 250, 252])
+  doc.setDrawColor(BORDER[0], BORDER[1], BORDER[2])
+  doc.setLineWidth(0.25)
+  doc.rect(M, y, CW, 14, 'S')
+
+  const metaCols: [string, string][] = [
+    ['Date',          dateStr],
+    ['Total Orders',  String(orderCount)],
+    ['Total Items',   String(sorted.length)],
+    ['In Progress',   String(inProgressCnt)],
+    ['Pending',       String(pendingCnt)],
+    ['Total Ordered', String(totalOrdered)],
+    ['Total Rem.',    String(totalRemaining)],
+  ]
+  const mw = CW / metaCols.length
+  metaCols.forEach(([lbl, val], i) => {
+    const mx = M + i * mw
+    if (i > 0) {
+      doc.setDrawColor(BORDER[0], BORDER[1], BORDER[2])
+      doc.setLineWidth(0.25)
+      doc.line(mx, y, mx, y + 14)
+    }
+    sf('normal', 5.5); sc(TEXT_MUTED)
+    doc.text(lbl.toUpperCase(), mx + mw / 2, y + 5, { align: 'center' })
+    sf('bold', 10); sc(TEXT_DARK)
+    doc.text(val, mx + mw / 2, y + 11.5, { align: 'center' })
+  })
+  y += 18
+
+  // ── Table ─────────────────────────────────────────────────────────────────
   drawTableHeader()
 
-  // Table rows
-  let rowIndex = 0
-  for (const order of orders) {
-    const rowH = 9
-    if (y + rowH > PAGE_HEIGHT - 20) {
-      doc.addPage()
-      drawPageHeader()
-      drawTableHeader()
-    }
+  sorted.forEach((row, idx) => {
+    const rh = 7
+    checkBreak(rh)
 
-    const bg: [number, number, number] = rowIndex % 2 === 0 ? WHITE : LIGHT_BG
-    fillRect(MARGIN, y, CONTENT_WIDTH, rowH, bg)
-    strokeRect(MARGIN, y, CONTENT_WIDTH, rowH, BORDER, 0.2)
+    const alt = idx % 2 === 1
+    const bg: [number,number,number] = alt ? ORA_50 : WHITE
+    fr(M, y, CW, rh, bg)
 
-    const textY = y + 5.8
-    setFont('normal', 6.5)
-    setColor(SLATE)
+    // Bottom border
+    doc.setDrawColor(BORDER[0], BORDER[1], BORDER[2])
+    doc.setLineWidth(0.18)
+    doc.line(M, y + rh, M + CW, y + rh)
 
-    let cx = MARGIN + 1.5
+    const ty = y + 4.8
 
-    // #
-    doc.text(String(rowIndex + 1), cx + COL.NUM / 2, textY, { align: 'center' })
-    cx += COL.NUM
+    // # (row number)
+    sf('normal', 6); sc(TEXT_MUTED)
+    doc.text(String(idx + 1), COL_X.num + W.num / 2, ty, { align: 'center' })
 
-    // Order
-    setFont('bold', 6.5)
-    setColor(ORANGE)
-    doc.text(order.orderNumber.substring(0, 12), cx + 1, textY)
-    setFont('normal', 6.5)
-    setColor(SLATE)
-    cx += COL.ORDER
+    // Order # (orange bold, left border accent)
+    doc.setFillColor(BRAND_ORA[0], BRAND_ORA[1], BRAND_ORA[2])
+    doc.rect(M, y, 1.2, rh, 'F')
+    sf('bold', 6); sc(BRAND_ORA)
+    doc.text(trunc(row.orderNumber, 11), COL_X.ord + 2, ty)
+
+    // Order Date
+    sf('normal', 5.8); sc(TEXT_MUTED)
+    doc.text(fmtDate(row.orderDate), COL_X.date + W.date / 2, ty, { align: 'center' })
 
     // Customer
-    const custTrunc = order.customerName.length > 22 ? order.customerName.slice(0, 21) + '…' : order.customerName
-    doc.text(custTrunc, cx + 1, textY)
-    cx += COL.CUSTOMER
+    sf('normal', 6); sc(TEXT_DARK)
+    doc.text(trunc(row.customerName, 19), COL_X.cust + 2, ty)
 
-    // Items
-    const itemsTrunc = order.itemNames.length > 22 ? order.itemNames.slice(0, 21) + '…' : order.itemNames
-    setColor(GRAY)
-    setFont('normal', 6)
-    doc.text(itemsTrunc, cx + 1, textY)
-    setFont('normal', 6.5)
-    setColor(SLATE)
-    cx += COL.ITEMS
+    // Item
+    sf('normal', 6); sc(TEXT_DARK)
+    doc.text(trunc(row.itemName, 23), COL_X.item + 2, ty)
+
+    // Active Batch
+    sf('normal', 5.8); sc(TEXT_MUTED)
+    const batchTxt = row.activeBatchLabels?.length
+      ? row.activeBatchLabels.join(', ')
+      : row.completedBatchLabels?.length
+        ? row.completedBatchLabels.join(', ')
+        : '—'
+    doc.text(trunc(batchTxt, 11), COL_X.batch + W.batch / 2, ty, { align: 'center' })
 
     // Ordered
-    doc.text(String(order.ordered), cx + COL.ORDERED / 2, textY, { align: 'center' })
-    cx += COL.ORDERED
+    sf('normal', 6); sc(TEXT_DARK)
+    doc.text(String(row.ordered), COL_X.oqty + W.oqty / 2, ty, { align: 'center' })
 
-    // Produced
-    doc.text(String(order.produced), cx + COL.PRODUCED / 2, textY, { align: 'center' })
-    cx += COL.PRODUCED
+    // Produced (= producedCompleted, matches getProducedForDisplay)
+    doc.text(String(row.producedCompleted), COL_X.prod + W.prod / 2, ty, { align: 'center' })
 
-    // Remaining
-    setFont('bold', 6.5)
-    const remColor: [number, number, number] = order.remaining > 50 ? RED : order.remaining > 0 ? AMBER : GREEN
-    setColor(remColor)
-    doc.text(String(order.remaining), cx + COL.REMAINING / 2, textY, { align: 'center' })
-    setFont('normal', 6.5)
-    setColor(SLATE)
-    cx += COL.REMAINING
+    // RP (= produced − producedCompleted, matches getRequestedProduction)
+    const rp = Math.max(0, row.produced - row.producedCompleted)
+    if (rp > 0) {
+      sf('bold', 6); sc(BLUE_FG)
+      doc.text(String(rp), COL_X.rp + W.rp / 2, ty, { align: 'center' })
+    } else {
+      sf('normal', 6); sc(TEXT_MUTED)
+      doc.text('—', COL_X.rp + W.rp / 2, ty, { align: 'center' })
+    }
+
+    // Remaining (= remainingUntilDone, matches getRemainingUntilDone)
+    const rem = row.remainingUntilDone
+    sf('bold', 6); sc(remColor(rem))
+    doc.text(String(rem), COL_X.rem + W.rem / 2, ty, { align: 'center' })
 
     // Status badge
-    let badgeBg: [number, number, number] = LIGHT_BG
-    let badgeFg: [number, number, number] = SLATE
-    const sl = statusLabel(order)
-    if (order.status === 'not_started') { badgeBg = RED_LIGHT; badgeFg = RED }
-    else if (order.status === 'in_progress') { badgeBg = ORANGE_LIGHT; badgeFg = ORANGE }
-    else { badgeBg = GREEN_LIGHT; badgeFg = GREEN }
-    fillRect(cx + 1, y + 1.5, COL.STATUS - 2, rowH - 3, badgeBg)
-    setFont('bold', 5.5)
-    setColor(badgeFg)
-    doc.text(sl, cx + COL.STATUS / 2, textY, { align: 'center' })
-    setFont('normal', 6.5)
-    setColor(SLATE)
-    cx += COL.STATUS
+    const status = queueStatus(row)
+    const badgeFg = status === 'In Progress' ? BLUE_FG  : AMBER_FG
+    const badgeBg = status === 'In Progress' ? BLUE_BG  : AMBER_BG
+    fr(COL_X.stat + 0.5, y + 0.8, W.stat - 1, rh - 1.6, badgeBg)
+    sf('bold', 5.2); sc(badgeFg)
+    doc.text(status, COL_X.stat + W.stat / 2, ty, { align: 'center' })
 
-    // Age
-    const ageColor: [number, number, number] = order.ageDays > 7 ? RED : SLATE
-    setColor(ageColor)
-    setFont(order.ageDays > 7 ? 'bold' : 'normal', 6.5)
-    doc.text(String(order.ageDays), cx + COL.AGE / 2, textY, { align: 'center' })
-    setFont('normal', 6.5)
-    setColor(SLATE)
+    y += rh
+  })
 
-    y += rowH
-    rowIndex++
-  }
+  // ── Totals row ────────────────────────────────────────────────────────────
+  checkBreak(9)
+  const th = 9
+  fr(M, y, CW, th, BRAND_DARK)
+  sf('bold', 6.5); sc(WHITE)
+  doc.text('TOTALS', COL_X.cust + 2, y + 6)
+  doc.text(String(totalOrdered),   COL_X.oqty + W.oqty / 2, y + 6, { align: 'center' })
+  doc.text(String(totalRemaining), COL_X.rem  + W.rem  / 2, y + 6, { align: 'center' })
+  y += th
 
-  if (orders.length === 0) {
-    fillRect(MARGIN, y, CONTENT_WIDTH, 14, LIGHT_BG)
-    setFont('normal', 9)
-    setColor(GRAY)
-    doc.text('No pending production orders.', PAGE_WIDTH / 2, y + 9, { align: 'center' })
+  if (sorted.length === 0) {
+    fr(M, y, CW, 14, [240, 253, 244])
+    sf('normal', 9); sc(REM_GREEN)
+    doc.text('All production is up to date — no pending items today.', PW / 2, y + 9, { align: 'center' })
     y += 14
   }
 
-  // Footer page 1
-  setFont('normal', 6.5)
-  setColor(GRAY)
-  doc.text(
-    'Auto-generated at 9:55 AM IST  ·  Sunkool Production Management',
-    PAGE_WIDTH / 2,
-    PAGE_HEIGHT - 8,
-    { align: 'center' }
-  )
+  drawFooter()
 
-  // ---- PAGE 2 — Smart Insights ----
-  doc.addPage()
-  drawPageHeader()
-
-  setFont('bold', 14)
-  setColor(SLATE)
-  doc.text('Smart Insights & Recommendations', MARGIN, y + 1)
-  y += 10
-
-  // Section helper
-  const drawInsightSection = (
-    emoji: string,
-    title: string,
-    insightOrders: OrderSummaryRow[],
-    accentColor: [number, number, number],
-    bgColor: [number, number, number],
-    getAction: (o: OrderSummaryRow) => string
-  ) => {
-    if (insightOrders.length === 0) return
-
-    if (y + 14 > PAGE_HEIGHT - 20) {
-      doc.addPage()
-      drawPageHeader()
-    }
-
-    // Section header bar
-    fillRect(MARGIN, y, CONTENT_WIDTH, 9, accentColor)
-    setFont('bold', 8)
-    setColor(WHITE)
-    doc.text(`${emoji}  ${title}`, MARGIN + 3, y + 6)
-    y += 9
-
-    for (const order of insightOrders) {
-      const cardH = 14
-      if (y + cardH > PAGE_HEIGHT - 20) {
-        doc.addPage()
-        drawPageHeader()
-      }
-
-      fillRect(MARGIN, y, CONTENT_WIDTH, cardH, bgColor)
-      strokeRect(MARGIN, y, CONTENT_WIDTH, cardH, BORDER, 0.2)
-
-      // Left: order info
-      setFont('bold', 7.5)
-      setColor(SLATE)
-      doc.text(`${order.orderNumber}`, MARGIN + 3, y + 5.5)
-
-      setFont('normal', 6.5)
-      setColor(GRAY)
-      doc.text(`${order.customerName}`, MARGIN + 3, y + 10)
-
-      // Middle: what's pending
-      const pendingText = `${order.remaining} units remaining of ${order.ordered} ordered`
-      setFont('normal', 6.5)
-      setColor(SLATE)
-      doc.text(pendingText, MARGIN + 55, y + 5.5)
-      setFont('normal', 6)
-      setColor(GRAY)
-      doc.text(`Age: ${order.ageDays} days  •  ${order.itemCount} item(s)`, MARGIN + 55, y + 10)
-
-      // Right: recommended action
-      const action = getAction(order)
-      setFont('bold', 6.5)
-      setColor(accentColor)
-      const actionTrunc = action.length > 45 ? action.slice(0, 44) + '…' : action
-      doc.text(actionTrunc, PAGE_WIDTH - MARGIN - 3, y + 5.5, { align: 'right' })
-
-      y += cardH + 2
-    }
-
-    y += 4
-  }
-
-  const takeActionNow = orders.filter(
-    (o) => (o.status === 'not_started' && o.ageDays > 5) || o.remaining > 100
-  )
-  const completeToday = orders.filter(
-    (o) => o.status === 'in_progress' && o.remaining > 0
-  )
-  const almostDone = orders.filter(
-    (o) => o.ordered > 0 && o.remaining / o.ordered < 0.2 && o.remaining > 0
-  )
-
-  drawInsightSection(
-    '🔴',
-    'Take Action Now',
-    takeActionNow,
-    RED,
-    RED_LIGHT,
-    (o) => {
-      if (o.ageDays > 5 && o.status === 'not_started') return 'Start production immediately — overdue'
-      if (o.remaining > 100) return `High volume order — prioritise (${o.remaining} units left)`
-      return 'Assign production team urgently'
-    }
-  )
-
-  drawInsightSection(
-    '🟠',
-    'Complete Today',
-    completeToday,
-    AMBER,
-    ORANGE_LIGHT,
-    (o) => {
-      if (o.remaining <= 20) return 'Almost done — finish & close batch today'
-      return `${o.remaining} units left — push to complete by EOD`
-    }
-  )
-
-  drawInsightSection(
-    '🟢',
-    'Almost Done',
-    almostDone,
-    GREEN,
-    GREEN_LIGHT,
-    (o) => {
-      const pct = Math.round(((o.ordered - o.remaining) / o.ordered) * 100)
-      return `${pct}% done — close batch when complete`
-    }
-  )
-
-  if (takeActionNow.length === 0 && completeToday.length === 0 && almostDone.length === 0) {
-    fillRect(MARGIN, y, CONTENT_WIDTH, 18, LIGHT_BG)
-    setFont('normal', 9)
-    setColor(GRAY)
-    doc.text('No actionable insights at this time.', PAGE_WIDTH / 2, y + 11, { align: 'center' })
-    y += 18
-  }
-
-  // Footer page 2
-  setFont('normal', 6.5)
-  setColor(GRAY)
-  doc.text(
-    'Auto-generated at 9:55 AM IST  ·  Sunkool Production Management',
-    PAGE_WIDTH / 2,
-    PAGE_HEIGHT - 8,
-    { align: 'center' }
-  )
-
-  const filename = `Morning_Production_Report_${now.toISOString().slice(0, 10)}.pdf`
-  const blob = doc.output('blob')
-  return { blob, filename }
+  const filename = `Sunkool_Production_Report_${now.toISOString().slice(0, 10)}.pdf`
+  return { blob: doc.output('blob'), filename }
 }

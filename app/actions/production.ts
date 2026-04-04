@@ -84,6 +84,8 @@ export type ProductionQueueRow = {
   activeBatchCount: number
   /** Completed batch IDs that allocated this line (for display when no active batch). */
   completedBatchLabels: string[]
+  /** True when a production record with "pending" status exists for this order but no in-production record. */
+  hasRequestedRecord: boolean
 }
 
 export type JourneyProductionRecord = {
@@ -375,6 +377,7 @@ export async function getProductionQueue(): Promise<
       activeBatchLabels,
       activeBatchCount: activeBatchLabels.length,
       completedBatchLabels,
+      hasRequestedRecord: false,
     })
   }
 
@@ -414,6 +417,11 @@ export async function getProductionQueue(): Promise<
     const remainingUntilDone = Math.max(0, item.quantity - producedCompleted)
     const hasCompletedRecord = priorRecords.some((r) => normalizeProductionStatus(r.status) === "completed")
     const completedBatchLabelsForItem = completedBatchLabelsForLine(priorRecords, item.id)
+    // An order has a "Requested Production" record when a pending production record exists
+    // but no in-production record — meaning production was requested but hasn't started yet.
+    const hasRequestedRecord = priorRecords.some(
+      (r) => normalizeProductionStatus(r.status) === "pending"
+    )
 
     rows.push({
       orderId: item.order_id,
@@ -434,6 +442,7 @@ export async function getProductionQueue(): Promise<
       activeBatchLabels: [],
       activeBatchCount: 0,
       completedBatchLabels: completedBatchLabelsForItem,
+      hasRequestedRecord,
     })
   }
 

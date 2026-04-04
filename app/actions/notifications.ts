@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role"
 import { revalidatePath } from "next/cache"
 import * as notificationService from "@/lib/notificationService"
 import { checkRateLimit } from "@/lib/server/rate-limit"
@@ -295,7 +296,9 @@ export async function sendMorningReportNow(): Promise<{
   error?: string
   sent?: number
 }> {
-  const supabase = await createClient()
+  // Storage uploads need service role (cron has no session) or RLS policies on the bucket.
+  const supabaseForStorage =
+    createServiceRoleSupabaseClient() ?? (await createClient())
 
   // Fetch production queue
   const queueResult = await getProductionQueue()
@@ -329,12 +332,14 @@ export async function sendMorningReportNow(): Promise<{
   const pdfPath = `reports/${filename}`
   let pdfUrl = ""
 
-  const { error: uploadError } = await supabase.storage
+  const { error: uploadError } = await supabaseForStorage.storage
     .from("production-reports")
     .upload(pdfPath, pdfBuffer, { contentType: "application/pdf", upsert: true })
 
-  if (!uploadError) {
-    const { data: urlData } = supabase.storage
+  if (uploadError) {
+    reportError(uploadError, { area: "notifications.sendMorningReportNow.storageUpload" })
+  } else {
+    const { data: urlData } = supabaseForStorage.storage
       .from("production-reports")
       .getPublicUrl(pdfPath)
     pdfUrl = urlData?.publicUrl ?? ""

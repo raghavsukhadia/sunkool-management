@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { getProductionQueue } from '@/app/actions/production'
 import { generateMorningReportPDF } from '@/lib/morning-report-pdf'
+import { createServiceRoleSupabaseClient } from '@/lib/supabase/service-role'
 import * as notificationService from '@/lib/notificationService'
 
 function makeSupabaseClient() {
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
 
     // --- Fetch logo (best-effort) ---
     let logoDataUrl: string | undefined
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '')
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://sunkool-management.vercel.app').replace(/\/$/, '')
     if (appUrl) {
       try {
         const logoRes = await fetch(`${appUrl}/images/logo.png`)
@@ -56,7 +57,7 @@ export async function GET(request: Request) {
     // --- Generate PDF ---
     const { blob, filename } = generateMorningReportPDF(pendingRows, logoDataUrl)
 
-    const supabase = makeSupabaseClient()
+    const supabase = createServiceRoleSupabaseClient() ?? makeSupabaseClient()
 
     // --- Upload PDF to Supabase storage ---
     const pdfBuffer = await blob.arrayBuffer()
@@ -75,6 +76,8 @@ export async function GET(request: Request) {
         .from('production-reports')
         .getPublicUrl(pdfPath)
       pdfUrl = urlData?.publicUrl ?? ''
+    } else {
+      console.error('[cron/morning-report] PDF upload failed:', uploadError.message)
     }
 
     // --- Fetch WhatsApp config ---
