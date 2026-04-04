@@ -321,6 +321,11 @@ export function generateMorningReportPDF(
 
   drawFooter()
 
-  const filename = `Sunkool_Production_Report_${now.toISOString().slice(0, 10)}.pdf`
+  // Include time so each run gets a unique URL — avoids Supabase CDN serving a cached old file
+  const timeTag = now.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit',
+    day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).replace(/[/,: ]+/g, '-').replace(/-+/g, '-')
+  const filename = `Sunkool_Production_Report_${timeTag}.pdf`
   return { blob: doc.output('blob'), filename }
 }
