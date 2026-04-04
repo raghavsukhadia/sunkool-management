@@ -33,6 +33,7 @@ type WhatsAppConfig = {
 type Template = { id: string; event_type: string; name: string | null; template_body: string }
 
 const EVENT_TYPES = [{ value: "order_created", label: "Order created (punched)" }]
+const MORNING_REPORT_EVENT_TYPE = "morning_report_config"
 const PLACEHOLDERS = "Placeholders: {{order_number}}, {{customer_name}}, {{sales_order_number}}"
 
 function useIsMobile() {
@@ -262,6 +263,12 @@ export default function NotificationsPage() {
   }
 
   const startEditTemplate = (t: Template) => {
+    if (t.event_type === MORNING_REPORT_EVENT_TYPE) {
+      setError(
+        "Morning report uses JSON settings in the card above — do not edit it here (that breaks the cron). Use the Morning Production Report section."
+      )
+      return
+    }
     setEditingTemplate(t)
     setTemplateEventType(t.event_type)
     setTemplateName(t.name ?? "")
@@ -681,7 +688,10 @@ export default function NotificationsPage() {
             Notification message templates
           </CardTitle>
           <CardDescription>
-            Define message text per workflow event. For &quot;order_created&quot; you can use: {PLACEHOLDERS}
+            Define message text per workflow event. For &quot;order_created&quot; you can use: {PLACEHOLDERS}{" "}
+            <span className="text-amber-800">
+              (Morning report settings are only in the Morning Production Report card — they are not listed here.)
+            </span>
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -733,11 +743,18 @@ export default function NotificationsPage() {
           </div>
           <div className="border-t pt-4">
             <p className="text-sm font-medium text-slate-700 mb-2">Saved templates</p>
-            {templates.length === 0 ? (
-              <p className="text-sm text-slate-500">No templates yet. Add one for &quot;order_created&quot; so the auto sender can notify when an order is punched.</p>
+            {templates.filter((t) => t.event_type !== MORNING_REPORT_EVENT_TYPE).length === 0 ? (
+              <p className="text-sm text-slate-500">
+                No workflow message templates yet. Add one for &quot;order_created&quot; so the auto sender can notify when an order is punched.
+                {templates.some((t) => t.event_type === MORNING_REPORT_EVENT_TYPE) && (
+                  <span className="block mt-2 text-slate-600">
+                    Morning report is configured in the orange card above (not in this list).
+                  </span>
+                )}
+              </p>
             ) : (
               <ul className="space-y-2">
-                {templates.map((t) => (
+                {templates.filter((t) => t.event_type !== MORNING_REPORT_EVENT_TYPE).map((t) => (
                   <li key={t.id} className="flex items-start justify-between py-2 px-3 rounded-lg bg-slate-50">
                     <div>
                       <span className="font-medium text-slate-900">{t.event_type}</span>

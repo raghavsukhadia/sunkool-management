@@ -98,11 +98,25 @@ export async function GET(request: Request) {
         : null
 
     // --- Fetch morning report manager phones ---
-    const { data: templateRow } = await supabase
+    const { data: templateRow, error: templateSelectError } = await supabase
       .from('notification_templates')
       .select('template_body')
       .eq('event_type', 'morning_report_config')
       .maybeSingle()
+
+    const diagnostic: {
+      rowFound: boolean
+      jsonValid: boolean
+      enabledInJson: boolean
+      selectError?: string
+    } = {
+      rowFound: Boolean(templateRow?.template_body),
+      jsonValid: false,
+      enabledInJson: false,
+    }
+    if (templateSelectError?.message) {
+      diagnostic.selectError = templateSelectError.message
+    }
 
     let managerPhones: string[] = []
     let reportEnabled = false
@@ -112,15 +126,29 @@ export async function GET(request: Request) {
           enabled?: boolean | string
           manager_phones?: string[]
         }
+        diagnostic.jsonValid = true
         reportEnabled = cfg.enabled === true || cfg.enabled === 'true'
+        diagnostic.enabledInJson = reportEnabled
         managerPhones = Array.isArray(cfg.manager_phones) ? cfg.manager_phones : []
       } catch {
-        // Malformed config — skip
+        diagnostic.jsonValid = false
       }
     }
 
     if (!reportEnabled) {
-      return NextResponse.json({ success: true, sent: 0, message: 'Morning report is disabled' })
+      const hint = !diagnostic.rowFound
+        ? 'Create/enable from Dashboard → Notifications → Morning Production Report (saves row morning_report_config).'
+        : !diagnostic.jsonValid
+          ? 'Stored config is not valid JSON (often caused by editing morning_report_config under Message templates). Re-save using only the Morning Production Report card.'
+          : 'enabled is false in JSON. Turn the Morning report toggle ON on Notifications (desktop) and confirm no error after save.'
+
+      return NextResponse.json({
+        success: true,
+        sent: 0,
+        message: 'Morning report is disabled',
+        diagnostic,
+        hint,
+      })
     }
 
     if (!waConfig || managerPhones.length === 0) {

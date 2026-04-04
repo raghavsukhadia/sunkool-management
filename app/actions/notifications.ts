@@ -10,6 +10,8 @@ import { getProductionQueue } from "@/app/actions/production"
 import { generateMorningReportPDF } from "@/lib/morning-report-pdf"
 
 const NOTIFICATIONS_PATH = "/dashboard/notifications"
+/** Stored as JSON: { enabled, manager_phones } — do not edit via generic message templates. */
+const MORNING_REPORT_EVENT_TYPE = "morning_report_config"
 
 // ---- Recipients ----
 export async function getNotificationRecipients() {
@@ -125,11 +127,25 @@ export async function getNotificationTemplateByEventType(event_type: string) {
   return { success: true, data, error: null }
 }
 
-export async function upsertNotificationTemplate(params: {
-  event_type: string
-  name?: string
-  template_body: string
-}) {
+export async function upsertNotificationTemplate(
+  params: {
+    event_type: string
+    name?: string
+    template_body: string
+  },
+  options?: { allowMorningReportConfig?: boolean }
+) {
+  if (
+    params.event_type === MORNING_REPORT_EVENT_TYPE &&
+    !options?.allowMorningReportConfig
+  ) {
+    return {
+      success: false,
+      error:
+        "Morning report settings can only be changed from the Morning Production Report card (not message templates).",
+      data: null,
+    }
+  }
   const supabase = await createClient()
   const { data: existing } = await supabase
     .from("notification_templates")
@@ -252,8 +268,6 @@ export async function sendOrderCreatedNotification(payload: {
 
 // ---- Morning report config ----
 
-const MORNING_REPORT_EVENT_TYPE = "morning_report_config"
-
 export async function getMorningReportConfig(): Promise<{
   enabled: boolean
   managerPhones: string[]
@@ -286,11 +300,14 @@ export async function upsertMorningReportConfig(
   managerPhones: string[]
 ): Promise<{ success: boolean; error?: string }> {
   const templateBody = JSON.stringify({ enabled, manager_phones: managerPhones })
-  const result = await upsertNotificationTemplate({
-    event_type: MORNING_REPORT_EVENT_TYPE,
-    name: "Morning Production Report Config",
-    template_body: templateBody,
-  })
+  const result = await upsertNotificationTemplate(
+    {
+      event_type: MORNING_REPORT_EVENT_TYPE,
+      name: "Morning Production Report Config",
+      template_body: templateBody,
+    },
+    { allowMorningReportConfig: true }
+  )
   if (!result.success) return { success: false, error: result.error ?? "Failed to save config" }
   return { success: true }
 }
