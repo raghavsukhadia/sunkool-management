@@ -267,9 +267,13 @@ export async function getMorningReportConfig(): Promise<{
 
   if (!data?.template_body) return { enabled: false, managerPhones: [] }
   try {
-    const cfg = JSON.parse(data.template_body) as { enabled?: boolean; manager_phones?: string[] }
+    const cfg = JSON.parse(data.template_body) as {
+      enabled?: boolean | string
+      manager_phones?: string[]
+    }
+    const enabled = cfg.enabled === true || cfg.enabled === "true"
     return {
-      enabled: cfg.enabled === true,
+      enabled,
       managerPhones: Array.isArray(cfg.manager_phones) ? cfg.manager_phones : [],
     }
   } catch {

@@ -109,10 +109,10 @@ export async function GET(request: Request) {
     if (templateRow?.template_body) {
       try {
         const cfg = JSON.parse(templateRow.template_body) as {
-          enabled?: boolean
+          enabled?: boolean | string
           manager_phones?: string[]
         }
-        reportEnabled = cfg.enabled === true
+        reportEnabled = cfg.enabled === true || cfg.enabled === 'true'
         managerPhones = Array.isArray(cfg.manager_phones) ? cfg.manager_phones : []
       } catch {
         // Malformed config — skip

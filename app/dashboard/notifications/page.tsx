@@ -276,11 +276,18 @@ export default function NotificationsPage() {
   }
 
   const handleToggleMorningReport = async (enabled: boolean) => {
+    const previous = morningReportEnabled
     setMorningReportEnabled(enabled)
     setSavingMorningConfig(true)
+    setError(null)
     try {
-      await upsertMorningReportConfig(enabled, managerPhones)
+      const result = await upsertMorningReportConfig(enabled, managerPhones)
+      if (!result.success) {
+        setMorningReportEnabled(previous)
+        setError(result.error ?? "Failed to save morning report config")
+      }
     } catch (e) {
+      setMorningReportEnabled(previous)
       setError(e instanceof Error ? e.message : "Failed to save morning report config")
     } finally {
       setSavingMorningConfig(false)
@@ -299,13 +306,19 @@ export default function NotificationsPage() {
       return
     }
     setError(null)
+    const previousPhones = [...managerPhones]
     const updated = [...managerPhones, phone]
     setManagerPhones(updated)
     setNewManagerPhone("")
     setSavingMorningConfig(true)
     try {
-      await upsertMorningReportConfig(morningReportEnabled, updated)
+      const result = await upsertMorningReportConfig(morningReportEnabled, updated)
+      if (!result.success) {
+        setManagerPhones(previousPhones)
+        setError(result.error ?? "Failed to save")
+      }
     } catch (e) {
+      setManagerPhones(previousPhones)
       setError(e instanceof Error ? e.message : "Failed to save")
     } finally {
       setSavingMorningConfig(false)
@@ -313,12 +326,19 @@ export default function NotificationsPage() {
   }
 
   const handleRemoveManagerPhone = async (phone: string) => {
+    const previousPhones = [...managerPhones]
     const updated = managerPhones.filter((p) => p !== phone)
     setManagerPhones(updated)
     setSavingMorningConfig(true)
+    setError(null)
     try {
-      await upsertMorningReportConfig(morningReportEnabled, updated)
+      const result = await upsertMorningReportConfig(morningReportEnabled, updated)
+      if (!result.success) {
+        setManagerPhones(previousPhones)
+        setError(result.error ?? "Failed to save")
+      }
     } catch (e) {
+      setManagerPhones(previousPhones)
       setError(e instanceof Error ? e.message : "Failed to save")
     } finally {
       setSavingMorningConfig(false)
