@@ -3,6 +3,11 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { reportError } from '@/lib/monitoring'
 
 export async function middleware(request: NextRequest) {
+  // Cron jobs use Authorization: Bearer CRON_SECRET — no Supabase session; must not redirect to /login.
+  if (request.nextUrl.pathname.startsWith('/api/cron/')) {
+    return NextResponse.next()
+  }
+
   try {
     let response = NextResponse.next({
       request: {
