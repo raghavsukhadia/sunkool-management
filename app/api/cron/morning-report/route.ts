@@ -108,11 +108,13 @@ export async function GET(request: Request) {
       rowFound: boolean
       jsonValid: boolean
       enabledInJson: boolean
+      serviceRoleActive: boolean
       selectError?: string
     } = {
       rowFound: Boolean(templateRow?.template_body),
       jsonValid: false,
       enabledInJson: false,
+      serviceRoleActive: Boolean(createServiceRoleSupabaseClient()),
     }
     if (templateSelectError?.message) {
       diagnostic.selectError = templateSelectError.message
