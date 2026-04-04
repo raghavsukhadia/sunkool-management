@@ -31,9 +31,13 @@ const REM_AMBER:   [number,number,number] = [146,  64,  14]   // #92400E amber-8
 const REM_RED:     [number,number,number] = [153,  27,  27]   // #991B1B red-800
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-/** Mirrors getQueueRowStatus — exactly two values used in the app */
+/**
+ * "In Progress" = there is an active open in-production batch right now.
+ * "Pending"     = no active batch (even if prior completed batches exist).
+ * Mirrors the app: hasInProductionRecord is the only true signal for an active batch.
+ */
 function queueStatus(row: ProductionQueueRow): 'In Progress' | 'Pending' {
-  if (row.hasInProductionRecord || row.produced > 0) return 'In Progress'
+  if (row.hasInProductionRecord) return 'In Progress'
   return 'Pending'
 }
 
