@@ -54,11 +54,5 @@
         }
       ]
     }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "/:path*"
-    }
   ]
 }

@@ -30,8 +30,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    // --- Fetch production queue ---
-    const queueResult = await getProductionQueue()
+    // Service role when set (RLS + storage); otherwise anon — queue/WhatsApp rows may be empty without it.
+    const supabase = createServiceRoleSupabaseClient() ?? makeSupabaseClient()
+    const queueResult = await getProductionQueue({ supabase })
     if (!queueResult.success) {
       return NextResponse.json({ error: queueResult.error }, { status: 500 })
     }
@@ -56,8 +57,6 @@ export async function GET(request: Request) {
 
     // --- Generate PDF ---
     const { blob, filename } = generateMorningReportPDF(pendingRows, logoDataUrl)
-
-    const supabase = createServiceRoleSupabaseClient() ?? makeSupabaseClient()
 
     // --- Upload PDF to Supabase storage ---
     const pdfBuffer = await blob.arrayBuffer()

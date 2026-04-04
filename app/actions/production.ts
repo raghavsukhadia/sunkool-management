@@ -1,5 +1,6 @@
 "use server"
 
+import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
 import {
   normalizeProductionStatus,
@@ -122,11 +123,13 @@ export type ProductionQueueResult = {
  * Fetches started production orders and returns a single-sheet item-wise view:
  * one row per order item with ordered/produced/remaining.
  * KPI data is computed inline from the same records — no extra DB round-trip.
+ *
+ * Pass `supabase` for server jobs without a user session (e.g. Vercel Cron) — use the service-role client.
  */
-export async function getProductionQueue(): Promise<
-  { success: true; data: ProductionQueueResult } | { success: false; error: string }
-> {
-  const supabase = await createClient()
+export async function getProductionQueue(options?: {
+  supabase?: SupabaseClient
+}): Promise<{ success: true; data: ProductionQueueResult } | { success: false; error: string }> {
+  const supabase = options?.supabase ?? (await createClient())
 
   const EMPTY_KPI: ProductionKpiData = {
     pendingOrdersCount: 0,
