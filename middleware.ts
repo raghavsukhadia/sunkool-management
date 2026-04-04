@@ -3,8 +3,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { reportError } from '@/lib/monitoring'
 
 export async function middleware(request: NextRequest) {
-  // Cron jobs use Authorization: Bearer CRON_SECRET — no Supabase session; must not redirect to /login.
-  if (request.nextUrl.pathname.startsWith('/api/cron/')) {
+  // Route Handlers under /api/* must not be forced through the dashboard session gate.
+  // Each route enforces its own auth (e.g. cron: Bearer CRON_SECRET in the handler).
+  if (request.nextUrl.pathname.startsWith('/api')) {
     return NextResponse.next()
   }
 
