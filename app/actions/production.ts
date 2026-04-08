@@ -484,18 +484,35 @@ export async function getProductionQueue(options?: {
   const queueOrderIds = Array.from(new Set(orderItems.map((i) => i.order_id).filter((id) => orderMap.has(id))))
   const noProductionQueueOrderIds = Array.from(new Set(noProductionItems.map((i) => i.order_id).filter((id) => noProductionOrderMap.has(id))))
 
+  // "Partial re-pending" = orders in noProductionOrders that have at least one completed production
+  // batch but no active in_production record. This happens when a production record is deleted after
+  // partial dispatch (e.g. customer edits quantity) — the order loses its active record and falls into
+  // noProductionOrders, but it had prior production so it's NOT "not started".
+  const partialRePendingOrderIds = noProductionQueueOrderIds.filter((orderId) =>
+    rows.some((row) => row.orderId === orderId && row.hasCompletedRecord && row.remainingUntilDone > 0)
+  )
+
+  // "Truly not started" = no prior completed records at all. These are the real "Not Started" orders.
+  const trulyNotStartedOrderIds = noProductionQueueOrderIds.filter(
+    (orderId) => !partialRePendingOrderIds.includes(orderId)
+  )
+
   // "Pending" = in-production orders with either:
   // - remaining units to produce, OR
   // - lines awaiting batch closure (0 remaining until DONE on order).
+  // Also includes partial-re-pending orders (had completed batches, deleted record, still has remaining).
   // This keeps the Pending KPI aligned with both queue work and closure work.
-  const pendingOrderIds = queueOrderIds.filter((orderId) =>
-    rows.some(
-      (row) =>
-        row.orderId === orderId &&
-        !noProductionOrderIdsSet_raw.has(row.orderId) &&
-        (row.remainingUntilDone > 0 || !!row.needsBatchClosure)
-    )
-  )
+  const pendingOrderIds = [
+    ...queueOrderIds.filter((orderId) =>
+      rows.some(
+        (row) =>
+          row.orderId === orderId &&
+          !noProductionOrderIdsSet_raw.has(row.orderId) &&
+          (row.remainingUntilDone > 0 || !!row.needsBatchClosure)
+      )
+    ),
+    ...partialRePendingOrderIds,
+  ]
   // Delayed: in-production orders with no activity for 5+ days and still not completed.
   const delayedInProductionIds = queueOrderIds.filter((id) => {
     const a = aggByOrder[id]
@@ -532,11 +549,11 @@ export async function getProductionQueue(options?: {
     totalUnitsToProduce: totalUnitsRemaining,
     productionDelayedCount: delayedOrderIds.length,
     completedThisMonthCount: completedThisMonthOrderIdSet.size,
-    noProductionOrdersCount: noProductionQueueOrderIds.length,
+    noProductionOrdersCount: trulyNotStartedOrderIds.length,
     pendingOrderIds,
     delayedOrderIds,
     completedThisMonthOrderIds: Array.from(completedThisMonthOrderIdSet),
-    noProductionOrderIds: noProductionQueueOrderIds,
+    noProductionOrderIds: trulyNotStartedOrderIds,
   }
 
   return {

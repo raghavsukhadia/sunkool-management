@@ -27,8 +27,6 @@ import { getCustomersWithStats } from "@/app/actions/customers"
 import type { CustomerWithStats } from "@/app/actions/customers"
 import { AdvancedFiltersPanel } from "@/components/customers/AdvancedFiltersPanel"
 import { BulkActionsBar } from "@/components/customers/BulkActionsBar"
-import { CustomerPreviewDrawer } from "@/components/customers/CustomerPreviewDrawer"
-import { PresetsBar } from "@/components/customers/PresetsBar"
 import { generateMockCustomers } from "@/components/customers/mockData"
 import type {
   AdvancedFilters,
@@ -50,7 +48,6 @@ import {
   formatCurrency,
   formatDate,
   getActiveFilterTags,
-  getPredefinedPresets,
   STATUS_FILTERS,
   toCsv,
 } from "@/components/customers/utils"
@@ -166,8 +163,6 @@ export function CustomerManagementTable({
   const [columns, setColumns] = useState<Record<ColumnKey, boolean>>(DEFAULT_COLUMNS)
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [preview, setPreview] = useState<CustomerRow | null>(null)
-  const [previewOpen, setPreviewOpen] = useState(false)
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [lastDeleted, setLastDeleted] = useState<CustomerRow[]>([])
@@ -211,8 +206,6 @@ export function CustomerManagementTable({
     }
   }, [])
 
-  const allPresets = useMemo(() => [...getPredefinedPresets(), ...customPresets], [customPresets])
-
   const filteredRows = useMemo(() => applyFilters(rows, search, status, advanced), [rows, search, status, advanced])
 
   const sortedRows = useMemo(
@@ -236,6 +229,14 @@ export function CustomerManagementTable({
   }, [rows])
 
   const activeFilterTags = useMemo(() => getActiveFilterTags(search, status, advanced), [search, status, advanced])
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: filteredRows.length }
+    for (const row of rows) {
+      counts[row.status] = (counts[row.status] ?? 0) + 1
+    }
+    return counts
+  }, [rows, filteredRows.length])
 
   const parentRef = useRef<HTMLDivElement | null>(null)
   const shouldVirtualize = enableVirtualization && sortedRows.length >= virtualizationThreshold
@@ -277,32 +278,6 @@ export function CustomerManagementTable({
     if (next.has(id)) next.delete(id)
     else next.add(id)
     setSelectedIds(next)
-  }
-
-  const applyPreset = (preset: CustomerPreset) => {
-    setActivePresetId(preset.id)
-    setSearch(preset.search)
-    setStatus(preset.status)
-    setAdvanced(preset.advanced)
-    setSortPrimary(preset.sortPrimary)
-    setSortSecondary(preset.sortSecondary)
-  }
-
-  const saveCurrentPreset = (name: string) => {
-    const preset: CustomerPreset = {
-      id: `custom-${Date.now()}`,
-      name,
-      kind: "custom",
-      search,
-      status,
-      advanced,
-      sortPrimary,
-      sortSecondary,
-    }
-    const next = [...customPresets, preset]
-    setCustomPresets(next)
-    writeCustomPresets(next)
-    setActivePresetId(preset.id)
   }
 
   const removeFilterTag = (tag: string) => {
@@ -372,30 +347,40 @@ export function CustomerManagementTable({
   return (
     <div className="space-y-4 p-4 lg:p-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Card className="border-sk-border bg-sk-card-bg shadow-none">
+        <Card className="overflow-hidden border-sk-border bg-sk-card-bg shadow-none">
+          <div className="h-1 bg-sk-primary" />
           <CardContent className="p-4">
             <p className="text-[11px] font-medium uppercase tracking-wide text-sk-text-3">Total Customers</p>
             <p className="mt-1 text-2xl font-bold text-sk-text-1">{kpis.totalCustomers}</p>
+            <p className="mt-0.5 text-xs text-sk-text-3">{kpis.activeThisMonth} active this month</p>
           </CardContent>
         </Card>
-        <Card className="border-sk-border bg-sk-card-bg shadow-none">
-          <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-sk-text-3">Active This Month</p>
-            <p className="mt-1 text-2xl font-bold text-sk-text-1">{kpis.activeThisMonth}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-sk-border bg-sk-card-bg shadow-none">
-          <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-sk-text-3">Unpaid Accounts</p>
-            <p className={`mt-1 text-2xl font-bold ${kpis.unpaidAccounts > 0 ? "text-red-600" : "text-sk-text-1"}`}>
-              {kpis.unpaidAccounts}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-sk-border bg-sk-card-bg shadow-none">
+        <Card className="overflow-hidden border-sk-border bg-sk-card-bg shadow-none">
+          <div className="h-1 bg-blue-500" />
           <CardContent className="p-4">
             <p className="text-[11px] font-medium uppercase tracking-wide text-sk-text-3">Total Value</p>
             <p className="mt-1 text-2xl font-bold text-sk-text-1">{formatCurrency(kpis.totalValue)}</p>
+            <p className="mt-0.5 text-xs text-sk-text-3">lifetime revenue</p>
+          </CardContent>
+        </Card>
+        <Card className="overflow-hidden border-sk-border bg-sk-card-bg shadow-none">
+          <div className={`h-1 ${kpis.unpaidAccounts > 0 ? "bg-red-500" : "bg-emerald-500"}`} />
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-sk-text-3">Unpaid Accounts</p>
+            <p className={`mt-1 text-2xl font-bold ${kpis.unpaidAccounts > 0 ? "text-red-600" : "text-emerald-600"}`}>
+              {kpis.unpaidAccounts}
+            </p>
+            <p className="mt-0.5 text-xs text-sk-text-3">{kpis.unpaidAccounts > 0 ? "pending collection" : "all accounts clear"}</p>
+          </CardContent>
+        </Card>
+        <Card className="overflow-hidden border-sk-border bg-sk-card-bg shadow-none">
+          <div className="h-1 bg-violet-500" />
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-sk-text-3">Avg Order Value</p>
+            <p className="mt-1 text-2xl font-bold text-sk-text-1">
+              {kpis.totalCustomers > 0 ? formatCurrency(kpis.totalValue / kpis.totalCustomers) : "—"}
+            </p>
+            <p className="mt-0.5 text-xs text-sk-text-3">per customer</p>
           </CardContent>
         </Card>
       </div>
@@ -472,6 +457,11 @@ export function CustomerManagementTable({
               }}
             >
               {item === "all" ? "All" : item}
+              {statusCounts[item] !== undefined && (
+                <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${status === item ? "bg-white/20 text-white" : "bg-sk-page-bg text-sk-text-2"}`}>
+                  {statusCounts[item]}
+                </span>
+              )}
             </Button>
           ))}
         </div>
@@ -507,65 +497,6 @@ export function CustomerManagementTable({
         />
       )}
 
-      <PresetsBar
-        presets={allPresets}
-        activePresetId={activePresetId}
-        onApply={applyPreset}
-        onSaveCurrent={saveCurrentPreset}
-      />
-
-      <div className="flex flex-wrap items-center gap-3 text-sm text-sk-text-2">
-        <label className="flex items-center gap-2">
-          Primary sort
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-            value={sortPrimary.key}
-            onChange={e => setSortPrimary(prev => ({ ...prev, key: e.target.value as SortKey }))}
-          >
-            <option value="name">Name</option>
-            <option value="phone">Phone</option>
-            <option value="email">Email</option>
-            <option value="totalOrders">Total Orders</option>
-            <option value="totalValue">Total Value</option>
-            <option value="unpaidAmount">Unpaid Amount</option>
-            <option value="lastOrderDate">Last Order Date</option>
-          </select>
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-            value={sortPrimary.direction}
-            onChange={e => setSortPrimary(prev => ({ ...prev, direction: e.target.value as SortRule["direction"] }))}
-          >
-            <option value="asc">Asc</option>
-            <option value="desc">Desc</option>
-          </select>
-        </label>
-
-        <label className="flex items-center gap-2">
-          Secondary sort
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-            value={sortSecondary.key}
-            onChange={e => setSortSecondary(prev => ({ ...prev, key: e.target.value as SortKey }))}
-          >
-            <option value="name">Name</option>
-            <option value="phone">Phone</option>
-            <option value="email">Email</option>
-            <option value="totalOrders">Total Orders</option>
-            <option value="totalValue">Total Value</option>
-            <option value="unpaidAmount">Unpaid Amount</option>
-            <option value="lastOrderDate">Last Order Date</option>
-          </select>
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-            value={sortSecondary.direction}
-            onChange={e => setSortSecondary(prev => ({ ...prev, direction: e.target.value as SortRule["direction"] }))}
-          >
-            <option value="asc">Asc</option>
-            <option value="desc">Desc</option>
-          </select>
-        </label>
-      </div>
-
       <BulkActionsBar
         selectedCount={selectedIds.size}
         onClear={() => setSelectedIds(new Set())}
@@ -580,9 +511,9 @@ export function CustomerManagementTable({
         <EmptyState text={rows.length === 0 ? "No customer data available." : "No customers match your filters."} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-sk-border bg-sk-card-bg">
-          <div className="overflow-x-auto" ref={parentRef} style={{ maxHeight: shouldVirtualize ? 620 : undefined }}>
+          <div className="[overflow-x:clip]" ref={parentRef} style={{ maxHeight: shouldVirtualize ? 620 : undefined }}>
             <table className="w-full min-w-[980px] text-sm">
-              <thead className="sticky top-0 z-10 bg-sk-page-bg">
+              <thead className="sticky top-[68px] z-10 bg-sk-page-bg">
                 <tr className="border-b border-sk-border">
                   <th className="w-10 px-3 py-3 text-left">
                     <input
@@ -642,14 +573,12 @@ export function CustomerManagementTable({
 
                     {virtualItems.map(virtualItem => {
                       const row = sortedRows[virtualItem.index]
+                      const initials = row.name.split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)
                       return (
                         <tr
                           key={row.id}
                           className="cursor-pointer transition-colors hover:bg-sk-primary-tint"
-                          onClick={() => {
-                            setPreview(row)
-                            setPreviewOpen(true)
-                          }}
+                          onClick={() => router.push(`/dashboard/customers/${row.id}`)}
                         >
                           <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
                             <input
@@ -661,19 +590,26 @@ export function CustomerManagementTable({
                           </td>
                           {columns.name && (
                             <td className="px-4 py-3">
-                              <p className="font-medium text-sk-text-1">{row.name}</p>
-                              {row.extraTags.length > 0 && (
-                                <div className="mt-1 flex flex-wrap gap-1">
-                                  {row.extraTags.map(tag => (
-                                    <span
-                                      key={tag}
-                                      className="rounded-full border border-sk-primary/20 bg-sk-primary-tint px-2 py-0.5 text-[10px] font-medium text-sk-primary-dk"
-                                    >
-                                      {tag}
-                                    </span>
-                                  ))}
+                              <div className="flex items-center gap-2.5">
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sk-primary-tint text-[11px] font-bold text-sk-primary-dk">
+                                  {initials}
                                 </div>
-                              )}
+                                <div>
+                                  <p className="font-medium text-sk-text-1">{row.name}</p>
+                                  {row.extraTags.length > 0 && (
+                                    <div className="mt-0.5 flex flex-wrap gap-1">
+                                      {row.extraTags.map(tag => (
+                                        <span
+                                          key={tag}
+                                          className="rounded-full border border-sk-primary/20 bg-sk-primary-tint px-2 py-0.5 text-[10px] font-medium text-sk-primary-dk"
+                                        >
+                                          {tag}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
                             </td>
                           )}
                           {columns.phone && <td className="px-4 py-3 text-sk-text-2">{row.phone ?? "-"}</td>}
@@ -700,14 +636,13 @@ export function CustomerManagementTable({
                     ) : null}
                   </>
                 ) : (
-                  sortedRows.map(row => (
+                  sortedRows.map(row => {
+                    const initials = row.name.split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)
+                    return (
                     <tr
                       key={row.id}
                       className="cursor-pointer transition-colors hover:bg-sk-primary-tint"
-                      onClick={() => {
-                        setPreview(row)
-                        setPreviewOpen(true)
-                      }}
+                      onClick={() => router.push(`/dashboard/customers/${row.id}`)}
                     >
                       <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
                         <input
@@ -719,19 +654,26 @@ export function CustomerManagementTable({
                       </td>
                       {columns.name && (
                         <td className="px-4 py-3">
-                          <p className="font-medium text-sk-text-1">{row.name}</p>
-                          {row.extraTags.length > 0 && (
-                            <div className="mt-1 flex flex-wrap gap-1">
-                              {row.extraTags.map(tag => (
-                                <span
-                                  key={tag}
-                                  className="rounded-full border border-sk-primary/20 bg-sk-primary-tint px-2 py-0.5 text-[10px] font-medium text-sk-primary-dk"
-                                >
-                                  {tag}
-                                </span>
-                              ))}
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sk-primary-tint text-[11px] font-bold text-sk-primary-dk">
+                              {initials}
                             </div>
-                          )}
+                            <div>
+                              <p className="font-medium text-sk-text-1">{row.name}</p>
+                              {row.extraTags.length > 0 && (
+                                <div className="mt-0.5 flex flex-wrap gap-1">
+                                  {row.extraTags.map(tag => (
+                                    <span
+                                      key={tag}
+                                      className="rounded-full border border-sk-primary/20 bg-sk-primary-tint px-2 py-0.5 text-[10px] font-medium text-sk-primary-dk"
+                                    >
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </td>
                       )}
                       {columns.phone && <td className="px-4 py-3 text-sk-text-2">{row.phone ?? "-"}</td>}
@@ -748,7 +690,7 @@ export function CustomerManagementTable({
                         </td>
                       )}
                     </tr>
-                  ))
+                  )})
                 )}
               </tbody>
             </table>
@@ -793,7 +735,6 @@ export function CustomerManagementTable({
         </div>
       )}
 
-      <CustomerPreviewDrawer customer={preview} open={previewOpen} onOpenChange={setPreviewOpen} />
     </div>
   )
 }

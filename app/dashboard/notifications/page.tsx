@@ -460,7 +460,7 @@ export default function NotificationsPage() {
           {/* Schedule info */}
           <div className="flex items-center gap-2 rounded-md bg-slate-50 border border-slate-200 px-4 py-2.5 text-sm text-slate-600">
             <Clock className="h-4 w-4 text-slate-400 shrink-0" />
-            <span>Sent daily at <strong>9:55 AM IST</strong> (4:25 AM UTC) via Vercel Cron</span>
+            <span>Sent daily at <strong>2:45 PM IST</strong> (9:15 AM UTC) via Vercel Cron</span>
           </div>
 
           {/* Manager phones */}

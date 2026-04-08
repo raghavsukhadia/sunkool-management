@@ -483,6 +483,6 @@ Built with:
 
 **Status**: ✅ Production Ready  
 **Last Updated**: January 28, 2026  
-**Maintainer**: Piyush Sukhadia
+**Maintainer**: Sunkool
 
 Ready to deploy? Start with [Vercel Deployment Guide](./VERCEL_DEPLOYMENT_GUIDE.md)! 🚀

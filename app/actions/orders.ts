@@ -7,6 +7,12 @@ import { getCourierCompanies } from "@/app/actions/management"
 import { checkRateLimit } from "@/lib/server/rate-limit"
 import { reportError } from "@/lib/monitoring"
 
+function isUniqueViolation(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false
+  if (error.code === "23505") return true
+  return (error.message || "").toLowerCase().includes("duplicate key")
+}
+
 // Generate next internal order number in sequence (SK01, SK02, SK03...)
 async function generateNextOrderNumber(): Promise<string> {
   const supabase = await createClient()
@@ -112,27 +118,46 @@ export async function createOrder(formData: {
     return { success: false, error: "User profile not found" }
   }
 
-  // Generate automatic internal order number (SK01, SK02, etc.)
-  const internalOrderNumber = await generateNextOrderNumber()
+  // Generate automatic internal order number with optimistic retry for concurrent inserts.
+  // Requires unique index on orders.internal_order_number (already in DB migrations).
+  let order: any = null
+  let finalError: { message?: string } | null = null
+  const MAX_CREATE_RETRIES = 5
 
-  // Create order
-  const { data: order, error: orderError } = await supabase
-    .from("orders")
-    .insert({
-      customer_id: formData.customer_id,
-      internal_order_number: internalOrderNumber, // Auto-generated internal order number
-      sales_order_number: formData.sales_order_number || null, // Manual sales order number from other platforms
-      cash_discount: formData.cash_discount,
-      order_status: "New Order",
-      payment_status: "Pending",
-      total_price: 0, // Will be updated when items are added
-      created_by: profile.id,
-    })
-    .select()
-    .single()
+  for (let attempt = 1; attempt <= MAX_CREATE_RETRIES; attempt++) {
+    const internalOrderNumber = await generateNextOrderNumber()
+    const { data, error: orderError } = await supabase
+      .from("orders")
+      .insert({
+        customer_id: formData.customer_id,
+        internal_order_number: internalOrderNumber, // Auto-generated internal order number
+        sales_order_number: formData.sales_order_number || null, // Manual sales order number from other platforms
+        cash_discount: formData.cash_discount,
+        order_status: "New Order",
+        payment_status: "Pending",
+        total_price: 0, // Will be updated when items are added
+        created_by: profile.id,
+      })
+      .select()
+      .single()
 
-  if (orderError) {
-    return { success: false, error: orderError.message }
+    if (!orderError) {
+      order = data
+      finalError = null
+      break
+    }
+
+    if (isUniqueViolation(orderError) && attempt < MAX_CREATE_RETRIES) {
+      // Another request inserted the same SK number first; retry with a fresh number.
+      continue
+    }
+
+    finalError = orderError
+    break
+  }
+
+  if (!order) {
+    return { success: false, error: finalError?.message || "Failed to create order" }
   }
 
   revalidatePath("/dashboard/orders")
@@ -991,7 +1016,8 @@ export async function createDispatch(
   notes?: string,
   courierCompanyId?: string,
   trackingId?: string,
-  productionRecordId?: string
+  productionRecordId?: string,
+  estimatedDelivery?: string
 ) {
   const supabase = await createClient()
 
@@ -1087,6 +1113,7 @@ export async function createDispatch(
       courier_company_id: courierCompanyId || null,
       tracking_id: trackingId || null,
       production_record_id: productionRecordId || null,
+      estimated_delivery: estimatedDelivery || null,
       shipment_status: 'ready', // Default status
       created_by: profile.id,
     })
@@ -1473,18 +1500,34 @@ async function syncOrderStatusAfterDispatchChange(
     if (d < Number(item.quantity)) fullyDelivered = false
   }
 
+  const IN_TRANSIT_STATUSES = ["picked_up", "in_transit", "out_for_delivery"]
+
   let nextStatus: string | null = null
   if (fullyDelivered) {
     nextStatus = "Delivered"
   } else if (someDelivered) {
     nextStatus = "Partial Delivered"
-  } else if (nonReturn.some((d) => d.shipment_status === "picked_up")) {
+  } else if (nonReturn.some((d) => IN_TRANSIT_STATUSES.includes(d.shipment_status))) {
     nextStatus = "In Transit"
+  } else if (
+    nonReturn.length > 0 &&
+    nonReturn.every((d) => ["failed_delivery", "cancelled", "returned"].includes(d.shipment_status ?? ""))
+  ) {
+    // All dispatches failed/cancelled/returned with nothing delivered → reset to dispatchable state
+    nextStatus = "Ready for Dispatch"
   }
 
   if (nextStatus) {
     await supabase.from("orders").update({ order_status: nextStatus }).eq("id", orderId)
   }
+}
+
+/** Exported wrapper so other server modules (e.g. tracking.ts) can trigger the same sync. */
+export async function syncOrderStatusFromTracking(orderId: string) {
+  const supabase = await createClient()
+  await syncOrderStatusAfterDispatchChange(supabase, orderId)
+  revalidatePath(`/dashboard/orders/${orderId}`)
+  revalidatePath("/dashboard/orders")
 }
 
 // Update dispatch shipment status

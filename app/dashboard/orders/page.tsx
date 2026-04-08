@@ -809,7 +809,7 @@ export default function OrdersPage() {
 
       {/* Orders Table - desktop only */}
       <Card className="hidden border border-sk-border bg-white lg:block">
-        <CardHeader className="border-b border-sk-border bg-[#fcf7f2] py-3 px-5">
+        <CardHeader className="sticky top-[68px] z-10 border-b border-sk-border bg-[#fcf7f2] py-3 px-5">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <div className="rounded-md bg-sk-primary-tint p-1.5">
@@ -864,10 +864,10 @@ export default function OrdersPage() {
               )}
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="[overflow-x:clip]">
               <table className="w-full border-collapse">
                 <thead>
-                  <tr className="border-b border-sk-border bg-[#fcf7f2]">
+                  <tr className="sticky top-[130px] z-10 border-b border-sk-border bg-[#fcf7f2]">
                     <th className="w-10 px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"

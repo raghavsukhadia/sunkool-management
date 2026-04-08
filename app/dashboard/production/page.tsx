@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Package, Clock, CheckCircle, ExternalLink, Printer, Activity, Search, Maximize2, Minimize2, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Check, X, FileDown } from "lucide-react"
+import { Package, Clock, CheckCircle, ExternalLink, Printer, Search, Maximize2, Minimize2, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Check, X, FileDown, Factory, Layers } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import {
@@ -17,14 +17,6 @@ import {
   type ProductionQueueRow,
   type ProductionQueueResult,
 } from "@/app/actions/production"
-import {
-  getStockPrediction,
-  getFastSlowMoving,
-  getDeadStock,
-  type StockPredictionRow,
-  type FastSlowRow,
-  type DeadStockRow,
-} from "@/app/actions/inventory-health"
 import { OrderJourneySheet } from "@/components/production/OrderJourneySheet"
 
 /** Remaining (until DONE) — uses `remainingUntilDone` from the server. */
@@ -131,15 +123,7 @@ export default function ProductionPage() {
   const [kpiData, setKpiData] = useState<ProductionKpiData | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [filter, setFilter] = useState<"pending" | "needed" | "inventory-health">("pending")
-  const [inventoryHealthView, setInventoryHealthView] = useState<"stock-prediction" | "fast-slow" | "dead-stock">("stock-prediction")
-  const [inventoryHealthDays, setInventoryHealthDays] = useState<7 | 30 | 90>(30)
-  const [inventoryHealthSearch, setInventoryHealthSearch] = useState("")
-  const [inventoryHealthFilter, setInventoryHealthFilter] = useState<"all" | "needs-action" | "low" | "dead" | "excess" | "fast">("all")
-  const [stockPredictionData, setStockPredictionData] = useState<StockPredictionRow[]>([])
-  const [fastSlowData, setFastSlowData] = useState<FastSlowRow[]>([])
-  const [deadStockData, setDeadStockData] = useState<DeadStockRow[]>([])
-  const [inventoryHealthLoading, setInventoryHealthLoading] = useState(false)
+  const [filter, setFilter] = useState<"pending" | "needed" | "under-production" | "nfp">("pending")
   const [isNeededFullscreen, setIsNeededFullscreen] = useState(false)
   const [neededLastUpdated, setNeededLastUpdated] = useState<Date | null>(null)
   const [queueSearch, setQueueSearch] = useState("")
@@ -154,6 +138,10 @@ export default function ProductionPage() {
   const [useDefaultOpenOnlyFilter, setUseDefaultOpenOnlyFilter] = useState(true)
   /** When false (default), hide line items with 0 remaining (fully allocated on an open batch until DONE on the order). */
   const [showLinesAwaitingClosure, setShowLinesAwaitingClosure] = useState(true)
+  const [nfpSearch, setNfpSearch] = useState("")
+  const [nfpSortKey, setNfpSortKey] = useState<"itemName" | "inProductionQty" | "remainingQty" | "sum">("sum")
+  const [nfpSortDir, setNfpSortDir] = useState<"asc" | "desc">("desc")
+  const [nfpStatusFilter, setNfpStatusFilter] = useState<"all" | "in-production-only" | "remaining-only" | "both">("all")
   const [selectedRow, setSelectedRow] = useState<ProductionQueueRow | null>(null)
   const [journeyOpen, setJourneyOpen] = useState(false)
   const neededFullscreenRef = useRef<HTMLDivElement>(null)
@@ -188,27 +176,6 @@ export default function ProductionPage() {
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange)
   }, [])
 
-  useEffect(() => {
-    if (filter !== "inventory-health") return
-    const loadHealth = async () => {
-      setInventoryHealthLoading(true)
-      try {
-        const [stockRes, fastRes, deadRes] = await Promise.all([
-          getStockPrediction({ days: inventoryHealthDays }),
-          getFastSlowMoving({ days: inventoryHealthDays }),
-          getDeadStock({ daysNoMovement: inventoryHealthDays }),
-        ])
-        if (stockRes.success) setStockPredictionData(stockRes.data)
-        if (fastRes.success) setFastSlowData(fastRes.data)
-        if (deadRes.success) setDeadStockData(deadRes.data)
-      } catch (e) {
-        console.error("Inventory health load error:", e)
-      } finally {
-        setInventoryHealthLoading(false)
-      }
-    }
-    loadHealth()
-  }, [filter, inventoryHealthDays])
 
   const inProgressRecords = useMemo(
     () => productionRecords.filter((r) => r.status === "in_production" || r.status === "In Progress"),
@@ -256,53 +223,6 @@ export default function ProductionPage() {
   )
   const noProductionOrderIdsSet = useMemo(() => new Set(kpiData?.noProductionOrderIds ?? []), [kpiData?.noProductionOrderIds])
 
-  // Merged inventory health data — combines stock prediction + fast/slow + dead stock into one list
-  const mergedInventoryData = useMemo(() => {
-    const speedById: Record<string, "Fast" | "Medium" | "Slow"> = {}
-    for (const r of fastSlowData) speedById[r.itemId] = r.classification
-    const deadById = new Set(deadStockData.map((r) => r.itemId))
-    const daysSinceById: Record<string, number | null> = {}
-    for (const r of deadStockData) daysSinceById[r.itemId] = r.daysSinceMovement
-
-    return stockPredictionData
-      .map((r) => ({
-        ...r,
-        speed: speedById[r.itemId] ?? null as "Fast" | "Medium" | "Slow" | null,
-        isDead: deadById.has(r.itemId),
-        daysSinceMovement: daysSinceById[r.itemId] ?? null as number | null,
-      }))
-      .sort((a, b) => {
-        const urgency = (x: typeof a) => {
-          if (x.status === "low") return 0
-          if (x.isDead && x.currentStock > 0) return 1
-          if (x.status === "ok" && x.speed === "Fast") return 2
-          if (x.status === "ok") return 3
-          if (x.status === "excess") return 4
-          return 5
-        }
-        return urgency(a) - urgency(b)
-      })
-  }, [stockPredictionData, fastSlowData, deadStockData])
-
-  const invSummary = useMemo(() => ({
-    low: mergedInventoryData.filter((r) => r.status === "low").length,
-    dead: mergedInventoryData.filter((r) => r.isDead && r.currentStock > 0).length,
-    excess: mergedInventoryData.filter((r) => r.status === "excess").length,
-    fast: mergedInventoryData.filter((r) => r.speed === "Fast").length,
-  }), [mergedInventoryData])
-
-  const filteredInventoryData = useMemo(() => {
-    const search = inventoryHealthSearch.trim().toLowerCase()
-    return mergedInventoryData.filter((r) => {
-      if (search && !r.itemName.toLowerCase().includes(search)) return false
-      if (inventoryHealthFilter === "low") return r.status === "low"
-      if (inventoryHealthFilter === "dead") return r.isDead && r.currentStock > 0
-      if (inventoryHealthFilter === "excess") return r.status === "excess"
-      if (inventoryHealthFilter === "fast") return r.speed === "Fast"
-      if (inventoryHealthFilter === "needs-action") return r.status === "low" || (r.isDead && r.currentStock > 0)
-      return true
-    })
-  }, [mergedInventoryData, inventoryHealthSearch, inventoryHealthFilter])
 
   const filteredQueueRows = useMemo(
     () =>
@@ -448,6 +368,104 @@ export default function ProductionPage() {
     () => neededList.reduce((s, r) => s + r.remainingQty, 0),
     [neededList]
   )
+
+  // Under Production: items currently active in an in-production batch.
+  const underProductionList = useMemo(() => {
+    if (!queueData?.rows?.length) return []
+    const byName: Record<string, {
+      orderCount: number
+      inProductionQty: number
+      batches: Set<string>
+      customers: Set<string>
+    }> = {}
+    for (const row of queueData.rows) {
+      if (!row.hasInProductionRecord) continue
+      const rp = getRequestedProduction(row)
+      const cur = byName[row.itemName] ?? { orderCount: 0, inProductionQty: 0, batches: new Set(), customers: new Set() }
+      cur.orderCount += 1
+      cur.inProductionQty += rp
+      for (const b of row.activeBatchLabels) cur.batches.add(b)
+      cur.customers.add(row.customerName)
+      byName[row.itemName] = cur
+    }
+    return Object.entries(byName)
+      .map(([itemName, v]) => ({
+        itemName,
+        orderCount: v.orderCount,
+        inProductionQty: v.inProductionQty,
+        batches: Array.from(v.batches).sort(),
+        customers: Array.from(v.customers).sort(),
+      }))
+      .sort((a, b) => b.inProductionQty - a.inProductionQty)
+  }, [queueData?.rows])
+
+  const underProductionTotalQty = useMemo(
+    () => underProductionList.reduce((s, r) => s + r.inProductionQty, 0),
+    [underProductionList]
+  )
+
+  // NFP: per-item breakdown of In Production + Remaining = Total Need.
+  // Computed directly from queue rows for accuracy (no double-counting).
+  const nfpList = useMemo(() => {
+    if (!queueData?.rows?.length) return []
+    const byName: Record<string, {
+      inProductionQty: number
+      remainingQty: number
+      batches: Set<string>
+      orderLines: number
+    }> = {}
+    for (const row of queueData.rows) {
+      const rp  = getRequestedProduction(row)
+      const rem = getRemainingUntilDone(row)
+      if (rp <= 0 && rem <= 0) continue
+      if (!byName[row.itemName]) byName[row.itemName] = { inProductionQty: 0, remainingQty: 0, batches: new Set(), orderLines: 0 }
+      const cur = byName[row.itemName]
+      cur.inProductionQty += rp
+      cur.remainingQty    += rem
+      cur.orderLines      += 1
+      for (const b of row.activeBatchLabels) cur.batches.add(b)
+    }
+    return Object.entries(byName).map(([itemName, v]) => ({
+      itemName,
+      inProductionQty: v.inProductionQty,
+      remainingQty:    v.remainingQty,
+      sum:             v.inProductionQty + v.remainingQty,
+      batches:         Array.from(v.batches).sort(),
+      orderLines:      v.orderLines,
+    }))
+  }, [queueData?.rows])
+
+  const filteredSortedNfpList = useMemo(() => {
+    const search = nfpSearch.trim().toLowerCase()
+    let rows = nfpList.filter((r) => {
+      if (search && !r.itemName.toLowerCase().includes(search)) return false
+      if (nfpStatusFilter === "in-production-only") return r.inProductionQty > 0 && r.remainingQty === 0
+      if (nfpStatusFilter === "remaining-only")     return r.remainingQty > 0 && r.inProductionQty === 0
+      if (nfpStatusFilter === "both")               return r.inProductionQty > 0 && r.remainingQty > 0
+      return true
+    })
+    rows = [...rows].sort((a, b) => {
+      let cmp = 0
+      if (nfpSortKey === "itemName")        cmp = a.itemName.localeCompare(b.itemName, undefined, { sensitivity: "base" })
+      else if (nfpSortKey === "inProductionQty") cmp = a.inProductionQty - b.inProductionQty
+      else if (nfpSortKey === "remainingQty")    cmp = a.remainingQty - b.remainingQty
+      else                                       cmp = a.sum - b.sum
+      return nfpSortDir === "asc" ? cmp : -cmp
+    })
+    return rows
+  }, [nfpList, nfpSearch, nfpStatusFilter, nfpSortKey, nfpSortDir])
+
+  const nfpTotals = useMemo(() => ({
+    inProduction: filteredSortedNfpList.reduce((s, r) => s + r.inProductionQty, 0),
+    remaining:    filteredSortedNfpList.reduce((s, r) => s + r.remainingQty, 0),
+    sum:          filteredSortedNfpList.reduce((s, r) => s + r.sum, 0),
+  }), [filteredSortedNfpList])
+
+  const handleNfpSort = (key: typeof nfpSortKey) => {
+    if (nfpSortKey === key) { setNfpSortDir((d) => d === "asc" ? "desc" : "asc"); return }
+    setNfpSortKey(key)
+    setNfpSortDir("desc")
+  }
 
   const handleFullscreenNeeded = () => {
     neededFullscreenRef.current?.requestFullscreen()
@@ -629,6 +647,318 @@ export default function ProductionPage() {
     setFilter("pending")
     setQueueItemFilter(itemName)
     setUseDefaultOpenOnlyFilter(true)
+  }
+
+  const handleUnderProductionItemClick = (itemName: string) => {
+    setFilter("pending")
+    setQueueItemFilter(itemName)
+    setQueueStatusFilter("In Progress")
+    setUseDefaultOpenOnlyFilter(false)
+  }
+
+  const handlePrintUnderProduction = async () => {
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) return
+
+    let logoHtml = `<div class="brand-text">SUNKOOL</div>`
+    try {
+      const response = await fetch('/images/logo.png')
+      if (response.ok) {
+        const blob = await response.blob()
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        })
+        logoHtml = `<img src="${dataUrl}" alt="Sunkool" class="brand-logo" />`
+      }
+    } catch { /* fall back to text */ }
+
+    const sorted = [...underProductionList]
+    const totalQty = sorted.reduce((s, r) => s + r.inProductionQty, 0)
+    const totalOrders = sorted.reduce((s, r) => s + r.orderCount, 0)
+    const now = new Date()
+    const dateStr = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+
+    const mid = Math.ceil(sorted.length / 2)
+    const col1 = sorted.slice(0, mid)
+    const col2 = sorted.slice(mid)
+    const maxRows = Math.max(col1.length, col2.length)
+
+    const tableRows = Array.from({ length: maxRows }, (_, i) => {
+      const a = col1[i]
+      const b = col2[i]
+      const cellA = a
+        ? `<td class="sn">${i + 1}</td>
+           <td class="item">${escapeHtml(a.itemName)}</td>
+           <td class="qty">${a.inProductionQty > 0 ? a.inProductionQty.toLocaleString() : "—"}</td>
+           <td class="batch">${escapeHtml(a.batches.join(", ") || "—")}</td>`
+        : `<td colspan="4" class="empty"></td>`
+      const cellB = b
+        ? `<td class="sn">${mid + i + 1}</td>
+           <td class="item">${escapeHtml(b.itemName)}</td>
+           <td class="qty">${b.inProductionQty > 0 ? b.inProductionQty.toLocaleString() : "—"}</td>
+           <td class="batch">${escapeHtml(b.batches.join(", ") || "—")}</td>`
+        : `<td colspan="4" class="empty"></td>`
+      return `<tr>${cellA}<td class="divider"></td>${cellB}</tr>`
+    }).join("")
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Under Production – ${dateStr}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: A4; margin: 14mm 12mm; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; color: #1e293b; background: #fff; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 10px; border-bottom: 2.5px solid #2563eb; margin-bottom: 10px; }
+    .brand-logo { height: 36px; width: auto; display: block; }
+    .brand-text { font-size: 22px; font-weight: 800; color: #2563eb; letter-spacing: -0.5px; }
+    .brand-sub { font-size: 9px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-top: 1px; }
+    .doc-title { text-align: right; }
+    .doc-title h2 { font-size: 15px; font-weight: 700; color: #1e293b; text-transform: uppercase; letter-spacing: 1px; }
+    .doc-title p { font-size: 9px; color: #64748b; margin-top: 2px; }
+    .meta { display: flex; gap: 0; margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; }
+    .meta-cell { flex: 1; padding: 7px 12px; border-right: 1px solid #e2e8f0; }
+    .meta-cell:last-child { border-right: none; }
+    .meta-label { font-size: 8.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; }
+    .meta-value { font-size: 13px; font-weight: 700; color: #1e293b; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #1e3a8a; color: #fff; }
+    thead th { padding: 7px 8px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; }
+    th.sn, td.sn { width: 26px; text-align: center; }
+    th.item, td.item { text-align: left; padding-left: 10px; }
+    th.qty, td.qty { width: 52px; text-align: right; font-weight: 700; color: #2563eb; }
+    th.batch, td.batch { width: 80px; text-align: left; padding-left: 8px; font-size: 9.5px; color: #64748b; }
+    th.divider, td.divider { width: 10px; background: #f8fafc; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; }
+    tbody tr { border-bottom: 1px solid #f1f5f9; }
+    tbody tr:nth-child(even) { background: #f0f9ff; }
+    td { padding: 6px 8px; font-size: 10.5px; color: #334155; }
+    td.sn { color: #94a3b8; font-size: 9.5px; }
+    td.qty { font-size: 11px; }
+    td.empty { background: #fafafa; }
+    .totals-row td { border-top: 2px solid #1e293b; font-weight: 700; font-size: 11px; padding: 8px; background: #f1f5f9; }
+    .totals-label { text-align: right; text-transform: uppercase; letter-spacing: 0.5px; font-size: 9.5px; color: #64748b; }
+    .footer { margin-top: 14px; padding-top: 8px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 8.5px; color: #94a3b8; }
+    .footer strong { color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      ${logoHtml}
+      <div class="brand-sub">Production Management System</div>
+    </div>
+    <div class="doc-title">
+      <h2>Under Production</h2>
+      <p>Items currently active in production batches — sorted by in-production quantity</p>
+    </div>
+  </div>
+  <div class="meta">
+    <div class="meta-cell"><div class="meta-label">Date</div><div class="meta-value">${dateStr}</div></div>
+    <div class="meta-cell"><div class="meta-label">Time</div><div class="meta-value">${timeStr}</div></div>
+    <div class="meta-cell"><div class="meta-label">Total Items</div><div class="meta-value">${sorted.length}</div></div>
+    <div class="meta-cell"><div class="meta-label">Total Order Lines</div><div class="meta-value">${totalOrders.toLocaleString()}</div></div>
+    <div class="meta-cell"><div class="meta-label">Total Units In Prod.</div><div class="meta-value">${totalQty.toLocaleString()}</div></div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th class="sn">#</th>
+        <th class="item">Item Name</th>
+        <th class="qty">In Prod.</th>
+        <th class="batch">Active Batch</th>
+        <th class="divider"></th>
+        <th class="sn">#</th>
+        <th class="item">Item Name</th>
+        <th class="qty">In Prod.</th>
+        <th class="batch">Active Batch</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRows}
+      <tr class="totals-row">
+        <td colspan="2" class="totals-label">Total units in production</td>
+        <td class="qty" style="color:#1e293b">${totalQty.toLocaleString()}</td>
+        <td class="batch"></td>
+        <td class="divider"></td>
+        <td colspan="3" style="background:#f1f5f9"></td>
+        <td class="batch"></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="footer">
+    <span>Printed: <strong>${dateStr}, ${timeStr}</strong></span>
+    <span>Sunkool Production Management · Confidential</span>
+    <span>Active items currently being produced</span>
+  </div>
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`)
+    printWindow.document.close()
+  }
+
+  const handleNfpItemClick = (itemName: string) => {
+    setFilter("pending")
+    setQueueItemFilter(itemName)
+    setQueueStatusFilter("All")
+    setUseDefaultOpenOnlyFilter(false)
+  }
+
+  const handlePrintNfp = async () => {
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) return
+
+    let logoHtml = `<div class="brand-text">SUNKOOL</div>`
+    try {
+      const res = await fetch('/images/logo.png')
+      if (res.ok) {
+        const blob = await res.blob()
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        })
+        logoHtml = `<img src="${dataUrl}" alt="Sunkool" class="brand-logo" />`
+      }
+    } catch { /* fall back to text */ }
+
+    const rows  = filteredSortedNfpList
+    const totalIP  = rows.reduce((s, r) => s + r.inProductionQty, 0)
+    const totalRem = rows.reduce((s, r) => s + r.remainingQty, 0)
+    const totalSum = rows.reduce((s, r) => s + r.sum, 0)
+    const now = new Date()
+    const dateStr = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+
+    const tableRows = rows.map((r, i) => {
+      const ipPct  = r.sum > 0 ? Math.round((r.inProductionQty / r.sum) * 100) : 0
+      const remPct = 100 - ipPct
+      const statusLabel = r.inProductionQty > 0 && r.remainingQty > 0
+        ? "Mixed" : r.inProductionQty > 0 ? "In Prod." : "Pending"
+      const statusColor = r.inProductionQty > 0 && r.remainingQty > 0
+        ? "#7c3aed" : r.inProductionQty > 0 ? "#16a34a" : "#dc2626"
+      return `<tr>
+        <td class="sn">${i + 1}</td>
+        <td class="item">
+          <div>${escapeHtml(r.itemName)}</div>
+          <div class="bar-wrap">
+            <div class="bar-ip"  style="width:${ipPct}%"></div>
+            <div class="bar-rem" style="width:${remPct}%"></div>
+          </div>
+        </td>
+        <td class="ip">${r.inProductionQty > 0 ? r.inProductionQty.toLocaleString() : "—"}</td>
+        <td class="rem">${r.remainingQty > 0 ? r.remainingQty.toLocaleString() : "—"}</td>
+        <td class="sum">${r.sum.toLocaleString()}</td>
+        <td class="batch">${escapeHtml(r.batches.join(", ") || "—")}</td>
+        <td class="status" style="color:${statusColor}">${statusLabel}</td>
+      </tr>`
+    }).join("")
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>NFP – Need for Production – ${dateStr}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    @page{size:A4;margin:12mm 10mm}
+    body{font-family:'Segoe UI',system-ui,sans-serif;font-size:10px;color:#1e293b;background:#fff}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:9px;border-bottom:2.5px solid #7c3aed;margin-bottom:9px}
+    .brand-logo{height:34px;width:auto;display:block}
+    .brand-text{font-size:20px;font-weight:800;color:#7c3aed;letter-spacing:-0.5px}
+    .brand-sub{font-size:8.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:1px}
+    .doc-title{text-align:right}
+    .doc-title h2{font-size:14px;font-weight:700;color:#1e293b;text-transform:uppercase;letter-spacing:1px}
+    .doc-title p{font-size:8.5px;color:#64748b;margin-top:2px}
+    .meta{display:flex;gap:0;margin-bottom:10px;border:1px solid #e2e8f0;border-radius:5px;overflow:hidden}
+    .meta-cell{flex:1;padding:6px 10px;border-right:1px solid #e2e8f0}
+    .meta-cell:last-child{border-right:none}
+    .ml{font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:#94a3b8}
+    .mv{font-size:12px;font-weight:700;color:#1e293b;margin-top:2px}
+    .mv.ip{color:#16a34a}.mv.rem{color:#dc2626}.mv.sum{color:#7c3aed}
+    table{width:100%;border-collapse:collapse}
+    thead tr{background:#4c1d95;color:#fff}
+    thead th{padding:6px 7px;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+    th.sn,td.sn{width:22px;text-align:center}
+    th.item,td.item{text-align:left;padding-left:8px;min-width:140px}
+    th.ip,td.ip{width:52px;text-align:right;color:#16a34a;font-weight:700}
+    th.rem,td.rem{width:52px;text-align:right;color:#dc2626;font-weight:700}
+    th.sum,td.sum{width:52px;text-align:right;color:#7c3aed;font-weight:800}
+    th.batch,td.batch{width:70px;text-align:left;padding-left:6px;font-size:8.5px;color:#64748b}
+    th.status,td.status{width:46px;text-align:center;font-size:8px;font-weight:700}
+    tbody tr{border-bottom:1px solid #f1f5f9}
+    tbody tr:nth-child(even){background:#faf5ff}
+    td{padding:5px 7px;font-size:9.5px;color:#334155}
+    td.sn{color:#94a3b8;font-size:9px}
+    .bar-wrap{display:flex;height:3px;border-radius:2px;overflow:hidden;margin-top:3px;background:#f1f5f9}
+    .bar-ip{background:#16a34a}
+    .bar-rem{background:#dc2626}
+    .totals-row td{border-top:2px solid #4c1d95;font-weight:700;font-size:10px;padding:7px;background:#f5f3ff}
+    .footer{margin-top:12px;padding-top:7px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;font-size:8px;color:#94a3b8}
+    .footer strong{color:#64748b}
+    .legend{display:flex;gap:12px;font-size:8px;margin-bottom:8px;align-items:center}
+    .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:3px}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>${logoHtml}<div class="brand-sub">Production Management System</div></div>
+    <div class="doc-title">
+      <h2>NFP — Need for Production</h2>
+      <p>In Production + Remaining = Total need per item across all open orders</p>
+    </div>
+  </div>
+  <div class="meta">
+    <div class="meta-cell"><div class="ml">Date</div><div class="mv">${dateStr}</div></div>
+    <div class="meta-cell"><div class="ml">Time</div><div class="mv">${timeStr}</div></div>
+    <div class="meta-cell"><div class="ml">Items</div><div class="mv">${rows.length}</div></div>
+    <div class="meta-cell"><div class="ml">In Production</div><div class="mv ip">${totalIP.toLocaleString()}</div></div>
+    <div class="meta-cell"><div class="ml">Remaining</div><div class="mv rem">${totalRem.toLocaleString()}</div></div>
+    <div class="meta-cell"><div class="ml">Total NFP</div><div class="mv sum">${totalSum.toLocaleString()}</div></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#16a34a"></span>In Production</span>
+    <span><span class="dot" style="background:#dc2626"></span>Remaining (not yet started)</span>
+    <span><span class="dot" style="background:#7c3aed"></span>NFP Total</span>
+    <span style="color:#94a3b8;margin-left:4px">· Mini bar = production progress split per item</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th class="sn">#</th>
+        <th class="item">Item Name</th>
+        <th class="ip">In Prod.</th>
+        <th class="rem">Remaining</th>
+        <th class="sum">NFP Total</th>
+        <th class="batch">Active Batch</th>
+        <th class="status">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRows}
+      <tr class="totals-row">
+        <td></td><td style="text-align:right;font-size:8.5px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Totals</td>
+        <td class="ip">${totalIP.toLocaleString()}</td>
+        <td class="rem">${totalRem.toLocaleString()}</td>
+        <td class="sum">${totalSum.toLocaleString()}</td>
+        <td></td><td></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="footer">
+    <span>Printed: <strong>${dateStr}, ${timeStr}</strong></span>
+    <span>Sunkool Production Management · Confidential</span>
+    <span>NFP = Need for Production per item type</span>
+  </div>
+  <script>window.onload=()=>{window.print()}</script>
+</body>
+</html>`)
+    printWindow.document.close()
   }
 
   const handleQueueStatusChange = (value: QueueStatusFilter) => {
@@ -875,15 +1205,6 @@ export default function ProductionPage() {
   return (
     <div className="space-y-5 bg-[#F1F5F9] pb-3 lg:space-y-6">
       {/* Header */}
-      <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm lg:px-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h1 className="text-[22px] font-semibold text-[#0F172A]">Production</h1>
-          <p className="mt-1 text-xs text-slate-400">{todayLabel}</p>
-        </div>
-
-      </div>
-      </div>
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -969,7 +1290,7 @@ export default function ProductionPage() {
       </div>
 
       {/* Tab Navigation */}
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="sticky top-[68px] z-20 rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex overflow-x-auto">
           {[
             { key: "pending" as const, icon: Clock, label: "Production Queue", count: sortedQueueRows.length, tabTitle: undefined as string | undefined },
@@ -980,7 +1301,20 @@ export default function ProductionPage() {
               count: neededRemainingTotal,
               tabTitle: undefined as string | undefined,
             },
-            { key: "inventory-health" as const, icon: Activity, label: "Inventory Health", count: null as number | null, tabTitle: undefined as string | undefined },
+            {
+              key: "under-production" as const,
+              icon: Factory,
+              label: "Under Production",
+              count: underProductionList.length,
+              tabTitle: undefined as string | undefined,
+            },
+            {
+              key: "nfp" as const,
+              icon: Layers,
+              label: "NFP",
+              count: nfpList.length,
+              tabTitle: "Need for Production — In Production + Remaining per item" as string | undefined,
+            },
           ].map(({ key, icon: Icon, label, count, tabTitle }) => (
             <button
               key={key}
@@ -1588,274 +1922,391 @@ export default function ProductionPage() {
             </div>
           )}
         </div>
-      ) : filter === "inventory-health" ? (
-        <div className="space-y-4">
+      ) : filter === "under-production" ? (
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           {/* Header */}
-          <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="text-[17px] font-semibold text-[#0F172A]">Inventory Intelligence</h2>
-                <p className="mt-0.5 text-xs text-slate-400">What needs your attention — sorted by urgency</p>
+          <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-[16px] font-semibold text-slate-900">Under Production</h2>
+                <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[12px] font-semibold text-blue-600">
+                  {underProductionList.length} items
+                </span>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Period:</span>
-                {([7, 30, 90] as const).map((d) => (
+              <p className="mt-0.5 text-xs text-slate-400">
+                Items currently active in production batches —{" "}
+                <span className="font-medium text-slate-600">
+                  {underProductionTotalQty.toLocaleString()} units in production
+                </span>{" "}
+                across {underProductionList.reduce((s, r) => s + r.orderCount, 0).toLocaleString()} order line{underProductionList.reduce((s, r) => s + r.orderCount, 0) === 1 ? "" : "s"} ·{" "}
+                {underProductionList.length} item type{underProductionList.length === 1 ? "" : "s"}
+                {neededLastUpdated && <span className="ml-2">· Updated {neededLastUpdated.toLocaleTimeString()}</span>}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 print:hidden">
+              <button
+                type="button"
+                onClick={handlePrintUnderProduction}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-[13px] font-medium text-slate-600 shadow-sm transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+              >
+                <Printer className="h-4 w-4" />
+                Print list
+              </button>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="p-4">
+            {underProductionList.length === 0 ? (
+              <div className="py-16 text-center">
+                <Factory className="mx-auto mb-3 h-12 w-12 text-slate-300" />
+                <p className="font-medium text-slate-600">Nothing in production</p>
+                <p className="mt-1 text-sm text-slate-400">No items currently have active production batches.</p>
+              </div>
+            ) : (
+              (() => {
+                const mid = Math.ceil(underProductionList.length / 2)
+                const col1 = underProductionList.slice(0, mid)
+                const col2 = underProductionList.slice(mid)
+
+                const renderCol = (
+                  rows: { itemName: string; inProductionQty: number; batches: string[]; orderCount: number; customers: string[] }[],
+                  offset: number
+                ) => (
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b-2 border-slate-200 bg-slate-50">
+                          <th className="w-8 px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">#</th>
+                          <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">Item</th>
+                          <th className="w-28 px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">Batch</th>
+                          <th className="w-32 px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-slate-400">In Prod. Qty</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map(({ itemName, inProductionQty, batches, orderCount }, i) => (
+                          <tr
+                            key={itemName}
+                            onClick={() => handleUnderProductionItemClick(itemName)}
+                            className={cn(
+                              "cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-blue-50/60",
+                              i % 2 === 0 ? "bg-white" : "bg-slate-50/40"
+                            )}
+                          >
+                            <td className="px-4 py-3 text-[11px] font-medium text-slate-300">{offset + i + 1}</td>
+                            <td className="px-4 py-3">
+                              <span className="text-[13px] font-medium text-slate-800">{itemName}</span>
+                              {orderCount > 1 && (
+                                <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                                  {orderCount} orders
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              {batches.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {batches.map((b) => (
+                                    <span key={b} className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                                      {b}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-slate-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={cn(
+                                "inline-flex items-center rounded-full px-3 py-1 text-[13px] font-bold",
+                                inProductionQty >= 100
+                                  ? "bg-blue-100 text-blue-700"
+                                  : inProductionQty >= 25
+                                    ? "bg-indigo-100 text-indigo-700"
+                                    : "bg-slate-100 text-slate-600"
+                              )}>
+                                {inProductionQty > 0 ? inProductionQty.toLocaleString() : "—"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+
+                return (
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    {renderCol(col1, 0)}
+                    {col2.length > 0 && renderCol(col2, mid)}
+                  </div>
+                )
+              })()
+            )}
+          </div>
+
+          {/* Footer */}
+          {underProductionList.length > 0 && (
+            <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/80 px-5 py-3 print:hidden">
+              <p className="text-xs text-slate-400">
+                Sorted by in-production quantity · Click an item to open the queue filtered to that SKU
+              </p>
+              <p className="text-xs font-semibold text-slate-600">
+                Total: {underProductionTotalQty.toLocaleString()} units · {underProductionList.reduce((s, r) => s + r.orderCount, 0).toLocaleString()} order line{underProductionList.reduce((s, r) => s + r.orderCount, 0) === 1 ? "" : "s"} · {underProductionList.length} item type{underProductionList.length === 1 ? "" : "s"}
+              </p>
+            </div>
+          )}
+        </div>
+      ) : filter === "nfp" ? (
+        <div className="space-y-4">
+
+          {/* NFP Summary bar */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-2xl border border-green-200 bg-white px-5 py-4 shadow-sm">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">In Production</p>
+              <p className="mt-1.5 text-3xl font-bold text-green-600">{nfpTotals.inProduction.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-slate-400">units active in batches</p>
+            </div>
+            <div className="rounded-2xl border border-red-200 bg-white px-5 py-4 shadow-sm">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Remaining</p>
+              <p className="mt-1.5 text-3xl font-bold text-red-600">{nfpTotals.remaining.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-slate-400">units not yet started</p>
+            </div>
+            <div className="rounded-2xl border border-violet-200 bg-white px-5 py-4 shadow-sm">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">NFP Total</p>
+              <p className="mt-1.5 text-3xl font-bold text-violet-600">{nfpTotals.sum.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-slate-400">total units needed across {filteredSortedNfpList.length} items</p>
+            </div>
+          </div>
+
+          {/* Master NFP Table */}
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            {/* Header */}
+            <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <Layers className="h-4 w-4 text-violet-500" />
+                  <h2 className="text-[16px] font-semibold text-slate-900">Need for Production</h2>
+                  <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-[12px] font-semibold text-violet-600">
+                    {filteredSortedNfpList.length} items
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  Per-item total production need —{" "}
+                  <span className="font-semibold text-green-600">{nfpTotals.inProduction.toLocaleString()} in production</span>
+                  {" "}+{" "}
+                  <span className="font-semibold text-red-500">{nfpTotals.remaining.toLocaleString()} remaining</span>
+                  {" "}={" "}
+                  <span className="font-semibold text-violet-600">{nfpTotals.sum.toLocaleString()} NFP total</span>
+                  {neededLastUpdated && <span className="ml-2 text-slate-300">· {neededLastUpdated.toLocaleTimeString()}</span>}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 print:hidden">
+                <button
+                  type="button"
+                  onClick={handlePrintNfp}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-[13px] font-medium text-slate-600 shadow-sm transition-colors hover:border-violet-300 hover:bg-violet-50 hover:text-violet-600"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print NFP
+                </button>
+              </div>
+            </div>
+
+            {/* Toolbar: search + filter chips */}
+            <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/60 px-5 py-3 lg:flex-row lg:items-center">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={nfpSearch}
+                  onChange={(e) => setNfpSearch(e.target.value)}
+                  placeholder="Search item…"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-[3px] focus:ring-violet-400/15"
+                />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {([
+                  { key: "all",                label: "All",          color: "slate"  },
+                  { key: "both",               label: "Mixed",        color: "violet" },
+                  { key: "in-production-only", label: "In Prod. only",color: "green"  },
+                  { key: "remaining-only",     label: "Remaining only",color: "red"   },
+                ] as const).map(({ key, label, color }) => (
                   <button
-                    key={d}
+                    key={key}
                     type="button"
-                    onClick={() => setInventoryHealthDays(d)}
+                    onClick={() => setNfpStatusFilter(key)}
                     className={cn(
-                      "h-8 rounded-lg px-3 text-[13px] font-medium transition-colors",
-                      inventoryHealthDays === d
-                        ? "bg-orange-500 text-white"
-                        : "border border-slate-200 bg-white text-slate-600 hover:border-orange-300 hover:text-orange-500"
+                      "rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors",
+                      nfpStatusFilter === key
+                        ? color === "slate"  ? "border-slate-400  bg-slate-200  text-slate-800"
+                        : color === "violet" ? "border-violet-400 bg-violet-100 text-violet-700"
+                        : color === "green"  ? "border-green-400  bg-green-100  text-green-700"
+                        :                     "border-red-400    bg-red-100    text-red-700"
+                        : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
                     )}
                   >
-                    {d}d
+                    {label}
                   </button>
                 ))}
               </div>
             </div>
-          </div>
 
-          {inventoryHealthLoading ? (
-            <div className="rounded-2xl border border-slate-200 bg-white py-16 text-center shadow-sm">
-              <Activity className="mx-auto mb-3 h-8 w-8 animate-pulse text-slate-300" />
-              <p className="text-sm text-slate-400">Analysing your inventory...</p>
-            </div>
-          ) : (
-            <>
-              {/* Summary cards */}
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <button
-                  type="button"
-                  onClick={() => setInventoryHealthFilter(inventoryHealthFilter === "low" ? "all" : "low")}
-                  className={cn(
-                    "rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md",
-                    inventoryHealthFilter === "low" ? "border-red-400 ring-2 ring-red-100" : "border-slate-200 hover:border-red-200"
-                  )}
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Low Stock</p>
-                    <span className="text-lg">🔴</span>
-                  </div>
-                  <p className="mt-2 text-3xl font-bold text-slate-900">{invSummary.low}</p>
-                  <p className="mt-1 text-[11px] text-slate-500">items running low — produce soon</p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setInventoryHealthFilter(inventoryHealthFilter === "dead" ? "all" : "dead")}
-                  className={cn(
-                    "rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md",
-                    inventoryHealthFilter === "dead" ? "border-amber-400 ring-2 ring-amber-100" : "border-slate-200 hover:border-amber-200"
-                  )}
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Not Moving</p>
-                    <span className="text-lg">📦</span>
-                  </div>
-                  <p className="mt-2 text-3xl font-bold text-slate-900">{invSummary.dead}</p>
-                  <p className="mt-1 text-[11px] text-slate-500">items with stock but no sales</p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setInventoryHealthFilter(inventoryHealthFilter === "fast" ? "all" : "fast")}
-                  className={cn(
-                    "rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md",
-                    inventoryHealthFilter === "fast" ? "border-green-400 ring-2 ring-green-100" : "border-slate-200 hover:border-green-200"
-                  )}
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Fast Moving</p>
-                    <span className="text-lg">🚀</span>
-                  </div>
-                  <p className="mt-2 text-3xl font-bold text-slate-900">{invSummary.fast}</p>
-                  <p className="mt-1 text-[11px] text-slate-500">top selling items — keep stocked</p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setInventoryHealthFilter(inventoryHealthFilter === "excess" ? "all" : "excess")}
-                  className={cn(
-                    "rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md",
-                    inventoryHealthFilter === "excess" ? "border-slate-500 ring-2 ring-slate-100" : "border-slate-200 hover:border-slate-400"
-                  )}
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Overstocked</p>
-                    <span className="text-lg">⚠️</span>
-                  </div>
-                  <p className="mt-2 text-3xl font-bold text-slate-900">{invSummary.excess}</p>
-                  <p className="mt-1 text-[11px] text-slate-500">items with excess inventory</p>
-                </button>
+            {/* Table */}
+            {filteredSortedNfpList.length === 0 ? (
+              <div className="py-16 text-center">
+                <Layers className="mx-auto mb-3 h-12 w-12 text-slate-200" />
+                <p className="font-medium text-slate-500">No items match your filters</p>
+                <p className="mt-1 text-sm text-slate-400">All production is fully caught up.</p>
               </div>
-
-              {/* Filter + Search bar */}
-              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="flex flex-wrap gap-1.5">
-                    {(["all", "needs-action", "low", "dead", "fast", "excess"] as const).map((f) => {
-                      const labels: Record<typeof f, string> = {
-                        "all": "All items",
-                        "needs-action": `⚠️ Needs Action (${invSummary.low + invSummary.dead})`,
-                        "low": `🔴 Low Stock (${invSummary.low})`,
-                        "dead": `📦 Not Moving (${invSummary.dead})`,
-                        "fast": `🚀 Fast Moving (${invSummary.fast})`,
-                        "excess": `Overstocked (${invSummary.excess})`,
-                      }
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-left">
+                      <th className="w-10 px-4 py-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400">#</th>
+                      <th className="px-4 py-3">
+                        <button type="button" onClick={() => handleNfpSort("itemName")} className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 hover:text-slate-700">
+                          Item {nfpSortKey === "itemName" ? (nfpSortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+                        </button>
+                      </th>
+                      <th className="w-36 px-4 py-3">
+                        <button type="button" onClick={() => handleNfpSort("inProductionQty")} className="inline-flex w-full items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-widest text-green-500 hover:text-green-700">
+                          In Production {nfpSortKey === "inProductionQty" ? (nfpSortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+                        </button>
+                      </th>
+                      <th className="w-36 px-4 py-3">
+                        <button type="button" onClick={() => handleNfpSort("remainingQty")} className="inline-flex w-full items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-widest text-red-400 hover:text-red-600">
+                          Remaining {nfpSortKey === "remainingQty" ? (nfpSortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+                        </button>
+                      </th>
+                      <th className="w-36 px-4 py-3">
+                        <button type="button" onClick={() => handleNfpSort("sum")} className="inline-flex w-full items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-widest text-violet-500 hover:text-violet-700">
+                          NFP Total {nfpSortKey === "sum" ? (nfpSortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+                        </button>
+                      </th>
+                      <th className="w-36 px-4 py-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Active Batch</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSortedNfpList.map((row, i) => {
+                      const ipPct  = row.sum > 0 ? (row.inProductionQty / row.sum) * 100 : 0
+                      const remPct = row.sum > 0 ? (row.remainingQty    / row.sum) * 100 : 0
+                      const isInProdOnly  = row.inProductionQty > 0 && row.remainingQty === 0
+                      const isRemOnly     = row.remainingQty > 0 && row.inProductionQty === 0
+                      const isMixed       = row.inProductionQty > 0 && row.remainingQty > 0
                       return (
-                        <button
-                          key={f}
-                          type="button"
-                          onClick={() => setInventoryHealthFilter(f)}
+                        <tr
+                          key={row.itemName}
+                          onClick={() => handleNfpItemClick(row.itemName)}
                           className={cn(
-                            "h-7 rounded-full px-3 text-[12px] font-medium transition-colors",
-                            inventoryHealthFilter === f
-                              ? "bg-orange-500 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            "cursor-pointer border-b border-slate-100 transition-colors last:border-0",
+                            i % 2 === 0 ? "bg-white hover:bg-violet-50/40" : "bg-slate-50/40 hover:bg-violet-50/60"
                           )}
                         >
-                          {labels[f]}
-                        </button>
+                          <td className="px-4 py-3 text-[11px] font-medium text-slate-300">{i + 1}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div>
+                                <p className="text-[13px] font-medium text-slate-800">{row.itemName}</p>
+                                {/* Progress bar: green = in production, red = remaining */}
+                                <div className="mt-1.5 flex h-[5px] w-40 overflow-hidden rounded-full bg-slate-100">
+                                  {ipPct > 0 && <div className="h-full rounded-l-full bg-green-500 transition-all" style={{ width: `${ipPct}%` }} />}
+                                  {remPct > 0 && <div className="h-full rounded-r-full bg-red-400 transition-all" style={{ width: `${remPct}%` }} />}
+                                </div>
+                              </div>
+                              <div className="ml-1">
+                                {isInProdOnly && <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">In Prod. only</span>}
+                                {isRemOnly    && <span className="rounded-full bg-red-100   px-2 py-0.5 text-[10px] font-semibold text-red-700">Pending</span>}
+                                {isMixed      && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Mixed</span>}
+                              </div>
+                            </div>
+                            <p className="mt-0.5 text-[10px] text-slate-400">{row.orderLines} order line{row.orderLines === 1 ? "" : "s"}</p>
+                          </td>
+                          {/* In Production */}
+                          <td className="px-4 py-3 text-right">
+                            {row.inProductionQty > 0 ? (
+                              <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-[13px] font-bold text-green-700">
+                                {row.inProductionQty.toLocaleString()}
+                              </span>
+                            ) : (
+                              <span className="text-[12px] text-slate-300">—</span>
+                            )}
+                          </td>
+                          {/* Remaining */}
+                          <td className="px-4 py-3 text-right">
+                            {row.remainingQty > 0 ? (
+                              <span className={cn(
+                                "inline-flex items-center rounded-full px-3 py-1 text-[13px] font-bold",
+                                row.remainingQty >= 100 ? "bg-red-100 text-red-700" : row.remainingQty >= 25 ? "bg-amber-100 text-amber-700" : "bg-orange-100 text-orange-700"
+                              )}>
+                                {row.remainingQty.toLocaleString()}
+                              </span>
+                            ) : (
+                              <span className="text-[12px] text-slate-300">—</span>
+                            )}
+                          </td>
+                          {/* NFP Total */}
+                          <td className="px-4 py-3 text-right">
+                            <span className="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-[14px] font-extrabold text-violet-700">
+                              {row.sum.toLocaleString()}
+                            </span>
+                          </td>
+                          {/* Active Batch */}
+                          <td className="px-4 py-3">
+                            {row.batches.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {row.batches.map((b) => (
+                                  <span key={b} className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">{b}</span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400">—</span>
+                            )}
+                          </td>
+                        </tr>
                       )
                     })}
-                  </div>
-                  <div className="relative lg:w-56">
-                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                    <input
-                      value={inventoryHealthSearch}
-                      onChange={(e) => setInventoryHealthSearch(e.target.value)}
-                      placeholder="Search item..."
-                      className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-3 text-[13px] text-slate-700 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-500/15"
-                    />
-                  </div>
-                </div>
-
-                {/* Table */}
-                {filteredInventoryData.length === 0 ? (
-                  <div className="py-14 text-center">
-                    <CheckCircle className="mx-auto mb-3 h-10 w-10 text-green-400" />
-                    <p className="text-sm font-medium text-slate-600">All clear!</p>
-                    <p className="mt-1 text-xs text-slate-400">No items match this filter.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="border-b-2 border-slate-100 bg-slate-50/60">
-                        <tr>
-                          <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">Item</th>
-                          <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Stock Level</th>
-                          <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-400">In Hand</th>
-                          <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-400">Sold ({inventoryHealthDays}d)</th>
-                          <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Weeks Left</th>
-                          <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Speed</th>
-                          <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredInventoryData.map((r, i) => {
-                          const weeksBarWidth = r.weeksOfStock != null
-                            ? Math.min(100, Math.round((r.weeksOfStock / 8) * 100))
-                            : r.currentStock > 0 ? 100 : 0
-                          const barColor = r.status === "low"
-                            ? "bg-red-400"
-                            : r.status === "excess"
-                              ? "bg-slate-300"
-                              : r.weeksOfStock != null && r.weeksOfStock < 4
-                                ? "bg-amber-400"
-                                : "bg-green-400"
-
-                          const actionLabel = r.status === "low"
-                            ? { text: "Produce Now", cls: "bg-red-100 text-red-700" }
-                            : r.isDead && r.currentStock > 0
-                              ? { text: "Investigate", cls: "bg-amber-100 text-amber-700" }
-                              : r.status === "excess"
-                                ? { text: "Overstocked", cls: "bg-slate-100 text-slate-600" }
-                                : r.speed === "Fast"
-                                  ? { text: "Keep Stocked", cls: "bg-green-100 text-green-700" }
-                                  : { text: "—", cls: "text-slate-300" }
-
-                          const weeksLabel = r.weeksOfStock != null
-                            ? `${r.weeksOfStock}w`
-                            : r.currentStock > 0 ? "∞" : "0"
-                          const weeksCls = r.status === "low"
-                            ? "bg-red-100 text-red-700 font-semibold"
-                            : r.weeksOfStock != null && r.weeksOfStock < 4
-                              ? "bg-amber-100 text-amber-700"
-                              : r.status === "excess"
-                                ? "bg-slate-100 text-slate-500"
-                                : "bg-green-100 text-green-700"
-
-                          return (
-                            <tr
-                              key={r.itemId}
-                              className={cn(
-                                "border-b border-slate-100 text-[13px] transition-colors hover:bg-orange-50/40",
-                                i % 2 === 0 ? "bg-white" : "bg-slate-50/40"
-                              )}
-                            >
-                              <td className={cn(
-                                "px-5 py-3 font-medium text-slate-900",
-                                r.status === "low" ? "border-l-[3px] border-l-red-400" : "border-l-[3px] border-l-transparent"
-                              )}>
-                                {r.itemName}
-                                {r.isDead && r.currentStock > 0 && (
-                                  <span className="ml-2 text-[10px] font-medium text-amber-500">
-                                    {r.daysSinceMovement != null ? `${r.daysSinceMovement}d no sales` : "no movement"}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="mx-auto w-24">
-                                  <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                                    <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${weeksBarWidth}%` }} />
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 text-right font-medium text-slate-800">{r.currentStock.toLocaleString()}</td>
-                              <td className="px-4 py-3 text-right text-slate-500">{r.demandInPeriod > 0 ? r.demandInPeriod : "—"}</td>
-                              <td className="px-4 py-3 text-center">
-                                <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px]", weeksCls)}>
-                                  {weeksLabel}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                {r.speed ? (
-                                  <span className={cn(
-                                    "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
-                                    r.speed === "Fast" ? "bg-green-100 text-green-700"
-                                      : r.speed === "Slow" ? "bg-amber-100 text-amber-700"
-                                        : "bg-slate-100 text-slate-500"
-                                  )}>
-                                    {r.speed}
-                                  </span>
-                                ) : <span className="text-slate-300">—</span>}
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium", actionLabel.cls)}>
-                                  {actionLabel.text}
-                                </span>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                    <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-3">
-                      <p className="text-xs text-slate-400">
-                        Showing {filteredInventoryData.length} of {mergedInventoryData.length} items · Period: last {inventoryHealthDays} days
-                        {invSummary.low > 0 && (
-                          <span className="ml-3 font-medium text-red-500">{invSummary.low} item{invSummary.low > 1 ? "s" : ""} need production attention</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                )}
+                  </tbody>
+                  {/* Totals footer row */}
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-200 bg-slate-50">
+                      <td colSpan={2} className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Totals — {filteredSortedNfpList.length} item type{filteredSortedNfpList.length === 1 ? "" : "s"}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="text-[13px] font-bold text-green-700">{nfpTotals.inProduction.toLocaleString()}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="text-[13px] font-bold text-red-600">{nfpTotals.remaining.toLocaleString()}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="text-[14px] font-extrabold text-violet-700">{nfpTotals.sum.toLocaleString()}</span>
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
               </div>
-            </>
-          )}
+            )}
+
+            {/* Footer hint */}
+            {filteredSortedNfpList.length > 0 && (
+              <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/80 px-5 py-3 print:hidden">
+                <p className="text-xs text-slate-400">
+                  Click any row to open Production Queue filtered to that item ·{" "}
+                  <span className="inline-flex items-center gap-1">
+                    <span className="inline-block h-2 w-4 rounded-sm bg-green-400"></span> In Production
+                  </span>
+                  {" "}<span className="inline-flex items-center gap-1">
+                    <span className="inline-block h-2 w-4 rounded-sm bg-red-400"></span> Remaining
+                  </span>
+                </p>
+                <p className="text-xs font-semibold text-violet-600">
+                  NFP = {nfpTotals.sum.toLocaleString()} units total
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
       <OrderJourneySheet open={journeyOpen} onOpenChange={setJourneyOpen} row={selectedRow} />

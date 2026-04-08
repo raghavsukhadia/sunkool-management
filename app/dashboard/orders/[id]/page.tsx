@@ -155,6 +155,7 @@ export default function OrderDetailsPage() {
   const [dispatchType, setDispatchType] = useState<"partial" | "full" | null>(null)
   const [dispatchQuantities, setDispatchQuantities] = useState<Record<string, number>>({})
   const [dispatchNotes, setDispatchNotes] = useState<string>("")
+  const [estimatedDelivery, setEstimatedDelivery] = useState<string>("")
   const [dispatching, setDispatching] = useState(false)
   const [courierCompanies, setCourierCompanies] = useState<any[]>([])
   const [selectedCourierCompany, setSelectedCourierCompany] = useState<string>("")
@@ -982,6 +983,7 @@ export default function OrderDetailsPage() {
     setDispatchType(type)
     setShowDispatchModal(true)
     setDispatchNotes("")
+    setEstimatedDelivery("")
     setSelectedCourierCompany("")
     setTrackingId("")
     setError(null)
@@ -1013,6 +1015,11 @@ export default function OrderDetailsPage() {
       return
     }
 
+    if (!estimatedDelivery) {
+      setError("Expected Delivery date is required")
+      return
+    }
+
     setDispatching(true)
     setError(null)
 
@@ -1023,7 +1030,9 @@ export default function OrderDetailsPage() {
         dispatchItems,
         dispatchNotes || undefined,
         selectedCourierCompany || undefined,
-        trackingId || undefined
+        trackingId || undefined,
+        undefined,
+        estimatedDelivery
       )
 
       if (result.success) {
@@ -1032,6 +1041,7 @@ export default function OrderDetailsPage() {
         setDispatchType(null)
         setDispatchQuantities({})
         setDispatchNotes("")
+        setEstimatedDelivery("")
         setSelectedCourierCompany("")
         setTrackingId("")
         await loadOrderDetails()
@@ -2255,6 +2265,7 @@ export default function OrderDetailsPage() {
                                   setShowDispatchForm(true)
                                   setSelectedCourierCompany("")
                                   setTrackingId("")
+                                  setEstimatedDelivery("")
                                   setDispatchNotes("")
                                 }}
                                 className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white"
@@ -2303,14 +2314,22 @@ export default function OrderDetailsPage() {
                               <CardTitle className="text-base font-semibold text-gray-900 mb-1">
                                 {dispatch.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
                               </CardTitle>
-                              <div className="flex items-center gap-2 mt-1">
+                              <div className="flex items-center gap-3 mt-1 flex-wrap">
                                 <span className="text-xs text-gray-500">
-                                  {new Date(dispatch.dispatch_date).toLocaleDateString('en-US', {
+                                  Dispatched: {new Date(dispatch.dispatch_date).toLocaleDateString('en-US', {
                                     month: 'short',
                                     day: 'numeric',
                                     year: 'numeric'
                                   })}
                                 </span>
+                                {dispatch.estimated_delivery && (
+                                  <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5">
+                                    <Calendar className="w-3 h-3" />
+                                    ETA: {new Date(dispatch.estimated_delivery).toLocaleDateString('en-IN', {
+                                      day: '2-digit', month: 'short', year: 'numeric'
+                                    })}
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <span className={`px-2.5 py-1 rounded text-xs font-medium ${dispatch.dispatch_type === "full"
@@ -2473,6 +2492,23 @@ export default function OrderDetailsPage() {
                                           </a>
                                         )}
                                       </div>
+                                    </div>
+                                  )}
+                                  {dispatch.estimated_delivery && (
+                                    <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <Calendar className="w-4 h-4 text-emerald-600" />
+                                        <Label className="text-xs font-semibold text-emerald-700">Expected Delivery</Label>
+                                      </div>
+                                      <p className="text-base font-bold text-emerald-900">
+                                        {new Date(dispatch.estimated_delivery).toLocaleDateString('en-IN', {
+                                          day: '2-digit', month: 'short', year: 'numeric'
+                                        })}
+                                      </p>
+                                      {new Date(dispatch.estimated_delivery) < new Date(new Date().setHours(0,0,0,0)) &&
+                                        dispatch.shipment_status !== 'delivered' && (
+                                          <p className="mt-1 text-xs font-medium text-red-600">Delivery overdue</p>
+                                        )}
                                     </div>
                                   )}
                                 </div>
@@ -2699,6 +2735,25 @@ export default function OrderDetailsPage() {
                     })()}
                   </div>
 
+                  {/* Expected Delivery */}
+                  <div>
+                    <Label className="text-sm font-semibold text-gray-700 mb-2 block">
+                      Expected Delivery Date <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      type="date"
+                      value={estimatedDelivery}
+                      onChange={(e) => setEstimatedDelivery(e.target.value)}
+                      disabled={creatingDispatch}
+                      min={new Date().toISOString().split("T")[0]}
+                      className={`h-10 ${!estimatedDelivery ? "border-red-300 focus-visible:ring-red-400" : ""}`}
+                      required
+                    />
+                    {!estimatedDelivery && (
+                      <p className="mt-1 text-xs text-red-500">Required — helps track on-time delivery</p>
+                    )}
+                  </div>
+
                   {/* Notes */}
                   <div>
                     <Label className="text-sm font-semibold text-gray-700 mb-2 block">
@@ -2722,6 +2777,7 @@ export default function OrderDetailsPage() {
                         setSelectedProductionRecord(null)
                         setSelectedCourierCompany("")
                         setTrackingId("")
+                        setEstimatedDelivery("")
                         setDispatchNotes("")
                       }}
                       disabled={creatingDispatch}
@@ -2732,6 +2788,11 @@ export default function OrderDetailsPage() {
                       onClick={async () => {
                         if (!selectedCourierCompany) {
                           setError("Please select a courier company")
+                          return
+                        }
+
+                        if (!estimatedDelivery) {
+                          setError("Expected Delivery date is required")
                           return
                         }
 
@@ -2776,7 +2837,8 @@ export default function OrderDetailsPage() {
                             dispatchNotes || undefined,
                             selectedCourierCompany,
                             trackingId || undefined,
-                            selectedProductionRecord.id
+                            selectedProductionRecord.id,
+                            estimatedDelivery
                           )
 
                           if (result.success) {
@@ -2785,6 +2847,7 @@ export default function OrderDetailsPage() {
                             setSelectedProductionRecord(null)
                             setSelectedCourierCompany("")
                             setTrackingId("")
+                            setEstimatedDelivery("")
                             setDispatchNotes("")
                             await loadDispatches()
                             setTimeout(() => setSuccess(null), 3000)
@@ -2797,7 +2860,7 @@ export default function OrderDetailsPage() {
                           setCreatingDispatch(false)
                         }
                       }}
-                      disabled={creatingDispatch || !selectedCourierCompany}
+                      disabled={creatingDispatch || !selectedCourierCompany || !estimatedDelivery}
                       className="bg-green-600 hover:bg-green-700 text-white"
                     >
                       <Truck className="w-4 h-4 mr-2" />
@@ -3877,6 +3940,24 @@ export default function OrderDetailsPage() {
 
                       <div>
                         <Label className="text-sm font-semibold text-gray-700 mb-2 block">
+                          Expected Delivery Date <span className="text-red-500">*</span>
+                        </Label>
+                        <Input
+                          type="date"
+                          value={estimatedDelivery}
+                          onChange={(e) => setEstimatedDelivery(e.target.value)}
+                          disabled={dispatching}
+                          min={new Date().toISOString().split("T")[0]}
+                          className={`h-10 ${!estimatedDelivery ? "border-red-300 focus-visible:ring-red-400" : ""}`}
+                          required
+                        />
+                        {!estimatedDelivery && (
+                          <p className="mt-1 text-xs text-red-500">Required — helps track on-time delivery</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <Label className="text-sm font-semibold text-gray-700 mb-2 block">
                           Notes (Optional)
                         </Label>
                         <Input
@@ -3912,7 +3993,7 @@ export default function OrderDetailsPage() {
                 </Button>
                 <Button
                   onClick={handleCreateDispatch}
-                  disabled={dispatching || Object.values(dispatchQuantities).every(qty => qty === 0)}
+                  disabled={dispatching || Object.values(dispatchQuantities).every(qty => qty === 0) || !estimatedDelivery}
                 >
                   {dispatching ? (
                     <>

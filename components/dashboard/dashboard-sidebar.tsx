@@ -27,7 +27,6 @@ import { Button } from "@/components/ui/button"
 // ─── Constants ───────────────────────────────────────────────────────────────
 const SIDEBAR_EXPANDED  = 240
 const SIDEBAR_COLLAPSED = 64
-const AUTO_COLLAPSE_MS  = 30_000   // 30 seconds
 const LS_KEY            = "sk_sidebar_collapsed"
 const EASE              = "cubic-bezier(0.4,0,0.2,1)"
 
@@ -36,13 +35,12 @@ const NAV = [
   {
     group: "Main",
     items: [
-      { href: "/dashboard",             label: "Dashboard",  icon: Home         },
-      { href: "/dashboard/orders",      label: "Orders",     icon: ShoppingCart  },
-      { href: "/dashboard/orders/new",  label: "New Order",  icon: Package      },
-      { href: "/dashboard/production",  label: "Production", icon: Factory      },
-      { href: "/dashboard/follow-up",   label: "Follow Up",  icon: DollarSign   },
-      { href: "/dashboard/tracking",    label: "Tracking",   icon: Truck        },
-      { href: "/dashboard/customers",   label: "Customers",  icon: Users        },
+      { href: "/dashboard",            label: "Dashboard",  icon: Home         },
+      { href: "/dashboard/orders",     label: "Orders",     icon: ShoppingCart },
+      { href: "/dashboard/production", label: "Production", icon: Factory      },
+      { href: "/dashboard/follow-up",  label: "Follow Up",  icon: DollarSign   },
+      { href: "/dashboard/tracking",   label: "Tracking",   icon: Truck        },
+      { href: "/dashboard/customers",  label: "Customers",  icon: Users        },
     ],
   },
   {
@@ -70,9 +68,11 @@ function resolveTitle(pathname: string) {
 function NavItem({
   href, label, icon: Icon, isActive, collapsed,
 }: {
-  href: string; label: string
+  href: string
+  label: string
   icon: React.ComponentType<{ className?: string }>
-  isActive: boolean; collapsed: boolean
+  isActive: boolean
+  collapsed: boolean
 }) {
   return (
     <Link
@@ -82,18 +82,21 @@ function NavItem({
         "group relative flex items-center gap-3 rounded-lg transition-all duration-150",
         collapsed ? "mx-2 justify-center px-0 py-2.5" : "mx-2 px-3 py-2.5",
         isActive
-          ? "bg-sk-primary text-white shadow-sm"
-          : "text-[#94a3b8] hover:bg-white/[0.07] hover:text-white",
+          ? "bg-white/[0.10] text-white"
+          : "text-[#64748b] hover:bg-white/[0.06] hover:text-[#cbd5e1]",
       )}
     >
+      {/* Left accent bar */}
       {isActive && (
-        <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-white/50" />
+        <span className="absolute left-0 top-1/2 h-[60%] w-[3px] -translate-y-1/2 rounded-r-full bg-sk-primary" />
       )}
+
       <Icon className={cn(
-        "flex-shrink-0",
-        collapsed ? "h-[19px] w-[19px]" : "h-[17px] w-[17px]",
-        isActive ? "text-white" : "text-[#64748b] group-hover:text-white",
+        "flex-shrink-0 transition-colors duration-150",
+        collapsed ? "h-[18px] w-[18px]" : "h-[16px] w-[16px]",
+        isActive ? "text-sk-primary" : "text-[#475569] group-hover:text-[#94a3b8]",
       )} />
+
       <span className={cn(
         "overflow-hidden whitespace-nowrap text-[13px] font-medium leading-none transition-all duration-[280ms]",
         collapsed ? "w-0 opacity-0" : "w-auto opacity-100",
@@ -108,13 +111,75 @@ function NavItem({
 function SectionLabel({ label, collapsed }: { label: string; collapsed: boolean }) {
   return (
     <div className={cn(
-      "mb-1 mt-5 flex items-center",
-      collapsed ? "justify-center px-2" : "px-3",
+      "mb-1 mt-5 flex items-center gap-2 px-4",
+      collapsed ? "justify-center px-2" : "",
     )}>
       {collapsed
-        ? <div className="h-px w-7 bg-white/[0.07]" />
-        : <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#3f4f63]">{label}</span>
+        ? <div className="h-px w-5 bg-white/[0.08]" />
+        : (
+          <>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#2d3a4a]">{label}</span>
+            <div className="flex-1 border-t border-white/[0.05]" />
+          </>
+        )
       }
+    </div>
+  )
+}
+
+// ─── UserFooter ──────────────────────────────────────────────────────────────
+function UserFooter({
+  email,
+  collapsed,
+  onSignOut,
+}: {
+  email: string
+  collapsed: boolean
+  onSignOut: () => void
+}) {
+  const initials = email
+    ? email.split("@")[0].split(/[._-]/).map(p => p[0]?.toUpperCase() ?? "").join("").slice(0, 2) || "U"
+    : "U"
+  const displayName = email ? email.split("@")[0].replace(/[._-]/g, " ") : "User"
+
+  return (
+    <div
+      className="shrink-0 border-t p-2"
+      style={{ borderColor: "rgba(255,255,255,0.06)" }}
+    >
+      {collapsed ? (
+        <button
+          onClick={onSignOut}
+          title="Sign Out"
+          className="flex w-full items-center justify-center rounded-lg py-2 text-[#475569] transition-all duration-150 hover:bg-white/[0.06] hover:text-[#f87171]"
+        >
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-sk-primary/20 text-[11px] font-bold text-sk-primary">
+            {initials}
+          </div>
+        </button>
+      ) : (
+        <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
+          {/* Avatar */}
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sk-primary/20 text-[11px] font-bold text-sk-primary">
+            {initials}
+          </div>
+
+          {/* Name + email */}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[12px] font-semibold capitalize text-[#cbd5e1]">{displayName}</p>
+            <p className="truncate text-[10px] text-[#334155]">{email}</p>
+          </div>
+
+          {/* Sign out icon */}
+          <button
+            onClick={onSignOut}
+            title="Sign Out"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#334155] transition-all duration-150 hover:bg-white/[0.06] hover:text-[#f87171]"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -127,75 +192,56 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
 
   const [collapsed, setCollapsed] = useState(false)
   const [mounted,   setMounted]   = useState(false)
+  const [userEmail, setUserEmail] = useState("")
 
-  // ref so timer callbacks always see latest collapsed value
   const collapsedRef = useRef(collapsed)
   collapsedRef.current = collapsed
 
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // ── Read persisted preference after mount ──────────────────────────────────
+  // ── Read persisted preference + current user after mount ──────────────────
   useEffect(() => {
     const stored = localStorage.getItem(LS_KEY)
     if (stored === "1") setCollapsed(true)
     setMounted(true)
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user?.email) setUserEmail(data.user.email)
+    })
   }, [])
-
-  // ── Auto-collapse helpers ──────────────────────────────────────────────────
-  const clearTimer = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
-  }, [])
-
-  const scheduleCollapse = useCallback(() => {
-    clearTimer()
-    timerRef.current = setTimeout(() => {
-      // Only collapse if currently expanded
-      if (!collapsedRef.current) {
-        setCollapsed(true)
-        localStorage.setItem(LS_KEY, "1")
-      }
-    }, AUTO_COLLAPSE_MS)
-  }, [clearTimer])
-
-  // Start the idle timer once mounted (if sidebar starts expanded)
-  useEffect(() => {
-    if (mounted && !collapsed) scheduleCollapse()
-    return clearTimer
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted])
 
   // ── Manual toggle ──────────────────────────────────────────────────────────
   const toggleCollapsed = () => {
-    clearTimer()
     setCollapsed(prev => {
       const next = !prev
       localStorage.setItem(LS_KEY, next ? "1" : "0")
-      // If expanding, restart idle timer
-      if (!next) scheduleCollapse()
       return next
     })
   }
 
   const handleSignOut = async () => {
-    clearTimer()
     await supabase.auth.signOut()
     router.push("/login")
     router.refresh()
   }
 
-  // Sidebar mouse handlers
-  const handleMouseEnter = () => {
-    clearTimer()
-    // Auto-expand if currently collapsed
+  // Sidebar hover: expand on enter, collapse on leave
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleMouseEnter = useCallback(() => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current)
     if (collapsedRef.current) {
       setCollapsed(false)
       localStorage.setItem(LS_KEY, "0")
     }
-  }
-  const handleMouseLeave = () => { scheduleCollapse() }
+  }, [])
+
+  const handleMouseLeave = useCallback(() => {
+    hoverTimer.current = setTimeout(() => {
+      if (!collapsedRef.current) {
+        setCollapsed(true)
+        localStorage.setItem(LS_KEY, "1")
+      }
+    }, 600)
+  }, [])
 
   const sidebarW = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED
 
@@ -214,7 +260,7 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
         style={{
           width: mounted ? sidebarW : SIDEBAR_EXPANDED,
           transition: `width 280ms ${EASE}`,
-          background: "linear-gradient(180deg, #0b1120 0%, #0f172a 60%, #111827 100%)",
+          background: "linear-gradient(180deg, #080e1a 0%, #0c1526 55%, #0f1b30 100%)",
           borderRight: "1px solid rgba(255,255,255,0.05)",
         }}
       >
@@ -223,16 +269,16 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
           {/* ── Logo area ─────────────────────────────────────────────────── */}
           <div
             className="relative flex shrink-0 items-center justify-center border-b"
-            style={{ borderColor: "rgba(255,255,255,0.06)", minHeight: 76, padding: "12px 10px" }}
+            style={{ borderColor: "rgba(255,255,255,0.05)", minHeight: 72, padding: "10px 10px" }}
           >
             <Link href="/dashboard" className="flex items-center justify-center">
-              {/* Full logo — visible when expanded */}
+              {/* Full logo */}
               <div
                 className={cn(
                   "flex items-center justify-center transition-all duration-[280ms]",
                   collapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100",
                 )}
-                style={{ width: collapsed ? 0 : 160 }}
+                style={{ width: collapsed ? 0 : 152 }}
               >
                 <Image
                   src="/images/logo.png"
@@ -244,30 +290,30 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
                 />
               </div>
 
-              {/* Icon logo — visible when collapsed */}
+              {/* Icon logo */}
               <div
                 className={cn(
                   "flex items-center justify-center transition-all duration-[280ms]",
                   collapsed ? "opacity-100" : "w-0 overflow-hidden opacity-0",
                 )}
-                style={{ width: collapsed ? 36 : 0 }}
+                style={{ width: collapsed ? 34 : 0 }}
               >
                 <Image
                   src="/images/logo-icon.png"
                   alt="SK"
-                  width={36}
-                  height={36}
+                  width={34}
+                  height={34}
                   priority
                   className="h-auto w-full object-contain"
                 />
               </div>
             </Link>
 
-            {/* ── Collapse toggle button (on the right border edge) ── */}
+            {/* Collapse toggle */}
             <button
               onClick={toggleCollapsed}
               title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="absolute -right-3 top-1/2 z-20 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-[#1e293b] bg-[#0f172a] text-[#475569] shadow-lg transition-all duration-150 hover:border-sk-primary hover:bg-sk-primary hover:text-white"
+              className="absolute -right-3 top-1/2 z-20 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-[#1a2740] bg-[#0c1526] text-[#334155] shadow-md transition-all duration-150 hover:border-sk-primary/50 hover:bg-sk-primary hover:text-white"
             >
               {collapsed
                 ? <ChevronRight className="h-3.5 w-3.5" />
@@ -276,18 +322,20 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
             </button>
           </div>
 
-          {/* ── Auto-collapse countdown hint (thin progress bar) ─────────── */}
-          {!collapsed && mounted && (
-            <div className="h-[2px] w-full overflow-hidden bg-transparent">
-              <div
-                key={`bar-${collapsed}`}
-                className="h-full bg-sk-primary/30"
-                style={{
-                  animation: `shrink ${AUTO_COLLAPSE_MS}ms linear forwards`,
-                }}
-              />
-            </div>
-          )}
+          {/* ── Tagline below logo ────────────────────────────────────────── */}
+          <div
+            className={cn(
+              "overflow-hidden text-center transition-all duration-[280ms]",
+              collapsed ? "max-h-0 opacity-0 py-0" : "max-h-8 opacity-100 py-1.5",
+            )}
+          >
+            <span className="text-[9.5px] font-semibold uppercase tracking-[0.18em] text-[#475569]">
+              Order Management System
+            </span>
+          </div>
+
+          {/* ── Thin accent line below tagline ────────────────────────────── */}
+          <div className="h-px w-full bg-gradient-to-r from-transparent via-sk-primary/30 to-transparent" />
 
           {/* ── Navigation ────────────────────────────────────────────────── */}
           <nav
@@ -318,29 +366,16 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
             ))}
           </nav>
 
-          {/* ── Sign out ──────────────────────────────────────────────────── */}
-          <div className="shrink-0 border-t p-2" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
-            <button
-              onClick={handleSignOut}
-              title={collapsed ? "Sign Out" : undefined}
-              className={cn(
-                "group flex w-full items-center gap-3 rounded-lg py-2.5 text-[13px] font-medium text-[#475569] transition-all duration-150 hover:bg-white/[0.06] hover:text-[#f87171]",
-                collapsed ? "justify-center px-0" : "px-3",
-              )}
-            >
-              <LogOut className="h-[17px] w-[17px] flex-shrink-0 group-hover:text-[#f87171]" />
-              <span className={cn(
-                "overflow-hidden whitespace-nowrap transition-all duration-[280ms]",
-                collapsed ? "w-0 opacity-0" : "w-auto opacity-100",
-              )}>
-                Sign Out
-              </span>
-            </button>
-          </div>
+          {/* ── User footer ───────────────────────────────────────────────── */}
+          <UserFooter
+            email={userEmail}
+            collapsed={collapsed}
+            onSignOut={handleSignOut}
+          />
         </div>
       </aside>
 
-      {/* ── Content area (shifts in sync with sidebar) ───────────────────── */}
+      {/* ── Content area ─────────────────────────────────────────────────── */}
       <div
         className="flex min-h-screen min-w-0 flex-col"
         style={{
@@ -377,14 +412,6 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
       </div>
 
       <MobileBottomNav />
-
-      {/* ── Keyframe for countdown bar ───────────────────────────────────── */}
-      <style>{`
-        @keyframes shrink {
-          from { width: 100%; }
-          to   { width: 0%; }
-        }
-      `}</style>
     </div>
   )
 }
