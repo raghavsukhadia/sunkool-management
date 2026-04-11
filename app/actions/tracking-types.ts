@@ -44,6 +44,7 @@ export type ShipmentRow = {
   current_location:     string | null
   is_delayed:           boolean
   is_stuck:             boolean
+  item_details:         string   // comma-separated "Name x Qty" list
 }
 
 export type ShipmentSummary = {

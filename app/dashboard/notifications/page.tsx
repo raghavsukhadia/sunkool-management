@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Bell, UserPlus, MessageSquare, Settings, Trash2, Edit2, Monitor, BarChart2, Send, Clock } from "lucide-react"
+import { Bell, UserPlus, MessageSquare, Settings, Trash2, Edit2, Monitor, BarChart2, Send, Clock, Truck, Package } from "lucide-react"
 import {
   getNotificationRecipients,
   createNotificationRecipient,
@@ -19,6 +19,13 @@ import {
   getMorningReportConfig,
   upsertMorningReportConfig,
   sendMorningReportNow,
+  getEtaReminderConfig,
+  upsertEtaReminderConfig,
+  sendEtaReminderNow,
+  getEtaReminderLogs,
+  getEtaDueTodayCount,
+  type EtaReminderLog,
+  type EtaReminderConfig,
 } from "@/app/actions/notifications"
 
 type Recipient = { id: string; name: string; phone: string; is_active: boolean }
@@ -34,6 +41,7 @@ type Template = { id: string; event_type: string; name: string | null; template_
 
 const EVENT_TYPES = [{ value: "order_created", label: "Order created (punched)" }]
 const MORNING_REPORT_EVENT_TYPE = "morning_report_config"
+const ETA_REMINDER_EVENT_TYPE   = "eta_reminder_config"
 const PLACEHOLDERS = "Placeholders: {{order_number}}, {{customer_name}}, {{sales_order_number}}"
 
 function useIsMobile() {
@@ -86,15 +94,29 @@ export default function NotificationsPage() {
   const [sendingReport, setSendingReport] = useState(false)
   const [reportSendResult, setReportSendResult] = useState<string | null>(null)
 
+  // ETA Delivery Reminder
+  const [etaEnabled,         setEtaEnabled]         = useState(false)
+  const [etaPhones,          setEtaPhones]           = useState<string[]>([])
+  const [etaTemplate,        setEtaTemplate]         = useState("")
+  const [etaLogs,            setEtaLogs]             = useState<EtaReminderLog[]>([])
+  const [etaTodayCount,      setEtaTodayCount]       = useState<number | null>(null)
+  const [newEtaPhone,        setNewEtaPhone]         = useState("")
+  const [savingEtaConfig,    setSavingEtaConfig]     = useState(false)
+  const [sendingEtaReminder, setSendingEtaReminder]  = useState(false)
+  const [etaSendResult,      setEtaSendResult]       = useState<{ ok: boolean; msg: string } | null>(null)
+
   const loadAll = async () => {
     setLoading(true)
     setError(null)
     try {
-      const [rRes, cRes, tRes, mrRes] = await Promise.all([
+      const [rRes, cRes, tRes, mrRes, etaRes, etaLogsRes, etaTodayRes] = await Promise.all([
         getNotificationRecipients(),
         getWhatsAppConfig(),
         getNotificationTemplates(),
         getMorningReportConfig(),
+        getEtaReminderConfig(),
+        getEtaReminderLogs(),
+        getEtaDueTodayCount(),
       ])
       if (rRes.success && rRes.data) setRecipients(rRes.data as Recipient[])
       if (cRes.success && cRes.data) {
@@ -111,6 +133,12 @@ export default function NotificationsPage() {
       if (tRes.success && tRes.data) setTemplates(tRes.data as Template[])
       setMorningReportEnabled(mrRes.enabled)
       setManagerPhones(mrRes.managerPhones)
+      // ETA reminder
+      setEtaEnabled(etaRes.enabled)
+      setEtaPhones(etaRes.phones)
+      setEtaTemplate(etaRes.template)
+      if (etaLogsRes.success && etaLogsRes.data) setEtaLogs(etaLogsRes.data)
+      setEtaTodayCount(etaTodayRes.count)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load")
     } finally {
@@ -269,6 +297,12 @@ export default function NotificationsPage() {
       )
       return
     }
+    if (t.event_type === ETA_REMINDER_EVENT_TYPE) {
+      setError(
+        "ETA reminder settings are managed in the ETA Delivery Reminder card — do not edit it here. Use that section to change the template."
+      )
+      return
+    }
     setEditingTemplate(t)
     setTemplateEventType(t.event_type)
     setTemplateName(t.name ?? "")
@@ -368,6 +402,105 @@ export default function NotificationsPage() {
       setError(e instanceof Error ? e.message : "Failed to send report")
     } finally {
       setSendingReport(false)
+    }
+  }
+
+  // ── ETA Reminder handlers ────────────────────────────────────────────────
+
+  const handleToggleEtaEnabled = async (enabled: boolean) => {
+    const prev = etaEnabled
+    setEtaEnabled(enabled)
+    setSavingEtaConfig(true)
+    setError(null)
+    try {
+      const res = await upsertEtaReminderConfig(enabled, etaPhones, etaTemplate)
+      if (!res.success) {
+        setEtaEnabled(prev)
+        setError(res.error ?? "Failed to save ETA reminder config")
+      }
+    } catch (e) {
+      setEtaEnabled(prev)
+      setError(e instanceof Error ? e.message : "Failed to save")
+    } finally {
+      setSavingEtaConfig(false)
+    }
+  }
+
+  const handleSaveEtaTemplate = async () => {
+    if (!etaTemplate.trim()) { setError("Template cannot be empty"); return }
+    setSavingEtaConfig(true)
+    setError(null)
+    try {
+      const res = await upsertEtaReminderConfig(etaEnabled, etaPhones, etaTemplate.trim())
+      if (!res.success) setError(res.error ?? "Failed to save template")
+      else { setSuccess("ETA reminder template saved"); setTimeout(() => setSuccess(null), 3000) }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save template")
+    } finally {
+      setSavingEtaConfig(false)
+    }
+  }
+
+  const handleAddEtaPhone = async () => {
+    const phone = newEtaPhone.trim()
+    if (!phone) return
+    if (!/^\+\d{10,13}$/.test(phone)) {
+      setError("Phone must start with + followed by 10–13 digits (e.g. +91XXXXXXXXXX)")
+      return
+    }
+    if (etaPhones.includes(phone)) { setError("This phone number is already added"); return }
+    setError(null)
+    const prev    = [...etaPhones]
+    const updated = [...etaPhones, phone]
+    setEtaPhones(updated)
+    setNewEtaPhone("")
+    setSavingEtaConfig(true)
+    try {
+      const res = await upsertEtaReminderConfig(etaEnabled, updated, etaTemplate)
+      if (!res.success) { setEtaPhones(prev); setError(res.error ?? "Failed to save") }
+    } catch (e) {
+      setEtaPhones(prev); setError(e instanceof Error ? e.message : "Failed to save")
+    } finally {
+      setSavingEtaConfig(false)
+    }
+  }
+
+  const handleRemoveEtaPhone = async (phone: string) => {
+    const prev    = [...etaPhones]
+    const updated = etaPhones.filter((p) => p !== phone)
+    setEtaPhones(updated)
+    setSavingEtaConfig(true)
+    setError(null)
+    try {
+      const res = await upsertEtaReminderConfig(etaEnabled, updated, etaTemplate)
+      if (!res.success) { setEtaPhones(prev); setError(res.error ?? "Failed to save") }
+    } catch (e) {
+      setEtaPhones(prev); setError(e instanceof Error ? e.message : "Failed to save")
+    } finally {
+      setSavingEtaConfig(false)
+    }
+  }
+
+  const handleSendEtaReminderNow = async () => {
+    setSendingEtaReminder(true)
+    setEtaSendResult(null)
+    setError(null)
+    try {
+      const res = await sendEtaReminderNow()
+      if (res.success) {
+        const msg = res.shipmentCount === 0
+          ? "No undelivered shipments due today — nothing to send."
+          : `✓ Reminder sent to ${res.sent} recipient(s) for ${res.shipmentCount} shipment(s).`
+        setEtaSendResult({ ok: true, msg })
+        setTimeout(() => setEtaSendResult(null), 8000)
+        await loadAll() // refresh logs
+      } else {
+        setEtaSendResult({ ok: false, msg: res.error ?? "Failed to send reminder" })
+      }
+    } catch (e) {
+      setEtaSendResult({ ok: false, msg: e instanceof Error ? e.message : "Failed to send" })
+    } finally {
+      setSendingEtaReminder(false)
     }
   }
 
@@ -523,6 +656,189 @@ export default function NotificationsPage() {
             {reportSendResult && (
               <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-700">
                 {reportSendResult}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── ETA Delivery Reminder ── */}
+      <Card className="border-slate-200 border-l-4 border-l-teal-500">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Truck className="h-5 w-5 text-teal-500" />
+            ETA Delivery Reminder
+          </CardTitle>
+          <CardDescription>
+            Sends a daily WhatsApp message listing all shipments whose ETA is today but aren&apos;t yet marked as delivered. Helps the team follow up and update delivery status promptly.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+
+          {/* Enable toggle */}
+          <div className="flex items-center gap-3">
+            <input
+              id="eta-reminder-toggle"
+              type="checkbox"
+              className="h-4 w-4 accent-teal-500 cursor-pointer"
+              checked={etaEnabled}
+              disabled={savingEtaConfig}
+              onChange={(e) => handleToggleEtaEnabled(e.target.checked)}
+            />
+            <Label htmlFor="eta-reminder-toggle" className="cursor-pointer select-none">
+              {etaEnabled ? "ETA reminder enabled" : "ETA reminder disabled"}
+            </Label>
+            {savingEtaConfig && <span className="text-xs text-slate-400">Saving…</span>}
+          </div>
+
+          {/* Schedule info */}
+          <div className="flex items-center gap-2 rounded-md bg-slate-50 border border-slate-200 px-4 py-2.5 text-sm text-slate-600">
+            <Clock className="h-4 w-4 text-slate-400 shrink-0" />
+            <span>Sent daily at <strong>10:00 AM IST</strong> (4:30 AM UTC) via Vercel Cron</span>
+          </div>
+
+          {/* Due today count */}
+          {etaTodayCount !== null && (
+            <div className={`flex items-center gap-2 rounded-md border px-4 py-2.5 text-sm ${etaTodayCount > 0 ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-green-50 border-green-200 text-green-700"}`}>
+              <Package className="h-4 w-4 shrink-0" />
+              {etaTodayCount > 0
+                ? <span><strong>{etaTodayCount}</strong> shipment(s) with ETA today are not yet marked delivered.</span>
+                : <span>No pending shipments due today.</span>
+              }
+            </div>
+          )}
+
+          {/* Message template */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-slate-700">Message template</Label>
+            <p className="text-xs text-slate-500">
+              Placeholders:{" "}
+              <code className="rounded bg-slate-100 px-1">{"{{date}}"}</code> — today&apos;s date,{" "}
+              <code className="rounded bg-slate-100 px-1">{"{{count}}"}</code> — number of shipments,{" "}
+              <code className="rounded bg-slate-100 px-1">{"{{shipment_list}}"}</code> — auto-generated order list
+            </p>
+            <textarea
+              className="flex min-h-[130px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+              value={etaTemplate}
+              onChange={(e) => setEtaTemplate(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSaveEtaTemplate}
+              disabled={savingEtaConfig}
+            >
+              {savingEtaConfig ? "Saving…" : "Save template"}
+            </Button>
+          </div>
+
+          {/* Phone numbers */}
+          <div className="space-y-3">
+            <Label className="text-sm font-medium text-slate-700">Phone numbers to notify</Label>
+            {etaPhones.length === 0 ? (
+              <p className="text-sm text-slate-500">No phones added yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {etaPhones.map((phone) => (
+                  <li key={phone} className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-50 border border-slate-100">
+                    <span className="font-mono text-sm text-slate-800">{phone}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveEtaPhone(phone)}
+                      disabled={savingEtaConfig}
+                    >
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="space-y-1.5">
+                <Label htmlFor="new-eta-phone" className="text-xs text-slate-500">Add phone number</Label>
+                <Input
+                  id="new-eta-phone"
+                  value={newEtaPhone}
+                  onChange={(e) => setNewEtaPhone(e.target.value)}
+                  placeholder="+91XXXXXXXXXX"
+                  className="w-52"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddEtaPhone() }}
+                />
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleAddEtaPhone}
+                disabled={savingEtaConfig || !newEtaPhone.trim()}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+
+          {/* Send now + result */}
+          <div className="border-t pt-4 space-y-4">
+            <div className="flex flex-col gap-2">
+              <Button
+                onClick={handleSendEtaReminderNow}
+                disabled={sendingEtaReminder || etaPhones.length === 0}
+                className="w-fit bg-teal-600 hover:bg-teal-700 text-white gap-2"
+              >
+                <Send className="h-4 w-4" />
+                {sendingEtaReminder ? "Sending…" : "Send Reminder Now"}
+              </Button>
+              {etaPhones.length === 0 && (
+                <p className="text-xs text-slate-400">Add at least one phone number to send.</p>
+              )}
+              {etaSendResult && (
+                <div className={`rounded-md border px-3 py-2 text-sm ${etaSendResult.ok ? "bg-green-50 border-green-200 text-green-700" : "bg-red-50 border-red-200 text-red-700"}`}>
+                  {etaSendResult.msg}
+                </div>
+              )}
+            </div>
+
+            {/* Recent send log */}
+            {etaLogs.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-700">Recent sends</p>
+                <div className="overflow-hidden rounded-lg border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-left">
+                        <th className="px-3 py-2 font-semibold text-slate-600">Sent at (IST)</th>
+                        <th className="px-3 py-2 font-semibold text-slate-600">ETA Date</th>
+                        <th className="px-3 py-2 font-semibold text-slate-600">Shipments</th>
+                        <th className="px-3 py-2 font-semibold text-slate-600">Delivered to</th>
+                        <th className="px-3 py-2 font-semibold text-slate-600">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {etaLogs.map((log) => (
+                        <tr key={log.id} className="text-slate-600">
+                          <td className="px-3 py-2">
+                            {new Date(log.sent_at).toLocaleString("en-IN", {
+                              day: "2-digit", month: "short", year: "numeric",
+                              hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata",
+                            })}
+                          </td>
+                          <td className="px-3 py-2">{log.reminder_date}</td>
+                          <td className="px-3 py-2">{log.shipment_count}</td>
+                          <td className="px-3 py-2">{log.sent_count} recipient(s)</td>
+                          <td className="px-3 py-2">
+                            <Badge
+                              variant={
+                                log.status === "sent"    ? "default"     :
+                                log.status === "skipped" ? "secondary"   : "destructive"
+                              }
+                            >
+                              {log.status}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
@@ -743,7 +1059,7 @@ export default function NotificationsPage() {
           </div>
           <div className="border-t pt-4">
             <p className="text-sm font-medium text-slate-700 mb-2">Saved templates</p>
-            {templates.filter((t) => t.event_type !== MORNING_REPORT_EVENT_TYPE).length === 0 ? (
+            {templates.filter((t) => ![MORNING_REPORT_EVENT_TYPE, ETA_REMINDER_EVENT_TYPE].includes(t.event_type)).length === 0 ? (
               <p className="text-sm text-slate-500">
                 No workflow message templates yet. Add one for &quot;order_created&quot; so the auto sender can notify when an order is punched.
                 {templates.some((t) => t.event_type === MORNING_REPORT_EVENT_TYPE) && (
@@ -754,7 +1070,7 @@ export default function NotificationsPage() {
               </p>
             ) : (
               <ul className="space-y-2">
-                {templates.filter((t) => t.event_type !== MORNING_REPORT_EVENT_TYPE).map((t) => (
+                {templates.filter((t) => ![MORNING_REPORT_EVENT_TYPE, ETA_REMINDER_EVENT_TYPE].includes(t.event_type)).map((t) => (
                   <li key={t.id} className="flex items-start justify-between py-2 px-3 rounded-lg bg-slate-50">
                     <div>
                       <span className="font-medium text-slate-900">{t.event_type}</span>

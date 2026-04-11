@@ -466,3 +466,243 @@ export async function sendProductionRecordCreatedNotification(payload: {
     reportError(error, { area: "notifications.sendProductionRecordCreated" })
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ETA Delivery Reminder
+// Stored as JSON in notification_templates (event_type = 'eta_reminder_config').
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ETA_REMINDER_EVENT_TYPE = "eta_reminder_config"
+
+const DEFAULT_ETA_REMINDER_TEMPLATE =
+  `📦 *ETA Delivery Reminder — {{date}}*\n` +
+  `\n` +
+  `*{{count}} shipment(s) due today — please confirm delivery status:*\n` +
+  `\n` +
+  `{{shipment_list}}\n` +
+  `\n` +
+  `Please update each order's status in the system.`
+
+export type EtaReminderConfig = {
+  enabled:  boolean
+  phones:   string[]
+  template: string
+}
+
+export type EtaReminderLog = {
+  id:             string
+  sent_at:        string
+  reminder_date:  string
+  shipment_count: number
+  sent_count:     number
+  status:         string
+  error_message:  string | null
+}
+
+/** Returns stored config or safe defaults. */
+export async function getEtaReminderConfig(): Promise<EtaReminderConfig> {
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from("notification_templates")
+    .select("template_body")
+    .eq("event_type", ETA_REMINDER_EVENT_TYPE)
+    .maybeSingle()
+
+  if (!data?.template_body) {
+    return { enabled: false, phones: [], template: DEFAULT_ETA_REMINDER_TEMPLATE }
+  }
+  try {
+    const cfg = JSON.parse(data.template_body) as {
+      enabled?:  boolean | string
+      phones?:   string[]
+      template?: string
+    }
+    return {
+      enabled:  cfg.enabled === true || cfg.enabled === "true",
+      phones:   Array.isArray(cfg.phones) ? cfg.phones : [],
+      template: typeof cfg.template === "string" && cfg.template.trim()
+        ? cfg.template
+        : DEFAULT_ETA_REMINDER_TEMPLATE,
+    }
+  } catch {
+    return { enabled: false, phones: [], template: DEFAULT_ETA_REMINDER_TEMPLATE }
+  }
+}
+
+/** Persists enabled flag, phone list, and template as JSON. */
+export async function upsertEtaReminderConfig(
+  enabled:  boolean,
+  phones:   string[],
+  template: string
+): Promise<{ success: boolean; error?: string }> {
+  const body = JSON.stringify({ enabled, phones, template })
+  const result = await upsertNotificationTemplate({
+    event_type:    ETA_REMINDER_EVENT_TYPE,
+    name:          "ETA Delivery Reminder Config",
+    template_body: body,
+  })
+  if (!result.success) return { success: false, error: result.error ?? "Failed to save config" }
+  return { success: true }
+}
+
+/** Returns the last 10 reminder send logs. */
+export async function getEtaReminderLogs(): Promise<{
+  success: boolean
+  data:    EtaReminderLog[] | null
+  error:   string | null
+}> {
+  const supabase = createServiceRoleSupabaseClient() ?? await createClient()
+  const { data, error } = await supabase
+    .from("tracking_reminder_log")
+    .select("id, sent_at, reminder_date, shipment_count, sent_count, status, error_message")
+    .order("sent_at", { ascending: false })
+    .limit(10)
+  if (error) return { success: false, data: null, error: error.message }
+  return { success: true, data: data ?? [], error: null }
+}
+
+/** Returns count of undelivered shipments whose ETA is today (IST). */
+export async function getEtaDueTodayCount(): Promise<{ count: number; error: string | null }> {
+  const supabase = createServiceRoleSupabaseClient() ?? await createClient()
+  const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+  const TERMINAL = ["delivered", "cancelled", "returned", "rto_initiated"]
+
+  const { data, error } = await supabase
+    .from("dispatches")
+    .select("id, shipment_status")
+    .lte("estimated_delivery", todayIST)
+    .not("estimated_delivery", "is", null)
+    .neq("dispatch_type", "return")
+
+  if (error) return { count: 0, error: error.message }
+  const count = (data ?? []).filter((r) => !TERMINAL.includes(r.shipment_status)).length
+  return { count, error: null }
+}
+
+/** Queries today's due shipments and sends WhatsApp reminders. Used by both UI "Send Now" and cron. */
+export async function sendEtaReminderNow(): Promise<{
+  success:       boolean
+  error?:        string
+  sent?:         number
+  shipmentCount?: number
+}> {
+  const supabase = createServiceRoleSupabaseClient() ?? await createClient()
+
+  // WhatsApp credentials
+  const configRes = await getWhatsAppConfig()
+  const waConfig  = toServiceConfig(configRes.success ? configRes.data : null)
+  if (!waConfig) {
+    return { success: false, error: "WhatsApp not configured (missing endpoint, username, or password)" }
+  }
+
+  // Reminder config
+  const { phones, template } = await getEtaReminderConfig()
+  if (phones.length === 0) {
+    return { success: false, error: "No phone numbers configured for ETA reminder" }
+  }
+
+  // Today's IST date string (YYYY-MM-DD)
+  const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+  const TERMINAL = ["delivered", "cancelled", "returned", "rto_initiated"]
+
+  const { data: rawShipments, error: fetchError } = await supabase
+    .from("dispatches")
+    .select(`
+      id,
+      tracking_id,
+      shipment_status,
+      orders (
+        internal_order_number,
+        sales_order_number,
+        customers:customer_id ( name )
+      ),
+      courier_companies ( name )
+    `)
+    .lte("estimated_delivery", todayIST)
+    .not("estimated_delivery", "is", null)
+    .neq("dispatch_type", "return")
+    .order("estimated_delivery", { ascending: true })
+    .order("created_at", { ascending: false })
+
+  if (fetchError) {
+    return { success: false, error: `Failed to fetch shipments: ${fetchError.message}` }
+  }
+
+  const shipments = (rawShipments ?? []).filter(
+    (s: any) => !TERMINAL.includes(s.shipment_status)
+  )
+
+  if (shipments.length === 0) {
+    await supabase.from("tracking_reminder_log").insert({
+      reminder_date:   todayIST,
+      shipment_count:  0,
+      sent_count:      0,
+      phones_notified: phones,
+      dispatch_ids:    [],
+      status:          "skipped",
+    })
+    return { success: true, sent: 0, shipmentCount: 0 }
+  }
+
+  // Build message
+  const dateStr = new Date().toLocaleDateString("en-IN", {
+    day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata",
+  })
+
+  const STATUS_LABELS: Record<string, string> = {
+    pending:          "Pending",
+    ready:            "Ready for Pickup",
+    picked_up:        "Picked Up",
+    in_transit:       "In Transit",
+    out_for_delivery: "Out for Delivery",
+    failed_delivery:  "Failed Delivery",
+    rto_initiated:    "RTO Initiated",
+  }
+
+  const shipmentList = shipments.map((s: any, i: number) => {
+    const order      = Array.isArray(s.orders)           ? s.orders[0]           : s.orders
+    const cust       = Array.isArray(order?.customers)   ? order.customers[0]    : order?.customers
+    const courier    = Array.isArray(s.courier_companies)? s.courier_companies[0]: s.courier_companies
+    const orderNo    = order?.internal_order_number || order?.sales_order_number || "—"
+    const statusLabel = STATUS_LABELS[s.shipment_status] ?? s.shipment_status ?? "—"
+    const etaLabel    = s.estimated_delivery
+      ? new Date(s.estimated_delivery).toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "Asia/Kolkata" })
+      : "—"
+    const overdue = s.estimated_delivery && s.estimated_delivery < todayIST ? " ⚠️" : ""
+    return `${i + 1}. Order #${orderNo} | ${cust?.name ?? "—"} | ${courier?.name ?? "—"} | ${s.tracking_id ?? "—"} | *${statusLabel}* | ETA: ${etaLabel}${overdue}`
+  }).join("\n")
+
+  const message = template
+    .replace(/\{\{date\}\}/g, dateStr)
+    .replace(/\{\{count\}\}/g, String(shipments.length))
+    .replace(/\{\{shipment_list\}\}/g, shipmentList)
+
+  let sentCount = 0
+  const sendErrors: string[] = []
+  for (const phone of phones) {
+    if (!phone?.trim()) continue
+    const result = await notificationService.sendMessage(waConfig, phone.trim(), message)
+    if (result.ok) sentCount++
+    else if (result.error) sendErrors.push(`${phone}: ${result.error}`)
+  }
+
+  await supabase.from("tracking_reminder_log").insert({
+    reminder_date:   todayIST,
+    shipment_count:  shipments.length,
+    sent_count:      sentCount,
+    phones_notified: phones,
+    dispatch_ids:    shipments.map((s: any) => s.id),
+    status:          sentCount > 0 ? "sent" : "failed",
+    error_message:   sendErrors.length > 0 ? sendErrors.join("; ") : null,
+  })
+
+  if (sentCount === 0) {
+    return {
+      success:       false,
+      error:         `No messages sent. ${sendErrors.join("; ")}`,
+      shipmentCount: shipments.length,
+    }
+  }
+
+  return { success: true, sent: sentCount, shipmentCount: shipments.length }
+}

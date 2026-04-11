@@ -11,6 +11,7 @@ import type {
 } from "@/app/actions/tracking-types"
 import { SHIPMENT_STATUS_LABELS } from "@/app/actions/tracking-types"
 import { syncOrderStatusFromTracking } from "@/app/actions/orders"
+import { logTimelineEvent } from "@/lib/timeline"
 
 // Statuses that mean the shipment is still active (not terminal)
 const ACTIVE_STATUSES: ShipmentStatus[] = [
@@ -141,9 +142,52 @@ export async function getShipmentsDashboard(filters: ShipmentFilters = {}): Prom
       dispatch_type:        row.dispatch_type,
       estimated_delivery:   row.estimated_delivery ?? null,
       current_location:     row.current_location  ?? null,
+      item_details:         "",   // filled below after batch fetch
       ...flags,
     }
   })
+
+  // Batch-fetch item details for all returned orders
+  const orderIds = rows.map((r) => r.order_id)
+  if (orderIds.length > 0) {
+    const { data: orderItems } = await supabase
+      .from("order_items")
+      .select("order_id, quantity, inventory_item_id, product_id")
+      .in("order_id", orderIds)
+
+    const inventoryIds = new Set<string>()
+    for (const item of orderItems || []) {
+      const row = item as { inventory_item_id?: string; product_id?: string }
+      if (row.inventory_item_id) inventoryIds.add(row.inventory_item_id)
+      if (row.product_id)        inventoryIds.add(row.product_id)
+    }
+
+    let itemNameById: Record<string, string> = {}
+    if (inventoryIds.size > 0) {
+      const { data: invItems } = await supabase
+        .from("inventory_items")
+        .select("id, item_name")
+        .in("id", [...inventoryIds])
+      for (const inv of invItems || []) {
+        const i = inv as { id: string; item_name: string }
+        itemNameById[i.id] = i.item_name ?? ""
+      }
+    }
+
+    const itemDetailsByOrder: Record<string, string[]> = {}
+    for (const item of orderItems || []) {
+      const row = item as { order_id: string; quantity: number; inventory_item_id?: string; product_id?: string }
+      const name = itemNameById[row.inventory_item_id ?? ""] || itemNameById[row.product_id ?? ""] || "Item"
+      const part = `${name} x ${row.quantity}`
+      if (!itemDetailsByOrder[row.order_id]) itemDetailsByOrder[row.order_id] = []
+      itemDetailsByOrder[row.order_id].push(part)
+    }
+
+    rows = rows.map((r) => ({
+      ...r,
+      item_details: (itemDetailsByOrder[r.order_id] ?? []).join(", "),
+    }))
+  }
 
   // Client-side search (order number, tracking ID, phone)
   if (filters.search) {
@@ -264,6 +308,24 @@ export async function addShipmentNote(dispatchId: string, note: string): Promise
 
   if (error) return { success: false, error: error.message }
 
+  // Timeline: log note on the associated order (best-effort — requires dispatch → order lookup)
+  const { data: dispatch } = await supabase
+    .from("dispatches")
+    .select("order_id")
+    .eq("id", dispatchId)
+    .single()
+
+  if (dispatch?.order_id) {
+    void logTimelineEvent(supabase, dispatch.order_id, {
+      event_type:  "shipment_note_added",
+      title:       "Shipment Note Added",
+      description: trimmed.length > 120 ? trimmed.slice(0, 117) + "…" : trimmed,
+      actor:       "admin",
+      actor_id:    profile?.id ?? null,
+      metadata: { dispatch_id: dispatchId },
+    })
+  }
+
   revalidatePath("/dashboard/tracking")
   return { success: true, error: null }
 }
@@ -290,6 +352,24 @@ export async function updateShipmentTracking(
   // Sync order_status to reflect the new shipment status
   if (dispatch?.order_id) {
     await syncOrderStatusFromTracking(dispatch.order_id)
+
+    // Timeline: log shipment status change
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", user.id)
+      .single()
+
+    void logTimelineEvent(supabase, dispatch.order_id, {
+      event_type:  "shipment_status_changed",
+      title:       SHIPMENT_STATUS_LABELS[fields.shipment_status] ?? "Shipment Status Updated",
+      actor:       "admin",
+      actor_id:    profile?.id ?? null,
+      metadata: {
+        new_status:  fields.shipment_status,
+        dispatch_id: dispatchId,
+      },
+    })
   }
 
   revalidatePath("/dashboard/tracking")

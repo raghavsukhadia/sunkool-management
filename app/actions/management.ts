@@ -28,7 +28,36 @@ export async function createProduct(formData: {
 }) {
   const { supabase, authorized } = await getAuthorizedClient()
   if (!authorized) return { success: false, error: "Unauthorized" }
-  
+
+  // Duplicate check: same name within the same parent scope
+  const nameTrimmed = formData.name.trim()
+  const nameQuery = supabase
+    .from("products")
+    .select("id, name")
+    .eq("is_active", true)
+    .ilike("name", nameTrimmed)
+  const { data: existingName } = await (
+    formData.parent_product_id
+      ? nameQuery.eq("parent_product_id", formData.parent_product_id)
+      : nameQuery.is("parent_product_id", null)
+  ).maybeSingle()
+  if (existingName) {
+    return { success: false, error: `A product named "${existingName.name}" already exists.` }
+  }
+
+  // Duplicate check: same SKU
+  if (formData.sku) {
+    const { data: existingSku } = await supabase
+      .from("products")
+      .select("id, name, sku")
+      .eq("is_active", true)
+      .ilike("sku", formData.sku.trim())
+      .maybeSingle()
+    if (existingSku) {
+      return { success: false, error: `SKU "${formData.sku}" is already used by "${existingSku.name}".` }
+    }
+  }
+
   const { data, error } = await supabase
     .from("products")
     .insert({
@@ -104,7 +133,18 @@ export async function createCourierCompany(formData: {
 }) {
   const { supabase, authorized } = await getAuthorizedClient()
   if (!authorized) return { success: false, error: "Unauthorized" }
-  
+
+  // Duplicate check: same courier name
+  const { data: existingName } = await supabase
+    .from("courier_companies")
+    .select("id, name")
+    .eq("is_active", true)
+    .ilike("name", formData.name.trim())
+    .maybeSingle()
+  if (existingName) {
+    return { success: false, error: `A courier named "${existingName.name}" already exists.` }
+  }
+
   const { data, error } = await supabase
     .from("courier_companies")
     .insert({
@@ -179,7 +219,31 @@ export async function createCustomer(formData: {
 }) {
   const { supabase, authorized } = await getAuthorizedClient()
   if (!authorized) return { success: false, error: "Unauthorized" }
-  
+
+  // Duplicate check: same customer name
+  const { data: existingName } = await supabase
+    .from("customers")
+    .select("id, name")
+    .eq("is_active", true)
+    .ilike("name", formData.name.trim())
+    .maybeSingle()
+  if (existingName) {
+    return { success: false, error: `A customer named "${existingName.name}" already exists.` }
+  }
+
+  // Duplicate check: same phone number
+  if (formData.phone?.trim()) {
+    const { data: existingPhone } = await supabase
+      .from("customers")
+      .select("id, name, phone")
+      .eq("is_active", true)
+      .eq("phone", formData.phone.trim())
+      .maybeSingle()
+    if (existingPhone) {
+      return { success: false, error: `Phone number is already registered under "${existingPhone.name}".` }
+    }
+  }
+
   const { data, error } = await supabase
     .from("customers")
     .insert({
@@ -468,6 +532,22 @@ export async function createInventoryItem(formData: {
   if (!authorized) return { success: false, error: "Unauthorized" }
   
   try {
+    // Duplicate check: same item_name within the same parent scope
+    const itemNameTrimmed = formData.item_name.trim()
+    const itemNameQuery = supabase
+      .from("inventory_items")
+      .select("id, item_name")
+      .eq("is_active", true)
+      .ilike("item_name", itemNameTrimmed)
+    const { data: existingItem } = await (
+      formData.parent_item_id
+        ? itemNameQuery.eq("parent_item_id", formData.parent_item_id)
+        : itemNameQuery.is("parent_item_id", null)
+    ).maybeSingle()
+    if (existingItem) {
+      return { success: false, error: `An item named "${existingItem.item_name}" already exists.` }
+    }
+
     // Auto-generate serial number only for parent items (not sub-items)
     let srNo: number | null = formData.sr_no || null
     

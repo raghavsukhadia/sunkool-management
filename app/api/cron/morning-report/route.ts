@@ -22,6 +22,9 @@ function makeSupabaseClient() {
 export async function GET(request: Request) {
   // --- Auth check ---
   const cronSecret = process.env.CRON_SECRET
+  if (process.env.VERCEL === '1' && !cronSecret) {
+    return NextResponse.json({ error: 'CRON_SECRET is not configured' }, { status: 503 })
+  }
   if (cronSecret) {
     const authHeader = request.headers.get('authorization')
     if (!authHeader || authHeader !== `Bearer ${cronSecret}`) {

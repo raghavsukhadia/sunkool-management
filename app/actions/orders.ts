@@ -6,6 +6,7 @@ import { sendProductionRecordCreatedNotification } from "@/app/actions/notificat
 import { getCourierCompanies } from "@/app/actions/management"
 import { checkRateLimit } from "@/lib/server/rate-limit"
 import { reportError } from "@/lib/monitoring"
+import { logTimelineEvent } from "@/lib/timeline"
 
 function isUniqueViolation(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false
@@ -159,6 +160,19 @@ export async function createOrder(formData: {
   if (!order) {
     return { success: false, error: finalError?.message || "Failed to create order" }
   }
+
+  // Timeline: log order creation
+  void logTimelineEvent(supabase, order.id, {
+    event_type:  "order_created",
+    title:       "Order Created",
+    description: `${order.internal_order_number ?? "Order"} was created.`,
+    actor:       "admin",
+    actor_id:    profile.id,
+    metadata: {
+      order_number:        order.internal_order_number ?? null,
+      sales_order_number:  order.sales_order_number    ?? null,
+    },
+  })
 
   revalidatePath("/dashboard/orders")
   revalidatePath("/dashboard/orders/new")
@@ -893,6 +907,20 @@ export async function addItemToOrder(orderId: string, inventoryItemId: string, q
 
   // Order stays in "New Order" when items are added; moves to "In Progress" when first production record is created
 
+  // Timeline: item added
+  const itemName = (inventoryItem as { id: string; item_name: string }).item_name ?? "Item"
+  void logTimelineEvent(supabase, orderId, {
+    event_type:  "item_added",
+    title:       "Item Added",
+    description: `${quantity} × ${itemName} added to order.`,
+    actor:       "admin",
+    metadata: {
+      item_name:          itemName,
+      quantity,
+      inventory_item_id:  inventoryItemId,
+    },
+  })
+
   revalidatePath(`/dashboard/orders/${orderId}`)
   return { success: true }
 }
@@ -1002,6 +1030,14 @@ export async function removeItemFromOrder(orderItemId: string) {
   }
 
   if (orderItem) {
+    // Timeline: item removed
+    void logTimelineEvent(supabase, orderItem.order_id, {
+      event_type:  "item_removed",
+      title:       "Item Removed",
+      description: "An item was removed from the order.",
+      actor:       "admin",
+      metadata:    { order_item_id: orderItemId },
+    })
     revalidatePath(`/dashboard/orders/${orderItem.order_id}`)
   }
 
@@ -1173,6 +1209,21 @@ export async function createDispatch(
     return { success: false, error: `Failed to update order status: ${updateError.message}` }
   }
 
+  // Timeline: log dispatch creation
+  void logTimelineEvent(supabase, orderId, {
+    event_type:  "dispatch_created",
+    title:       `Dispatch Created (${dispatchType === "full" ? "Full" : "Partial"})`,
+    description: `${dispatchItems.length} item${dispatchItems.length !== 1 ? "s" : ""} dispatched.${notes ? ` Note: ${notes}` : ""}`,
+    actor:       "admin",
+    actor_id:    profile.id,
+    metadata: {
+      dispatch_id:   dispatch.id,
+      dispatch_type: dispatchType,
+      item_count:    dispatchItems.length,
+      tracking_id:   trackingId    ?? null,
+    },
+  })
+
   revalidatePath(`/dashboard/orders/${orderId}`)
   revalidatePath("/dashboard/orders")
 
@@ -1284,6 +1335,19 @@ export async function createReturnDispatch(
     await supabase.from("dispatches").delete().eq("id", returnDispatch.id)
     return { success: false, error: returnItemsError.message }
   }
+
+  // Timeline: return initiated
+  void logTimelineEvent(supabase, orderId, {
+    event_type:  "return_dispatch_created",
+    title:       "Return Initiated",
+    description: `${returnItems.length} item type${returnItems.length !== 1 ? "s" : ""} being returned.${notes ? ` Note: ${notes}` : ""}`,
+    actor:       "admin",
+    actor_id:    profile.id,
+    metadata: {
+      dispatch_id: returnDispatch.id,
+      item_count:  returnItems.length,
+    },
+  })
 
   revalidatePath(`/dashboard/orders/${orderId}`)
   revalidatePath("/dashboard/orders")
@@ -1562,11 +1626,105 @@ export async function updateDispatchStatus(
 
   if (dispatch?.order_id) {
     await syncOrderStatusAfterDispatchChange(supabase, dispatch.order_id)
+
+    // Timeline: log shipment status change
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", user.id)
+      .single()
+
+    const STATUS_TITLES: Record<string, string> = {
+      ready:      "Ready for Pickup",
+      picked_up:  "Shipment Picked Up",
+      delivered:  "Order Delivered",
+    }
+    void logTimelineEvent(supabase, dispatch.order_id, {
+      event_type:  "shipment_status_changed",
+      title:       STATUS_TITLES[status] ?? "Shipment Status Updated",
+      actor:       "admin",
+      actor_id:    profile?.id ?? null,
+      metadata: {
+        new_status:  status,
+        dispatch_id: dispatchId,
+      },
+    })
   }
 
   revalidatePath(`/dashboard/orders/${dispatch.order_id}`)
   revalidatePath("/dashboard/orders")
 
+  return { success: true, data: dispatch }
+}
+
+// Update dispatch details (courier, tracking ID, estimated delivery)
+// Only allowed when shipment_status is 'ready' or 'picked_up'
+export async function updateDispatchDetails(
+  dispatchId: string,
+  fields: {
+    courier_company_id?: string | null
+    tracking_id?: string | null
+    estimated_delivery?: string | null
+  }
+) {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return { success: false, error: "User not authenticated" }
+  }
+
+  // Fetch current dispatch to validate status
+  const { data: existing, error: fetchError } = await supabase
+    .from("dispatches")
+    .select("id, order_id, shipment_status")
+    .eq("id", dispatchId)
+    .single()
+
+  if (fetchError || !existing) {
+    return { success: false, error: "Dispatch not found" }
+  }
+
+  if (existing.shipment_status === "delivered") {
+    return { success: false, error: "Cannot edit a delivered dispatch" }
+  }
+
+  const { data: dispatch, error } = await supabase
+    .from("dispatches")
+    .update({
+      ...(fields.courier_company_id !== undefined ? { courier_company_id: fields.courier_company_id || null } : {}),
+      ...(fields.tracking_id !== undefined ? { tracking_id: fields.tracking_id || null } : {}),
+      ...(fields.estimated_delivery !== undefined ? { estimated_delivery: fields.estimated_delivery || null } : {}),
+    })
+    .eq("id", dispatchId)
+    .select()
+    .single()
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  if (existing.order_id) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", user.id)
+      .single()
+
+    void logTimelineEvent(supabase, existing.order_id, {
+      event_type:  "shipment_note_added",
+      title:       "Shipment Details Updated",
+      description: "Courier, tracking ID, or estimated delivery was updated.",
+      actor:       "admin",
+      actor_id:    profile?.id ?? null,
+      metadata: {
+        dispatch_id: dispatchId,
+        tracking_id: fields.tracking_id ?? null,
+      },
+    })
+  }
+
+  revalidatePath(`/dashboard/orders/${existing.order_id}`)
   return { success: true, data: dispatch }
 }
 
@@ -1914,6 +2072,10 @@ export async function updateOrder(
 ) {
   const supabase = await createClient()
 
+  // Hoisted for timeline logging after the update succeeds
+  let _prevStatus: string | undefined
+  let _nextStatus: string | undefined
+
   // Validate status transitions if status is being updated - CRITICAL FIX
   if (formData.order_status !== undefined) {
     const { data: order, error: orderError } = await supabase
@@ -1926,8 +2088,12 @@ export async function updateOrder(
       return { success: false, error: "Order not found" }
     }
 
-    const currentStatus = order.order_status
-    const newStatus = formData.order_status
+    _prevStatus = order.order_status
+    _nextStatus = formData.order_status
+
+    // Use typed local aliases so validTransitions indexing stays clean
+    const currentStatus: string = order.order_status
+    const newStatus: string     = formData.order_status
 
     // Define valid state transitions (new order stages)
     const validTransitions: Record<string, string[]> = {
@@ -1987,6 +2153,32 @@ export async function updateOrder(
 
   if (error) {
     return { success: false, error: error.message }
+  }
+
+  // Timeline: log what changed
+  if (_nextStatus !== undefined) {
+    const isVoid = _nextStatus === "Void"
+    void logTimelineEvent(supabase, orderId, {
+      event_type:  isVoid ? "order_cancelled" : "order_status_changed",
+      title:       isVoid ? "Order Voided" : `Status → ${_nextStatus}`,
+      description: isVoid
+        ? "Order has been voided and is no longer active."
+        : `Order status changed from "${_prevStatus}" to "${_nextStatus}".`,
+      actor:       "admin",
+      metadata: {
+        new_status: _nextStatus,
+        old_status: _prevStatus,
+      },
+    })
+  } else {
+    // Non-status update (customer, sales order number, etc.)
+    void logTimelineEvent(supabase, orderId, {
+      event_type:  "order_updated",
+      title:       "Order Updated",
+      description: "Order details were updated.",
+      actor:       "admin",
+      metadata:    {},
+    })
   }
 
   revalidatePath(`/dashboard/orders/${orderId}`)
@@ -2553,6 +2745,20 @@ export async function createProductionRecord(
     }
   })()
 
+  // Timeline: production record created → production started
+  void logTimelineEvent(supabase, orderId, {
+    event_type:  "production_record_created",
+    title:       `Production Started (${productionType === "full" ? "Full" : "Partial"})`,
+    description: `Production record ${productionNumber} created and set to In Production.`,
+    actor:       "admin",
+    actor_id:    profile.id,
+    metadata: {
+      production_record_id: productionRecord.id,
+      production_number:    productionNumber,
+      production_type:      productionType,
+    },
+  })
+
   // Reload order details so the new record is reflected in the UI.
   revalidatePath(`/dashboard/orders/${orderId}`)
 
@@ -2632,7 +2838,25 @@ export async function updateProductionRecordStatus(
     }
   }
 
-  if (record) {
+  if (record?.order_id) {
+    // Timeline: production status changed
+    if (status === "in_production") {
+      void logTimelineEvent(supabase, record.order_id, {
+        event_type:  "production_in_progress",
+        title:       "Production In Progress",
+        description: "Production record resumed and is now in progress.",
+        actor:       "admin",
+        metadata:    { production_record_id: recordId },
+      })
+    } else if (status === "completed") {
+      void logTimelineEvent(supabase, record.order_id, {
+        event_type:  "production_completed",
+        title:       "Production Completed",
+        description: "Production record has been marked as completed.",
+        actor:       "admin",
+        metadata:    { production_record_id: recordId },
+      })
+    }
     revalidatePath(`/dashboard/orders/${record.order_id}`)
   }
 
@@ -2926,6 +3150,20 @@ export async function createOrUpdateOrderInvoice(params: {
   const { data, error } = await q
   if (error) return { success: false, error: error.message }
 
+  // Timeline: invoice created
+  void logTimelineEvent(supabase, params.orderId, {
+    event_type:  "invoice_created",
+    title:       `Invoice Created: ${invoiceNumber}`,
+    description: `Invoice ${invoiceNumber} for ₹${params.invoiceAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })} raised.`,
+    actor:       "admin",
+    actor_id:    profile.id,
+    metadata: {
+      invoice_id:     (data as any).id,
+      invoice_number: invoiceNumber,
+      invoice_amount: params.invoiceAmount,
+    },
+  })
+
   revalidatePath(`/dashboard/orders/${params.orderId}`)
   return { success: true, data }
 }
@@ -3073,6 +3311,23 @@ export async function addOrderPayment(
   if (error) {
     return { success: false, error: error.message }
   }
+
+  // Timeline: log payment received
+  void logTimelineEvent(supabase, orderId, {
+    event_type:  "payment_received",
+    title:       "Payment Received",
+    description: paymentMethod
+      ? `₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })} via ${paymentMethod}`
+      : `₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })} received.`,
+    actor:       "admin",
+    actor_id:    profile.id,
+    metadata: {
+      amount,
+      payment_method:  paymentMethod  ?? null,
+      reference:       reference       ?? null,
+      invoice_id:      invoiceId,
+    },
+  })
 
   revalidatePath(`/dashboard/orders/${orderId}`)
   return { success: true, data }

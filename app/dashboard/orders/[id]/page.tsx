@@ -26,6 +26,7 @@ import {
   createDispatch,
   getOrderDispatches,
   updateDispatchStatus,
+  updateDispatchDetails,
   updateOrderPayment,
   getOrderPaymentFollowups,
   ensurePaymentFollowupForOrder,
@@ -50,6 +51,7 @@ import {
   addOrderPayment,
   deleteOrderPayment,
 } from "@/app/actions/orders"
+import { TimelineDrawer } from "@/components/orders/TimelineDrawer"
 import { getCourierCompanies } from "@/app/actions/management"
 import {
   ShoppingCart,
@@ -178,6 +180,11 @@ export default function OrderDetailsPage() {
   const [creatingRecord, setCreatingRecord] = useState(false)
   const [generatingTrackingSlip, setGeneratingTrackingSlip] = useState<string | null>(null)
   const [expandedShipments, setExpandedShipments] = useState<Record<string, boolean>>({})
+  const [editingDispatchId, setEditingDispatchId] = useState<string | null>(null)
+  const [editCourierId, setEditCourierId] = useState<string>("")
+  const [editTrackingId, setEditTrackingId] = useState<string>("")
+  const [editEstimatedDelivery, setEditEstimatedDelivery] = useState<string>("")
+  const [savingDispatchEdit, setSavingDispatchEdit] = useState(false)
   const [invoiceAttachments, setInvoiceAttachments] = useState<any[]>([])
   const [uploadingInvoiceAttachment, setUploadingInvoiceAttachment] = useState(false)
   const [orderInvoices, setOrderInvoices] = useState<any[]>([])
@@ -413,7 +420,7 @@ export default function OrderDetailsPage() {
     setInvoiceDraftAmount(String(current.invoice_amount ?? ""))
     setInvoiceDraftDispatchId(current.dispatch_id ?? "")
     setInvoiceDraftNotes(current.notes ?? "")
-  }, [orderInvoices])
+  }, [orderInvoices, selectedInvoiceId])
 
   // When Payment or Followup tab is active and order has amount due, ensure single 14-day followup exists and reload followups
   useEffect(() => {
@@ -1376,6 +1383,11 @@ export default function OrderDetailsPage() {
 
           {/* Header Buttons Group */}
           <div className="flex items-center gap-2">
+            <TimelineDrawer
+              orderId={orderId}
+              orderNumber={order.internal_order_number}
+            />
+
             <Button
               variant="outline"
               size="sm"
@@ -1579,14 +1591,15 @@ export default function OrderDetailsPage() {
           </TabsTrigger>
 
           {(order.cash_discount || paymentFollowups.length > 0 || paymentSummary.amountDue > 0) && (
-            <TabsTrigger 
-              value="followup" 
+            <TabsTrigger
+              value="followup"
               className="relative flex-shrink-0 rounded-none border-b-2 border-transparent px-5 py-3 font-medium text-sm text-slate-400 hover:text-orange-500 hover:bg-orange-50 transition-none data-[state=active]:border-b-2 data-[state=active]:border-orange-500 data-[state=active]:text-orange-500 data-[state=active]:bg-transparent"
             >
               <Calendar className="w-4 h-4 mr-2" />
               Payment Followup
             </TabsTrigger>
           )}
+
         </TabsList>
 
         {/* Items Tab */}
@@ -2332,12 +2345,31 @@ export default function OrderDetailsPage() {
                                 )}
                               </div>
                             </div>
-                            <span className={`px-2.5 py-1 rounded text-xs font-medium ${dispatch.dispatch_type === "full"
-                              ? "bg-green-100 text-green-700"
-                              : "bg-blue-100 text-blue-700"
-                              }`}>
-                              {dispatch.dispatch_type === "full" ? "Full" : "Partial"}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2.5 py-1 rounded text-xs font-medium ${dispatch.dispatch_type === "full"
+                                ? "bg-green-100 text-green-700"
+                                : "bg-blue-100 text-blue-700"
+                                }`}>
+                                {dispatch.dispatch_type === "full" ? "Full" : "Partial"}
+                              </span>
+                              {(shipmentStatus === 'ready' || shipmentStatus === 'picked_up') && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2.5 text-xs border-gray-300 text-gray-600 hover:bg-gray-50"
+                                  onClick={() => {
+                                    setEditingDispatchId(dispatch.id)
+                                    setEditCourierId(dispatch.courier_company_id || "")
+                                    setEditTrackingId(dispatch.tracking_id || "")
+                                    setEditEstimatedDelivery(dispatch.estimated_delivery || "")
+                                    setExpandedShipments(prev => ({ ...prev, [dispatch.id]: true }))
+                                  }}
+                                >
+                                  <Edit2 className="w-3 h-3 mr-1" />
+                                  Edit
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         </CardHeader>
                         <CardContent className="pt-5">
@@ -2438,82 +2470,169 @@ export default function OrderDetailsPage() {
                             {/* Collapsible Details Section */}
                             {expandedShipments[dispatch.id] && (
                               <div className="space-y-5 animate-in fade-in slide-in-from-top-2 duration-300">
-                                {/* Information Grid */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                  {dispatch.courier_companies && (
-                                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-5 bg-gray-50 rounded-lg border border-gray-100 hover:bg-gray-100/80 transition-colors">
-                                      <div className="flex items-center gap-4">
-                                        <div className="p-2.5 bg-white rounded-lg shadow-sm">
-                                          <Truck className="w-5 h-5 text-indigo-600" />
+
+                                {/* ── Inline Edit Form ─────────────────────── */}
+                                {editingDispatchId === dispatch.id ? (
+                                  <div className="rounded-lg border-2 border-orange-200 bg-orange-50/40 p-4 space-y-4">
+                                    <p className="text-xs font-semibold text-orange-700 uppercase tracking-wider">
+                                      Edit Shipment Details
+                                    </p>
+
+                                    {/* Courier */}
+                                    <div>
+                                      <Label className="text-xs font-semibold text-gray-600 mb-1.5 block">Courier Company</Label>
+                                      <select
+                                        value={editCourierId}
+                                        onChange={(e) => setEditCourierId(e.target.value)}
+                                        className="w-full h-9 px-3 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
+                                      >
+                                        <option value="">— No courier —</option>
+                                        {courierCompanies.map((c) => (
+                                          <option key={c.id} value={c.id}>{c.name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    {/* Tracking ID */}
+                                    <div>
+                                      <Label className="text-xs font-semibold text-gray-600 mb-1.5 block">Tracking ID</Label>
+                                      <Input
+                                        value={editTrackingId}
+                                        onChange={(e) => setEditTrackingId(e.target.value)}
+                                        placeholder="Enter tracking ID"
+                                        className="h-9 text-sm font-mono"
+                                      />
+                                    </div>
+
+                                    {/* Estimated Delivery */}
+                                    <div>
+                                      <Label className="text-xs font-semibold text-gray-600 mb-1.5 block">Estimated Delivery</Label>
+                                      <Input
+                                        type="date"
+                                        value={editEstimatedDelivery}
+                                        onChange={(e) => setEditEstimatedDelivery(e.target.value)}
+                                        className="h-9 text-sm"
+                                      />
+                                    </div>
+
+                                    {/* Actions */}
+                                    <div className="flex items-center gap-2 pt-1">
+                                      <Button
+                                        size="sm"
+                                        disabled={savingDispatchEdit}
+                                        onClick={async () => {
+                                          setSavingDispatchEdit(true)
+                                          const result = await updateDispatchDetails(dispatch.id, {
+                                            courier_company_id: editCourierId || null,
+                                            tracking_id: editTrackingId || null,
+                                            estimated_delivery: editEstimatedDelivery || null,
+                                          })
+                                          setSavingDispatchEdit(false)
+                                          if (result.success) {
+                                            setEditingDispatchId(null)
+                                            await loadDispatches()
+                                            setSuccess("Shipment details updated!")
+                                            setTimeout(() => setSuccess(null), 3000)
+                                          } else {
+                                            setError(result.error || "Failed to save changes")
+                                          }
+                                        }}
+                                        className="h-8 text-xs bg-orange-500 hover:bg-orange-600 text-white"
+                                      >
+                                        {savingDispatchEdit ? "Saving…" : "Save Changes"}
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled={savingDispatchEdit}
+                                        onClick={() => setEditingDispatchId(null)}
+                                        className="h-8 text-xs text-gray-600"
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <>
+                                    {/* ── Read-only view ───────────────────── */}
+                                    {/* Information Grid */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      {dispatch.courier_companies && (
+                                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-5 bg-gray-50 rounded-lg border border-gray-100 hover:bg-gray-100/80 transition-colors">
+                                          <div className="flex items-center gap-4">
+                                            <div className="p-2.5 bg-white rounded-lg shadow-sm">
+                                              <Truck className="w-5 h-5 text-indigo-600" />
+                                            </div>
+                                            <div className="space-y-1">
+                                              <span className="text-sm font-semibold text-gray-900">
+                                                {dispatch.courier_companies?.name || "Standard Delivery"}
+                                              </span>
+                                              <p className="text-xs text-gray-500 font-medium">
+                                                Shipment on {new Date(dispatch.dispatch_date).toLocaleDateString('en-IN', {
+                                                  day: '2-digit',
+                                                  month: 'short',
+                                                  year: 'numeric'
+                                                })}
+                                              </p>
+                                            </div>
+                                          </div>
+
+                                          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                                            {dispatch.tracking_id && (
+                                              <div className="flex items-center px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-md text-xs font-bold border border-indigo-100">
+                                                ID: {dispatch.tracking_id}
+                                              </div>
+                                            )}
+                                            <div className="flex items-center px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-xs font-bold border border-blue-100">
+                                              {dispatch.dispatch_type === 'full' ? 'Full Dispatch' : 'Partial'}
+                                            </div>
+                                          </div>
                                         </div>
-                                        <div className="space-y-1">
-                                          <span className="text-sm font-semibold text-gray-900">
-                                            {dispatch.courier_companies?.name || "Standard Delivery"}
-                                          </span>
-                                          <p className="text-xs text-gray-500 font-medium">
-                                            Shipment on {new Date(dispatch.dispatch_date).toLocaleDateString('en-IN', {
-                                              day: '2-digit',
-                                              month: 'short',
-                                              year: 'numeric'
+                                      )}
+                                      {dispatch.tracking_id && (
+                                        <div className="p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border border-gray-200">
+                                          <div className="flex items-center gap-2 mb-2">
+                                            <FileText className="w-4 h-4 text-gray-600" />
+                                            <Label className="text-xs font-semibold text-gray-600">Tracking ID</Label>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <p className="text-base font-mono font-bold text-gray-900">{dispatch.tracking_id}</p>
+                                            {dispatch.courier_companies?.tracking_url && (
+                                              <a
+                                                href={dispatch.courier_companies.tracking_url.replace('{tracking_number}', dispatch.tracking_id)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium flex items-center gap-1"
+                                              >
+                                                <Truck className="w-3 h-3" />
+                                                Track
+                                              </a>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                      {dispatch.estimated_delivery && (
+                                        <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                                          <div className="flex items-center gap-2 mb-2">
+                                            <Calendar className="w-4 h-4 text-emerald-600" />
+                                            <Label className="text-xs font-semibold text-emerald-700">Expected Delivery</Label>
+                                          </div>
+                                          <p className="text-base font-bold text-emerald-900">
+                                            {new Date(dispatch.estimated_delivery).toLocaleDateString('en-IN', {
+                                              day: '2-digit', month: 'short', year: 'numeric'
                                             })}
                                           </p>
+                                          {new Date(dispatch.estimated_delivery) < new Date(new Date().setHours(0,0,0,0)) &&
+                                            dispatch.shipment_status !== 'delivered' && (
+                                              <p className="mt-1 text-xs font-medium text-red-600">Delivery overdue</p>
+                                            )}
                                         </div>
-                                      </div>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
 
-                                      <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                                        {dispatch.tracking_id && (
-                                          <div className="flex items-center px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-md text-xs font-bold border border-indigo-100">
-                                            ID: {dispatch.tracking_id}
-                                          </div>
-                                        )}
-                                        <div className="flex items-center px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-xs font-bold border border-blue-100">
-                                          {dispatch.dispatch_type === 'full' ? 'Full Dispatch' : 'Partial'}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
-                                  {dispatch.tracking_id && (
-                                    <div className="p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border border-gray-200">
-                                      <div className="flex items-center gap-2 mb-2">
-                                        <FileText className="w-4 h-4 text-gray-600" />
-                                        <Label className="text-xs font-semibold text-gray-600">Tracking ID</Label>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <p className="text-base font-mono font-bold text-gray-900">{dispatch.tracking_id}</p>
-                                        {dispatch.courier_companies?.tracking_url && (
-                                          <a
-                                            href={dispatch.courier_companies.tracking_url.replace('{tracking_number}', dispatch.tracking_id)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium flex items-center gap-1"
-                                          >
-                                            <Truck className="w-3 h-3" />
-                                            Track
-                                          </a>
-                                        )}
-                                      </div>
-                                    </div>
-                                  )}
-                                  {dispatch.estimated_delivery && (
-                                    <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-200">
-                                      <div className="flex items-center gap-2 mb-2">
-                                        <Calendar className="w-4 h-4 text-emerald-600" />
-                                        <Label className="text-xs font-semibold text-emerald-700">Expected Delivery</Label>
-                                      </div>
-                                      <p className="text-base font-bold text-emerald-900">
-                                        {new Date(dispatch.estimated_delivery).toLocaleDateString('en-IN', {
-                                          day: '2-digit', month: 'short', year: 'numeric'
-                                        })}
-                                      </p>
-                                      {new Date(dispatch.estimated_delivery) < new Date(new Date().setHours(0,0,0,0)) &&
-                                        dispatch.shipment_status !== 'delivered' && (
-                                          <p className="mt-1 text-xs font-medium text-red-600">Delivery overdue</p>
-                                        )}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Items Section */}
+                                {/* Items Section — always visible */}
                                 {dispatch.dispatch_items && dispatch.dispatch_items.length > 0 && (
                                   <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                                     <Label className="text-sm font-semibold text-gray-700 mb-3 block">Items Dispatched</Label>
@@ -3746,6 +3865,7 @@ export default function OrderDetailsPage() {
             </Card>
           </TabsContent>
         )}
+
       </Tabs>
 
       {/* Dispatch Modal */}

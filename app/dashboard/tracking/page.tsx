@@ -15,6 +15,9 @@ import {
   SlidersHorizontal,
   ChevronDown,
   Download,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from "lucide-react"
 import XLSX from "xlsx-js-style"
 import { Card, CardContent } from "@/components/ui/card"
@@ -104,6 +107,49 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+// ── Sort types ────────────────────────────────────────────────────────────────
+
+type SortKey = "order_number" | "sales_order_number" | "customer_name" | "courier_name" | "shipment_status" | "dispatch_date" | "estimated_delivery"
+type SortDir = "asc" | "desc"
+
+// ── Sortable column header ─────────────────────────────────────────────────
+
+function SortableHeader({
+  label, sortKey, active, dir, onSort, className,
+}: {
+  label:    string
+  sortKey:  SortKey
+  active:   boolean
+  dir:      SortDir
+  onSort:   (key: SortKey) => void
+  className?: string
+}) {
+  return (
+    <th
+      className={cn(
+        "sticky top-[68px] z-10 border-b border-sk-border bg-sk-page-bg px-4 py-3",
+        className,
+      )}
+    >
+      <button
+        onClick={() => onSort(sortKey)}
+        className={cn(
+          "flex items-center gap-1 text-xs font-semibold transition-colors",
+          active ? "text-sk-primary" : "text-sk-text-2 hover:text-sk-text-1",
+        )}
+      >
+        {label}
+        {active
+          ? (dir === "asc"
+              ? <ArrowUp className="h-3 w-3 shrink-0" />
+              : <ArrowDown className="h-3 w-3 shrink-0" />)
+          : <ArrowUpDown className="h-3 w-3 shrink-0 opacity-40" />
+        }
+      </button>
+    </th>
+  )
+}
+
 // ── Status filter options (simplified) ──────────────────────────────────────
 
 const STATUS_FILTER_OPTIONS = [
@@ -154,6 +200,23 @@ function SummaryCard({
   )
 }
 
+// ── Filter chip ────────────────────────────────────────────────────────────
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-sk-primary/30 bg-sk-primary/8 px-2.5 py-0.5 text-xs font-medium text-sk-primary">
+      {label}
+      <button
+        onClick={onRemove}
+        className="ml-0.5 rounded-full p-0.5 hover:bg-sk-primary/20 transition-colors"
+        aria-label={`Remove ${label} filter`}
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  )
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function TrackingCommandCenter() {
@@ -169,12 +232,16 @@ export default function TrackingCommandCenter() {
   const [status,    setStatus]    = useState<StatusFilterValue>("all")
   const [dateFrom,  setDateFrom]  = useState("")
   const [dateTo,    setDateTo]    = useState("")
+  const [etaFrom,    setEtaFrom]    = useState("")
+  const [etaTo,      setEtaTo]      = useState("")
+  const [itemSearch, setItemSearch] = useState("")
 
   // Active KPI card filter — "active" is the default on mount
   const [cardFilter, setCardFilter] = useState<string | null>("active")
 
-  // Collapsible filter panel
-  const [filtersOpen, setFiltersOpen] = useState(false)
+  // Sorting
+  const [sortKey, setSortKey] = useState<SortKey>("dispatch_date")
+  const [sortDir, setSortDir] = useState<SortDir>("desc")
 
   // Drawer
   const [selected,   setSelected]   = useState<ShipmentRow | null>(null)
@@ -238,6 +305,9 @@ export default function TrackingCommandCenter() {
     setStatus("all")
     setDateFrom("")
     setDateTo("")
+    setEtaFrom("")
+    setEtaTo("")
+    setItemSearch("")
     setCardFilter("active") // reset to default, not null
   }
 
@@ -534,8 +604,19 @@ export default function TrackingCommandCenter() {
     }
   }
 
+  // Derive unique item names from loaded shipments for the dropdown
+  const uniqueItemNames = Array.from(
+    new Set(
+      shipments.flatMap((r) =>
+        r.item_details
+          ? r.item_details.split(", ").map((part) => part.replace(/ x \d+$/, "").trim())
+          : []
+      )
+    )
+  ).sort()
+
   // "active" card is the default — don't count it as an active filter
-  const filterCount = [!!search, courier !== "all", status !== "all", !!dateFrom, !!dateTo].filter(Boolean).length
+  const filterCount = [!!search, courier !== "all", status !== "all", !!dateFrom, !!dateTo, !!etaFrom, !!etaTo, !!itemSearch].filter(Boolean).length
   const hasActiveFilters = filterCount > 0 || (cardFilter !== null && cardFilter !== "active")
 
   // Card click — toggle between the clicked filter and the "active" default
@@ -553,7 +634,7 @@ export default function TrackingCommandCenter() {
     : shipments
 
   // 2. Apply KPI card filter
-  const displayedShipments = cardFilter
+  const afterCard = cardFilter
     ? afterStatus.filter((r) => {
         if (cardFilter === "active")       return ["pending","ready","picked_up","in_transit","out_for_delivery"].includes(r.shipment_status)
         if (cardFilter === "in_transit")   return ["picked_up","in_transit","out_for_delivery"].includes(r.shipment_status)
@@ -562,6 +643,43 @@ export default function TrackingCommandCenter() {
         return true
       })
     : afterStatus
+
+  // 3. Apply ETA date range filter (client-side)
+  const afterEta = (etaFrom || etaTo)
+    ? afterCard.filter((r) => {
+        if (!r.estimated_delivery) return false
+        const eta = r.estimated_delivery.slice(0, 10) // "YYYY-MM-DD"
+        if (etaFrom && eta < etaFrom) return false
+        if (etaTo   && eta > etaTo)   return false
+        return true
+      })
+    : afterCard
+
+  // 4. Apply item filter — match any "Name x Qty" part whose name equals the selected item
+  const afterItem = itemSearch
+    ? afterEta.filter((r) =>
+        r.item_details
+          .split(", ")
+          .some((part) => part.replace(/ x \d+$/, "").trim() === itemSearch)
+      )
+    : afterEta
+
+  // 5. Sort
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortKey(key)
+      setSortDir("asc")
+    }
+  }
+
+  const displayedShipments = [...afterItem].sort((a, b) => {
+    const mul = sortDir === "asc" ? 1 : -1
+    const av = (a[sortKey] ?? "") as string
+    const bv = (b[sortKey] ?? "") as string
+    return av.localeCompare(bv) * mul
+  })
 
   const allVisibleSelected =
     displayedShipments.length > 0 &&
@@ -624,127 +742,185 @@ export default function TrackingCommandCenter() {
 
       {/* ── Main card ── */}
       <Card className="border-sk-border bg-white">
-        {/* Header */}
-        <div className="flex flex-col gap-3 border-b border-sk-border bg-[#fcf7f2] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+
+        {/* ── Card header ── */}
+        <div className="flex items-center justify-between gap-4 border-b border-sk-border bg-[#fcf7f2] px-5 py-3.5">
+          <div className="min-w-0">
             <h2 className="text-base font-semibold text-sk-text-1">All Shipments</h2>
             <p className="text-xs text-sk-text-2">
-              {loading ? "Loading…" : `${displayedShipments.length} shipment${displayedShipments.length !== 1 ? "s" : ""}`}
+              {loading
+                ? "Loading…"
+                : hasActiveFilters
+                  ? `${displayedShipments.length} of ${shipments.length} shipments`
+                  : `${displayedShipments.length} shipment${displayedShipments.length !== 1 ? "s" : ""}`}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {hasActiveFilters && (
-              <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8 gap-1.5 text-xs text-sk-text-2 hover:text-sk-text-1">
-                <X className="h-3.5 w-3.5" /> Clear filters
+              <Button variant="ghost" size="sm" onClick={clearFilters}
+                className="h-8 gap-1 text-xs text-sk-text-2 hover:text-red-600 hover:bg-red-50">
+                <X className="h-3.5 w-3.5" /> Clear all
               </Button>
             )}
-            {/* Export button — visible when rows are selected */}
             {someSelected && (
-              <Button
-                size="sm"
-                onClick={() => void handleExport()}
-                disabled={exportLoading}
-                className="h-8 gap-1.5 bg-green-600 text-xs text-white hover:bg-green-700"
-              >
+              <Button size="sm" onClick={() => void handleExport()} disabled={exportLoading}
+                className="h-8 gap-1.5 bg-green-600 text-xs text-white hover:bg-green-700">
                 {exportLoading
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  : <Download className="h-3.5 w-3.5" />
-                }
+                  : <Download className="h-3.5 w-3.5" />}
                 Export ({selectedIds.size})
               </Button>
             )}
-            {/* Filters toggle */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setFiltersOpen((v) => !v)}
-              className={cn(
-                "h-8 gap-1.5 border-sk-border text-xs",
-                filtersOpen && "bg-sk-primary/5 border-sk-primary text-sk-primary",
-              )}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Filters
-              {filterCount > 0 && (
-                <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-sk-primary px-1 text-[10px] font-bold text-white">
-                  {filterCount}
-                </span>
-              )}
-              <ChevronDown className={cn("h-3 w-3 transition-transform", filtersOpen && "rotate-180")} />
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} className="h-8 gap-1.5 border-sk-border text-xs">
+            <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}
+              className="h-8 gap-1.5 border-sk-border text-xs">
               <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
               Refresh
             </Button>
           </div>
         </div>
 
-        {/* ── Smart Filters (collapsible) ── */}
-        {filtersOpen && (
-          <div className="grid grid-cols-2 gap-2 border-b border-sk-border bg-sk-page-bg/50 px-5 py-3 sm:grid-cols-3 lg:flex lg:flex-wrap lg:items-center">
-            {/* Search */}
-            <div className="relative col-span-2 sm:col-span-3 lg:flex-1 lg:min-w-[220px]">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-sk-text-3" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Order #, sales order, tracking ID, customer…"
-                className="h-9 border-sk-border bg-white pl-8 text-sm focus-visible:ring-sk-primary"
+        {/* ── Search bar — always visible ── */}
+        <div className="border-b border-sk-border bg-white px-5 py-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sk-text-3" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by order #, tracking ID, customer name…"
+              className="h-10 border-sk-border bg-sk-page-bg/60 pl-9 pr-8 text-sm focus-visible:ring-sk-primary"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-sk-text-3 hover:text-sk-text-1 transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── Filter strip — always visible ── */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-sk-border bg-sk-page-bg/40 px-5 py-2.5">
+          {/* Status */}
+          <Select value={status} onValueChange={(v) => {
+            setStatus(v as StatusFilterValue)
+            setCardFilter(v === "all" ? "active" : null)
+          }}>
+            <SelectTrigger className="h-8 w-auto min-w-[130px] border-sk-border bg-white text-xs">
+              <SelectValue placeholder="All Statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_FILTER_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Courier */}
+          <Select value={courier} onValueChange={(v) => { setCourier(v); setCardFilter(null) }}>
+            <SelectTrigger className="h-8 w-auto min-w-[130px] border-sk-border bg-white text-xs">
+              <SelectValue placeholder="All Couriers" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Couriers</SelectItem>
+              {couriers.map((c) => (
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Item */}
+          <Select value={itemSearch || "all"} onValueChange={(v) => setItemSearch(v === "all" ? "" : v)}>
+            <SelectTrigger className="h-8 w-auto min-w-[130px] border-sk-border bg-white text-xs">
+              <SelectValue placeholder="All Items" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Items</SelectItem>
+              {uniqueItemNames.map((name) => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <div className="hidden h-5 w-px bg-sk-border sm:block" />
+
+          {/* Dispatch date range */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-sk-text-3">Dispatch</span>
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-8 w-[132px] border-sk-border bg-white text-xs"
+            />
+            <span className="text-xs text-sk-text-3">—</span>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-8 w-[132px] border-sk-border bg-white text-xs"
+            />
+          </div>
+
+          <div className="hidden h-5 w-px bg-sk-border sm:block" />
+
+          {/* ETA date range */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-sk-text-3">ETA</span>
+            <Input
+              type="date"
+              value={etaFrom}
+              onChange={(e) => { setEtaFrom(e.target.value); setCardFilter(null) }}
+              className="h-8 w-[132px] border-sk-border bg-white text-xs"
+            />
+            <span className="text-xs text-sk-text-3">—</span>
+            <Input
+              type="date"
+              value={etaTo}
+              onChange={(e) => { setEtaTo(e.target.value); setCardFilter(null) }}
+              className="h-8 w-[132px] border-sk-border bg-white text-xs"
+            />
+          </div>
+        </div>
+
+        {/* ── Active filter chips ── */}
+        {filterCount > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-sk-border bg-white px-5 py-2">
+            <span className="text-[10px] font-medium text-sk-text-3 mr-0.5">Active:</span>
+            {status !== "all" && (
+              <FilterChip
+                label={STATUS_FILTER_OPTIONS.find((o) => o.value === status)?.label ?? status}
+                onRemove={() => { setStatus("all"); setCardFilter("active") }}
               />
-            </div>
-
-            {/* Status (simplified) */}
-            <Select value={status} onValueChange={(v) => {
-              setStatus(v as StatusFilterValue)
-              // restore the default card when clearing the status dropdown
-              setCardFilter(v === "all" ? "active" : null)
-            }}>
-              <SelectTrigger className="h-9 border-sk-border bg-white text-sm">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_FILTER_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Courier */}
-            <Select value={courier} onValueChange={(v) => { setCourier(v); setCardFilter(null) }}>
-              <SelectTrigger className="h-9 border-sk-border bg-white text-sm">
-                <SelectValue placeholder="Courier" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Couriers</SelectItem>
-                {couriers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Date From */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-medium text-sk-text-3 pl-0.5">Dispatch From</label>
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="h-9 border-sk-border bg-white text-sm"
+            )}
+            {courier !== "all" && (
+              <FilterChip
+                label={couriers.find((c) => c.id === courier)?.name ?? "Courier"}
+                onRemove={() => setCourier("all")}
               />
-            </div>
-
-            {/* Date To */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-medium text-sk-text-3 pl-0.5">Dispatch To</label>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="h-9 border-sk-border bg-white text-sm"
-              />
-            </div>
+            )}
+            {itemSearch && (
+              <FilterChip label={itemSearch} onRemove={() => setItemSearch("")} />
+            )}
+            {search && (
+              <FilterChip label={`"${search}"`} onRemove={() => setSearch("")} />
+            )}
+            {dateFrom && (
+              <FilterChip label={`Dispatch from ${formatDate(dateFrom)}`} onRemove={() => setDateFrom("")} />
+            )}
+            {dateTo && (
+              <FilterChip label={`Dispatch to ${formatDate(dateTo)}`} onRemove={() => setDateTo("")} />
+            )}
+            {etaFrom && (
+              <FilterChip label={`ETA from ${formatDate(etaFrom)}`} onRemove={() => { setEtaFrom(""); setCardFilter(null) }} />
+            )}
+            {etaTo && (
+              <FilterChip label={`ETA to ${formatDate(etaTo)}`} onRemove={() => { setEtaTo(""); setCardFilter(null) }} />
+            )}
           </div>
         )}
+
 
         {/* Error */}
         {error && (
@@ -798,14 +974,14 @@ export default function TrackingCommandCenter() {
                           title="Select all"
                         />
                       </th>
-                      <th className="sticky top-[68px] z-10 border-b border-sk-border bg-sk-page-bg px-5 py-3 text-xs font-semibold text-sk-text-2">Order #</th>
-                      <th className="sticky top-[68px] z-10 border-b border-sk-border bg-sk-page-bg px-4 py-3 text-xs font-semibold text-sk-text-2">Sales Order #</th>
-                      <th className="sticky top-[68px] z-10 border-b border-sk-border bg-sk-page-bg px-4 py-3 text-xs font-semibold text-sk-text-2">Customer</th>
-                      <th className="sticky top-[68px] z-10 border-b border-sk-border bg-sk-page-bg px-4 py-3 text-xs font-semibold text-sk-text-2">Courier</th>
+                      <SortableHeader label="Order #"       sortKey="order_number"        active={sortKey === "order_number"}        dir={sortDir} onSort={handleSort} className="px-5" />
+                      <SortableHeader label="Sales Order #" sortKey="sales_order_number"  active={sortKey === "sales_order_number"}  dir={sortDir} onSort={handleSort} />
+                      <SortableHeader label="Customer"      sortKey="customer_name"        active={sortKey === "customer_name"}       dir={sortDir} onSort={handleSort} />
+                      <SortableHeader label="Courier"       sortKey="courier_name"         active={sortKey === "courier_name"}        dir={sortDir} onSort={handleSort} />
                       <th className="sticky top-[68px] z-10 border-b border-sk-border bg-sk-page-bg px-4 py-3 text-xs font-semibold text-sk-text-2">Tracking ID</th>
-                      <th className="sticky top-[68px] z-10 border-b border-sk-border bg-sk-page-bg px-4 py-3 text-xs font-semibold text-sk-text-2">Status</th>
-                      <th className="sticky top-[68px] z-10 border-b border-sk-border bg-sk-page-bg px-4 py-3 text-xs font-semibold text-sk-text-2">Dispatched</th>
-                      <th className="sticky top-[68px] z-10 border-b border-sk-border bg-sk-page-bg px-4 py-3 text-xs font-semibold text-sk-text-2">ETA</th>
+                      <SortableHeader label="Status"        sortKey="shipment_status"      active={sortKey === "shipment_status"}     dir={sortDir} onSort={handleSort} />
+                      <SortableHeader label="Dispatched"    sortKey="dispatch_date"        active={sortKey === "dispatch_date"}       dir={sortDir} onSort={handleSort} />
+                      <SortableHeader label="ETA"           sortKey="estimated_delivery"   active={sortKey === "estimated_delivery"}  dir={sortDir} onSort={handleSort} />
                       <th className="sticky top-[68px] z-10 border-b border-sk-border bg-sk-page-bg px-4 py-3 text-xs font-semibold text-sk-text-2"></th>
                     </tr>
                   </thead>
