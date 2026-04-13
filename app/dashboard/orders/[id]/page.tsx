@@ -1352,77 +1352,71 @@ export default function OrderDetailsPage() {
 
   return (
     <div className="space-y-6 pb-8">
-      {/* Header Section */}
-      <div className="pb-0 border-b-0">
-        {/* Header Top: Back link + Order # + Date */}
-        <div className="flex items-baseline gap-4 mb-3">
-          <button
-            onClick={() => router.back()}
-            className="text-sm text-slate-400 hover:text-orange-500 transition-colors cursor-pointer font-medium flex items-center gap-1.5"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            Back to Orders
-          </button>
+      {/* Header Section — single compact bar */}
+      <div className="flex items-center gap-3 min-w-0">
+        {/* Back */}
+        <button
+          onClick={() => router.back()}
+          title="Back to Orders"
+          className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-500 hover:text-orange-600 hover:border-orange-300 hover:bg-orange-50 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </button>
+
+        {/* Divider */}
+        <div className="h-5 w-px bg-slate-200 flex-shrink-0" />
+
+        {/* Order identity */}
+        <div className="flex-1 min-w-0 flex items-baseline gap-2 flex-wrap">
+          <h1 className="text-base font-bold text-slate-900 whitespace-nowrap">
+            Order #{order.internal_order_number || order.id.slice(0, 8)}
+          </h1>
+          {order.sales_order_number && (
+            <>
+              <span className="text-slate-300 text-xs hidden sm:inline">·</span>
+              <span className="text-xs text-slate-500 whitespace-nowrap hidden sm:inline">
+                SO# <span className="font-medium text-slate-700">{order.sales_order_number}</span>
+              </span>
+            </>
+          )}
+          <span className="text-slate-300 text-xs hidden sm:inline">·</span>
+          <span className="text-xs text-slate-400 whitespace-nowrap hidden sm:inline">
+            {new Date(order.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </span>
         </div>
-        
-        {/* Order Title + Date */}
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex-1">
-            <h1 className="text-2xl font-semibold text-slate-900">
-              Order #{order.internal_order_number || order.id.slice(0, 8)}
-            </h1>
-            {order.sales_order_number && (
-              <p className="mt-1 text-sm font-medium text-slate-600">
-                Sales Order #: {order.sales_order_number}
-              </p>
-            )}
-            <p className="text-xs text-slate-400 mt-1">
-              {new Date(order.created_at).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}
-            </p>
-          </div>
 
-          {/* Header Buttons Group */}
-          <div className="flex items-center gap-2">
-            <TimelineDrawer
-              orderId={orderId}
-              orderNumber={order.internal_order_number}
-            />
+        {/* Action buttons — right-aligned, compact */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <TimelineDrawer orderId={orderId} orderNumber={order.internal_order_number} />
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDownloadLatestTrackingSlip}
-              disabled={generatingTrackingSlip !== null}
-              className="h-9 px-3 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2"
-            >
-              {generatingTrackingSlip !== null ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <FileDown className="w-4 h-4" />
-              )}
-              <span className="hidden sm:inline text-sm">Tracking Slip</span>
-            </Button>
+          <button
+            onClick={handleDownloadLatestTrackingSlip}
+            disabled={generatingTrackingSlip !== null}
+            title="Download Tracking Slip"
+            className="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors text-xs font-medium disabled:opacity-50"
+          >
+            {generatingTrackingSlip !== null
+              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              : <FileDown className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">Slip</span>
+          </button>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowEditModal(true)}
-              className="h-9 px-3 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2"
-            >
-              <Edit2 className="w-4 h-4" />
-              <span className="hidden sm:inline text-sm">Edit</span>
-            </Button>
+          <button
+            onClick={() => setShowEditModal(true)}
+            title="Edit Order"
+            className="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:text-orange-700 hover:border-orange-300 hover:bg-orange-50 transition-colors text-xs font-medium"
+          >
+            <Edit2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Edit</span>
+          </button>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowDeleteConfirm(true)}
-              className="h-9 px-3 border border-red-200 bg-white hover:bg-red-50 text-red-600 hover:text-red-700 flex items-center gap-2"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span className="hidden sm:inline text-sm">Delete</span>
-            </Button>
-          </div>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            title="Delete Order"
+            className="flex items-center justify-center h-8 w-8 rounded-md border border-slate-200 bg-white text-slate-400 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
@@ -1451,89 +1445,121 @@ export default function OrderDetailsPage() {
       )}
 
       {/* Customer Information - Always visible */}
-      <Card className="bg-white border border-slate-200 border-l-4 border-l-orange-500 rounded-none md:rounded-lg shadow-none">
-        <div className="pl-0">
-          <div className="px-6 py-4 border-b border-slate-100">
-            <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide">Customer Information</h2>
+      <Card className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+        {/* Card Header */}
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <User className="w-4 h-4 text-orange-500" />
+            <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer Information</h2>
           </div>
-          <div className="px-6 py-5 space-y-5">
-            {/* Customer Name Row with Initials */}
-            <div className="flex items-start gap-4">
-              <div className="w-11 h-11 rounded-full bg-orange-50 text-orange-700 font-semibold text-base flex items-center justify-center flex-shrink-0">
-                {order.customers?.name?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || "?"}
+          {/* Status badges — compact, in the header */}
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <span
+              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                order.order_status === 'Delivered' ? 'bg-green-100 text-green-700' :
+                order.order_status === 'In Transit' ? 'bg-blue-100 text-blue-700' :
+                order.order_status === 'Ready for Dispatch' ? 'bg-purple-100 text-purple-700' :
+                order.order_status === 'Partial Delivered' ? 'bg-amber-100 text-amber-700' :
+                'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {order.order_status}
+            </span>
+            <span
+              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                derivedPaymentStatus === 'complete' ? 'bg-green-100 text-green-700' :
+                derivedPaymentStatus === 'partial' ? 'bg-blue-100 text-blue-700' :
+                'bg-amber-100 text-amber-700'
+              }`}
+            >
+              {derivedPaymentStatus === 'complete' ? 'Paid' :
+               derivedPaymentStatus === 'partial' ? 'Partial Payment' :
+               'Payment Pending'}
+            </span>
+            {order.cash_discount && (
+              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">
+                Cash Discount
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Card Body */}
+        <div className="px-5 py-4">
+          <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+            {/* Avatar + Name + Contact Person */}
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="w-12 h-12 rounded-full bg-orange-100 text-orange-700 font-bold text-base flex items-center justify-center flex-shrink-0 select-none">
+                {order.customers?.name?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
               </div>
-              <div className="flex-1">
-                <p className="text-lg font-semibold text-slate-900">{order.customers?.name || "-"}</p>
-                {order.customers?.phone && (
-                  <p className="text-sm text-slate-600 mt-0.5 flex items-center gap-2">
-                    {order.customers.phone}
+              <div className="min-w-0">
+                <p className="text-base font-semibold text-slate-900 truncate">{order.customers?.name || '—'}</p>
+                {order.customers?.contact_person && (
+                  <p className="text-xs text-slate-500 mt-0.5 truncate">
+                    Contact: <span className="font-medium text-slate-700">{order.customers.contact_person}</span>
                   </p>
                 )}
               </div>
             </div>
 
-            {/* Email and Phone Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Email</p>
-                <p className="text-sm text-slate-900">{order.customers?.email || "-"}</p>
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Phone</p>
-                <p className="text-sm text-slate-900">{order.customers?.phone || "-"}</p>
-              </div>
-            </div>
-
-            {/* Address */}
-            {order.customers?.address && (
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Address</p>
-                <p className="text-sm text-slate-600 leading-relaxed">{order.customers.address}</p>
-              </div>
-            )}
-
-            {/* Status Badges */}
-            <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-3">
-              {/* Order Status Badge */}
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Order Status</p>
-                <span 
-                  className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${
-                    order.order_status === 'Delivered' ? 'bg-green-100 text-green-700' :
-                    order.order_status === 'In Transit' ? 'bg-blue-100 text-blue-700' :
-                    order.order_status === 'Ready for Dispatch' ? 'bg-purple-100 text-purple-700' :
-                    order.order_status === 'Partial Delivered' ? 'bg-amber-100 text-amber-700' :
-                    'bg-slate-100 text-slate-700'
-                  }`}
+            {/* Contact details: Phone, Email, Address */}
+            <div className="flex flex-col gap-2 sm:items-end text-sm sm:min-w-[220px]">
+              {order.customers?.phone ? (
+                <a
+                  href={`tel:${order.customers.phone}`}
+                  className="flex items-center gap-2 text-slate-700 hover:text-orange-600 transition-colors group"
                 >
-                  {order.order_status}
-                </span>
-              </div>
-
-              {/* Payment Status Badge */}
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Payment Status</p>
-                <span 
-                  className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${
-                    derivedPaymentStatus === 'complete' ? 'bg-green-100 text-green-700' :
-                    derivedPaymentStatus === 'partial' ? 'bg-blue-100 text-blue-700' :
-                    'bg-amber-100 text-amber-700'
-                  }`}
-                >
-                  {derivedPaymentStatus === 'complete' ? 'Paid' : 
-                   derivedPaymentStatus === 'partial' ? 'Partial' : 
-                   'Pending'}
-                </span>
-              </div>
-
-              {/* Cash Discount Badge */}
-              {order.cash_discount && (
-                <div>
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Discount</p>
-                  <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">
-                    Cash Discount
+                  <span className="w-5 h-5 rounded bg-slate-100 group-hover:bg-orange-50 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-3 h-3 text-slate-500 group-hover:text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                    </svg>
                   </span>
-                </div>
+                  <span className="font-medium">{order.customers.phone}</span>
+                </a>
+              ) : (
+                <p className="flex items-center gap-2 text-slate-400 text-xs">
+                  <span className="w-5 h-5 rounded bg-slate-100 flex items-center justify-center">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                    </svg>
+                  </span>
+                  No phone
+                </p>
+              )}
+
+              {order.customers?.email ? (
+                <a
+                  href={`mailto:${order.customers.email}`}
+                  className="flex items-center gap-2 text-slate-700 hover:text-orange-600 transition-colors group"
+                >
+                  <span className="w-5 h-5 rounded bg-slate-100 group-hover:bg-orange-50 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-3 h-3 text-slate-500 group-hover:text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </span>
+                  <span className="font-medium truncate max-w-[180px]">{order.customers.email}</span>
+                </a>
+              ) : (
+                <p className="flex items-center gap-2 text-slate-400 text-xs">
+                  <span className="w-5 h-5 rounded bg-slate-100 flex items-center justify-center">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </span>
+                  No email
+                </p>
+              )}
+
+              {order.customers?.address && (
+                <p className="flex items-start gap-2 text-slate-600 text-xs sm:text-right">
+                  <span className="w-5 h-5 rounded bg-slate-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <svg className="w-3 h-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </span>
+                  <span className="leading-relaxed">{order.customers.address}</span>
+                </p>
               )}
             </div>
           </div>
@@ -1603,325 +1629,287 @@ export default function OrderDetailsPage() {
         </TabsList>
 
         {/* Items Tab */}
-        <TabsContent value="items" className="space-y-6 mt-6">
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="space-y-6">
-              {/* Add Items Section */}
-              <div className="bg-white border border-slate-200 rounded-lg shadow-none">
-                <div className="px-6 py-5 border-b border-slate-100">
-                  <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide flex items-center gap-2">
-                    <Plus className="w-4 h-4 text-orange-500" />
-                    Add Items to Order
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-2">Select items from inventory and specify quantities</p>
-                </div>
-                <div className="p-6">
-                  <div className="space-y-4">
-                    <div className="grid gap-4 md:grid-cols-3">
-                      <div className="md:col-span-2 relative">
-                        <Label htmlFor="item-select" className="text-sm font-semibold text-slate-700 mb-2 block">
-                          Select Item <span className="text-red-500">*</span>
-                        </Label>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                            className="flex h-10 w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-orange-500 focus:ring-3 focus:ring-orange-500 focus:ring-opacity-10 transition-all"
-                          >
-                            <span className={selectedItem ? "text-slate-900" : "text-slate-400"}>
-                              {getSelectedItemName()}
-                            </span>
-                            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
-                          </button>
+        <TabsContent value="items" className="space-y-4 mt-5">
 
-                          {isDropdownOpen && (
-                            <>
-                              <div
-                                className="fixed inset-0 z-10"
-                                onClick={() => setIsDropdownOpen(false)}
-                              />
-                              <div className="absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-80 overflow-hidden flex flex-col">
-                                {/* Search Input */}
-                                <div className="p-2 border-b border-slate-200 bg-slate-50 sticky top-0">
-                                  <div className="relative">
-                                    <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
-                                    <Input
-                                      type="text"
-                                      placeholder="Type to search items..."
-                                      value={searchTerm}
-                                      onChange={(e) => setSearchTerm(e.target.value)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Escape") {
-                                          setIsDropdownOpen(false)
-                                        }
-                                        e.stopPropagation()
-                                      }}
-                                      className="pl-8 pr-8 h-9 text-sm border-slate-200 focus:border-orange-500 focus:ring-orange-500"
-                                      autoFocus
-                                    />
-                                    {searchTerm && (
+          {/* ── Add Item — compact bar ─────────────────────────────────── */}
+          <div className="bg-white border border-slate-200 rounded-lg">
+            <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex items-center gap-2 rounded-t-lg">
+              <Plus className="w-3.5 h-3.5 text-orange-500" />
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Add Item to Order</span>
+            </div>
+            <div className="p-4">
+              <div className="flex flex-col sm:flex-row gap-3 items-end">
+
+                {/* Item picker */}
+                <div className="flex-1 min-w-0 relative">
+                  <Label className="text-xs font-medium text-slate-600 mb-1.5 block">
+                    Item <span className="text-red-500">*</span>
+                  </Label>
+                  <button
+                    type="button"
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                    className="flex h-9 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:border-slate-300 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all"
+                  >
+                    <span className={selectedItem ? "text-slate-900 font-medium" : "text-slate-400"}>
+                      {getSelectedItemName()}
+                    </span>
+                    <ChevronDown className={`h-4 w-4 text-slate-400 flex-shrink-0 ml-2 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {isDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setIsDropdownOpen(false)} />
+                      <div className="absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col">
+                        {/* Search */}
+                        <div className="p-2 border-b border-slate-100 bg-slate-50">
+                          <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 w-3.5 h-3.5" />
+                            <Input
+                              type="text"
+                              placeholder="Search items…"
+                              value={searchTerm}
+                              onChange={(e) => setSearchTerm(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Escape") setIsDropdownOpen(false); e.stopPropagation() }}
+                              className="pl-8 pr-8 h-8 text-sm border-slate-200 focus:border-orange-400 focus:ring-orange-100"
+                              autoFocus
+                            />
+                            {searchTerm && (
+                              <button onClick={() => setSearchTerm("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded">
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {/* List */}
+                        <div className="overflow-y-auto flex-1 py-1">
+                          {filteredItems.length === 0 ? (
+                            <div className="px-3 py-6 text-sm text-slate-400 text-center">No items match &ldquo;{searchTerm}&rdquo;</div>
+                          ) : (
+                            filteredItems.map((item) => {
+                              const filteredSubItems = item.sub_items?.filter(sub =>
+                                !searchTerm || sub.item_name.toLowerCase().includes(searchTerm.toLowerCase())
+                              )
+                              const showParent = !searchTerm ||
+                                item.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                item.sr_no?.toString().includes(searchTerm) ||
+                                (filteredSubItems && filteredSubItems.length > 0)
+                              if (!showParent) return null
+                              return (
+                                <div key={item.id}>
+                                  <div
+                                    className={`flex items-center justify-between px-3 py-2 text-sm cursor-pointer transition-colors ${selectedItem === item.id ? "bg-orange-50 text-orange-700" : "hover:bg-slate-50 text-slate-800"}`}
+                                    onClick={() => handleItemSelect(item.id)}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 rounded px-1 flex-shrink-0">#{item.sr_no}</span>
+                                      <span className="font-medium truncate">{item.item_name}</span>
+                                    </div>
+                                    {item.sub_items && item.sub_items.length > 0 && (
                                       <button
-                                        onClick={() => setSearchTerm("")}
-                                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-1 rounded hover:bg-slate-200"
-                                        title="Clear search"
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); toggleItemExpansion(item.id) }}
+                                        className="ml-2 p-1 rounded hover:bg-slate-200 flex-shrink-0"
                                       >
-                                        <X className="w-3.5 h-3.5" />
+                                        <ChevronDown className={`w-3.5 h-3.5 text-slate-500 transition-transform ${expandedItems.has(item.id) ? "rotate-180" : ""}`} />
                                       </button>
                                     )}
                                   </div>
-                                </div>
-
-                                {/* Items List */}
-                                <div className="overflow-y-auto flex-1">
-                                  {filteredItems.length === 0 ? (
-                                    <div className="px-3 py-4 text-sm text-slate-500 text-center">
-                                      No items found matching &quot;{searchTerm}&quot;
-                                    </div>
-                                  ) : (
-                                    <div className="py-1">
-                                      {filteredItems.map((item) => {
-                                        // Filter sub-items based on search term
-                                        const filteredSubItems = item.sub_items?.filter(sub => {
-                                          if (!searchTerm) return true
-                                          return sub.item_name.toLowerCase().includes(searchTerm.toLowerCase())
-                                        })
-
-                                        // Show parent item if it matches or has matching sub-items
-                                        const showParent = !searchTerm ||
-                                          item.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                          item.sr_no?.toString().includes(searchTerm) ||
-                                          (filteredSubItems && filteredSubItems.length > 0)
-
-                                        if (!showParent) return null
-
-                                        return (
-                                          <div key={item.id}>
-                                            {/* Parent Item */}
-                                            <div
-                                              className={`px-3 py-2 text-sm cursor-pointer hover:bg-orange-50 transition-colors ${selectedItem === item.id ? "bg-orange-100" : ""
-                                                }`}
-                                              onClick={() => handleItemSelect(item.id)}
-                                            >
-                                              <div className="flex items-center justify-between">
-                                                <span className="font-medium text-slate-900">
-                                                  #{item.sr_no} - {item.item_name}
-                                                </span>
-                                                {item.sub_items && item.sub_items.length > 0 && (
-                                                  <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation()
-                                                      toggleItemExpansion(item.id)
-                                                    }}
-                                                    className="p-1 hover:bg-orange-200 rounded transition-colors"
-                                                  >
-                                                    {expandedItems.has(item.id) ? (
-                                                      <ChevronDown className="w-4 h-4 text-slate-600" />
-                                                    ) : (
-                                                      <ChevronRight className="w-4 h-4 text-slate-600" />
-                                                    )}
-                                                  </button>
-                                                )}
-                                              </div>
-                                            </div>
-
-                                            {/* Sub-items */}
-                                            {item.sub_items && item.sub_items.length > 0 && expandedItems.has(item.id) && (
-                                              <div className="bg-slate-50 border-l-2 border-orange-300">
-                                                {filteredSubItems && filteredSubItems.length > 0 ? (
-                                                  filteredSubItems.map((subItem) => (
-                                                    <div
-                                                      key={subItem.id}
-                                                      className={`px-6 py-2 text-sm cursor-pointer hover:bg-orange-50 transition-colors ${selectedItem === subItem.id ? "bg-orange-100" : ""
-                                                        }`}
-                                                      onClick={() => handleItemSelect(subItem.id)}
-                                                    >
-                                                      <div className="flex items-center gap-2">
-                                                        <span className="text-slate-400">└─</span>
-                                                        <span className="text-slate-700">
-                                                          {subItem.item_name}
-                                                        </span>
-                                                        <span className="text-xs text-slate-500 ml-auto">
-                                                          Sub Item
-                                                        </span>
-                                                      </div>
-                                                    </div>
-                                                  ))
-                                                ) : (
-                                                  searchTerm && (
-                                                    <div className="px-6 py-2 text-xs text-slate-400">
-                                                      No sub-items match your search
-                                                    </div>
-                                                  )
-                                                )}
-                                              </div>
-                                            )}
-                                          </div>
-                                        )
-                                      })}
+                                  {item.sub_items && item.sub_items.length > 0 && expandedItems.has(item.id) && (
+                                    <div className="border-l-2 border-orange-200 ml-4">
+                                      {filteredSubItems && filteredSubItems.length > 0 ? filteredSubItems.map((subItem) => (
+                                        <div
+                                          key={subItem.id}
+                                          className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition-colors ${selectedItem === subItem.id ? "bg-orange-50 text-orange-700" : "hover:bg-slate-50 text-slate-700"}`}
+                                          onClick={() => handleItemSelect(subItem.id)}
+                                        >
+                                          <ChevronRight className="w-3 h-3 text-slate-300 flex-shrink-0" />
+                                          <span className="truncate">{subItem.item_name}</span>
+                                          <span className="ml-auto text-[10px] font-medium text-slate-400 bg-slate-100 rounded px-1.5 py-0.5 flex-shrink-0">Sub</span>
+                                        </div>
+                                      )) : searchTerm && (
+                                        <div className="px-5 py-1.5 text-xs text-slate-400">No sub-items match</div>
+                                      )}
                                     </div>
                                   )}
                                 </div>
-                              </div>
-                            </>
+                              )
+                            })
                           )}
                         </div>
                       </div>
-                      <div>
-                        <Label htmlFor="quantity" className="text-sm font-semibold text-slate-700 mb-2 block">
-                          Quantity <span className="text-red-500">*</span>
-                        </Label>
-                        <Input
-                          id="quantity"
-                          type="text"
-                          inputMode="numeric"
-                          value={quantity}
-                          onChange={(e) => {
-                            const raw = e.target.value.replace(/\D/g, "")
-                            const num = raw === "" ? 1 : Math.max(1, parseInt(raw, 10))
-                            setQuantity(num)
-                          }}
-                          className="h-10 border border-slate-200 rounded-lg focus:border-orange-500 focus:ring-orange-500 focus:ring-opacity-10"
-                          placeholder="e.g. 1, 10, 100"
-                        />
-                      </div>
-                    </div>
-                    <Button
-                      onClick={handleAddItem}
-                      disabled={addingItem || !selectedItem || quantity <= 0}
-                      className="w-full bg-orange-500 hover:bg-orange-600 text-white h-10 rounded-lg font-medium transition-colors"
-                    >
-                      {addingItem ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                          Adding...
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="w-4 h-4 mr-2" />
-                          Add Item to Order
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column - Order Items */}
-            <div className="space-y-6">
-              <div className="bg-white border border-slate-200 rounded-lg shadow-none overflow-hidden">
-                <div className="px-6 py-5 border-b border-slate-100">
-                  <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide flex items-center gap-2">
-                    Order Items
-                    <span className="text-xs font-normal text-slate-400 ml-1">
-                      ({order.items?.length || 0})
-                    </span>
-                  </h2>
-                </div>
-                <div className="p-0">
-                  {!order.items || order.items.length === 0 ? (
-                    <div className="text-center py-12">
-                      <Package className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                      <p className="text-slate-500 font-medium">No items added yet</p>
-                      <p className="text-sm text-slate-400 mt-1">Add items using the form on the left</p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full border-collapse">
-                        <thead>
-                          <tr className="bg-slate-50 border-b border-slate-200">
-                            <th className="text-left px-4 py-3 font-semibold text-xs text-slate-600 uppercase tracking-wider">Item</th>
-                            <th className="text-left px-4 py-3 font-semibold text-xs text-slate-600 uppercase tracking-wider">Qty</th>
-                            <th className="text-left px-4 py-3 font-semibold text-xs text-slate-600 uppercase tracking-wider">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {order.items.map((item, index) => {
-                            // Find inventory item by matching inventory_item_id or product_id with inventory item id
-                            let inventoryItem: InventoryItem | undefined
-                            let subItem: SubItem | undefined
-
-                            // Check if it's a parent item
-                            inventoryItem = inventoryItems.find(inv =>
-                              inv.id === item.inventory_item_id || inv.id === item.product_id
-                            )
-
-                            // If not found as parent, check if it's a sub-item
-                            if (!inventoryItem) {
-                              for (const parentItem of inventoryItems) {
-                                subItem = parentItem.sub_items?.find(sub =>
-                                  sub.id === item.inventory_item_id || sub.id === item.product_id
-                                )
-                                if (subItem) {
-                                  inventoryItem = parentItem
-                                  break
-                                }
-                              }
-                            }
-
-                            const displayName = subItem
-                              ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
-                              : inventoryItem?.item_name || `Item ${index + 1}`
-
-                            return (
-                              <tr key={item.id} className="border-b border-slate-100 hover:bg-orange-50 transition-colors h-12">
-                                <td className="px-4 py-3">
-                                  <span className="text-sm font-medium text-slate-900">
-                                    {displayName}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center gap-2">
-                                    <Input
-                                      type="number"
-                                      min="1"
-                                      value={item.quantity}
-                                      onChange={(e) => {
-                                        const newQty = parseInt(e.target.value) || 1
-                                        handleUpdateQuantity(item.id, newQty)
-                                      }}
-                                      className="w-16 h-8 text-sm border border-slate-200 rounded-lg focus:border-orange-500 focus:ring-orange-500"
-                                    />
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <button
-                                    onClick={() => handleRemoveItem(item.id)}
-                                    className="w-7 h-7 flex items-center justify-center rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors"
-                                    title="Remove item"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                    </>
                   )}
                 </div>
+
+                {/* Quantity */}
+                <div className="w-28 flex-shrink-0">
+                  <Label className="text-xs font-medium text-slate-600 mb-1.5 block">
+                    Quantity <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={quantity}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\D/g, "")
+                      setQuantity(raw === "" ? 1 : Math.max(1, parseInt(raw, 10)))
+                    }}
+                    className="h-9 text-sm text-center font-semibold border-slate-200 focus:border-orange-400 focus:ring-orange-100"
+                    placeholder="1"
+                  />
+                </div>
+
+                {/* Add button */}
+                <Button
+                  onClick={handleAddItem}
+                  disabled={addingItem || !selectedItem || quantity <= 0}
+                  className="h-9 px-5 bg-orange-500 hover:bg-orange-600 text-white font-medium gap-2 flex-shrink-0 w-full sm:w-auto"
+                >
+                  {addingItem
+                    ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Adding…</>
+                    : <><Plus className="w-3.5 h-3.5" /> Add Item</>}
+                </Button>
               </div>
             </div>
+          </div>
+
+          {/* ── Order Items list ───────────────────────────────────────── */}
+          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
+              <Package className="w-3.5 h-3.5 text-slate-500" />
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Order Items</span>
+              {order.items && order.items.length > 0 && (
+                <span className="ml-auto inline-flex items-center justify-center rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold px-2 py-0.5">
+                  {order.items.length}
+                </span>
+              )}
+            </div>
+
+            {!order.items || order.items.length === 0 ? (
+              <div className="py-14 flex flex-col items-center gap-3 text-slate-400">
+                <div className="p-3 bg-slate-100 rounded-full">
+                  <Package className="w-6 h-6 text-slate-300" />
+                </div>
+                <p className="text-sm font-medium text-slate-500">No items added yet</p>
+                <p className="text-xs text-slate-400">Use the form above to add items to this order</p>
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-slate-100">
+                        <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-8">#</th>
+                        <th className="px-2 py-2.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Item</th>
+                        <th className="px-4 py-2.5 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-32">Quantity</th>
+                        <th className="px-4 py-2.5 w-10" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {order.items.map((item, index) => {
+                        let inventoryItem: InventoryItem | undefined
+                        let subItem: SubItem | undefined
+
+                        inventoryItem = inventoryItems.find(inv =>
+                          inv.id === item.inventory_item_id || inv.id === item.product_id
+                        )
+                        if (!inventoryItem) {
+                          for (const parentItem of inventoryItems) {
+                            subItem = parentItem.sub_items?.find(sub =>
+                              sub.id === item.inventory_item_id || sub.id === item.product_id
+                            )
+                            if (subItem) { inventoryItem = parentItem; break }
+                          }
+                        }
+
+                        const displayName = subItem
+                          ? `${inventoryItem?.item_name || ""}`
+                          : inventoryItem?.item_name || `Item ${index + 1}`
+                        const subName = subItem?.item_name
+                        const srNo = inventoryItem?.sr_no
+
+                        return (
+                          <tr key={item.id} className="hover:bg-orange-50/40 transition-colors group">
+                            {/* Row # */}
+                            <td className="px-4 py-3 text-xs font-bold text-slate-300 text-center">
+                              {srNo ?? index + 1}
+                            </td>
+                            {/* Item name */}
+                            <td className="px-2 py-3">
+                              <p className="text-sm font-semibold text-slate-800 leading-tight">{displayName}</p>
+                              {subName && (
+                                <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
+                                  <ChevronRight className="w-3 h-3" />
+                                  {subName}
+                                </p>
+                              )}
+                            </td>
+                            {/* Quantity stepper */}
+                            <td className="px-4 py-3">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => handleUpdateQuantity(item.id, Math.max(1, item.quantity - 1))}
+                                  className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center font-bold text-base leading-none"
+                                  title="Decrease"
+                                >−</button>
+                                <span className="w-8 text-center text-sm font-bold text-slate-800 tabular-nums">{item.quantity}</span>
+                                <button
+                                  onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
+                                  className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center font-bold text-base leading-none"
+                                  title="Increase"
+                                >+</button>
+                              </div>
+                            </td>
+                            {/* Remove */}
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                onClick={() => handleRemoveItem(item.id)}
+                                className="w-7 h-7 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100"
+                                title="Remove item"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary footer */}
+                <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+                  <span className="text-xs text-slate-500">
+                    {order.items.length} line item{order.items.length !== 1 ? "s" : ""}
+                  </span>
+                  <span className="text-xs font-semibold text-slate-700">
+                    Total qty: <span className="text-orange-600 font-bold">{order.items.reduce((s, i) => s + i.quantity, 0)}</span>
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </TabsContent>
 
         {/* Production Tab */}
-        <TabsContent value="production" className="space-y-6 mt-6">
+        <TabsContent value="production" className="space-y-5 mt-6">
           {/* Production Management Card */}
-          <div className="bg-white border border-slate-200 rounded-lg shadow-none">
-            <div className="px-6 py-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide flex items-center gap-2">
-                  <Factory className="w-4 h-4" />
-                  Production Management
-                </h2>
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-orange-50 border border-orange-100 flex items-center justify-center flex-shrink-0">
+                  <Factory className="w-4 h-4 text-orange-500" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-900">Production Management</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Plan and track item manufacturing quantities</p>
+                </div>
               </div>
 
               {/* Order Type Toggle - Hidden if Full Order already exists */}
               {!(productionRecords.length > 0 && productionRecords[0]?.production_type === "full") && (
-                <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 self-start md:self-center">
+                <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 self-start sm:self-center">
                   <button
                     type="button"
                     onClick={() => {
@@ -1930,8 +1918,8 @@ export default function OrderDetailsPage() {
                     }}
                     disabled={productionRecords.length > 0}
                     className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${productionType === "full"
-                      ? "bg-orange-500 text-white"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent"
+                      ? "bg-orange-500 text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                       }`}
                   >
                     Full Order
@@ -1940,8 +1928,8 @@ export default function OrderDetailsPage() {
                     type="button"
                     onClick={() => setProductionType("partial")}
                     className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${productionType === "partial"
-                      ? "bg-orange-500 text-white"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-white"
+                      ? "bg-orange-500 text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
                       }`}
                   >
                     Partial Order
@@ -1950,268 +1938,273 @@ export default function OrderDetailsPage() {
               )}
             </div>
 
-            <div className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Item Details</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Ordered</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Produced</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Remaining</th>
-                      <th className="px-6 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider w-32">To Produce</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {!order?.items || order.items.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
-                          <Package className="w-12 h-12 text-slate-200 mx-auto mb-3" />
-                          No items added to this order yet.
-                        </td>
-                      </tr>
-                    ) : (
-                      order.items.map((item, index) => {
-                        // Find inventory item for display name
-                        let inventoryItem: InventoryItem | undefined
-                        let subItem: SubItem | undefined
+            {/* Items List */}
+            <div className="divide-y divide-slate-100">
+              {!order?.items || order.items.length === 0 ? (
+                <div className="px-6 py-14 text-center">
+                  <Package className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+                  <p className="text-sm text-slate-400 font-medium">No items added to this order yet</p>
+                </div>
+              ) : (
+                order.items.map((item, index) => {
+                  // Find inventory item for display name
+                  let inventoryItem: InventoryItem | undefined
+                  let subItem: SubItem | undefined
 
-                        inventoryItem = inventoryItems.find(inv =>
-                          inv.id === item.inventory_item_id || inv.id === item.product_id
-                        )
+                  inventoryItem = inventoryItems.find(inv =>
+                    inv.id === item.inventory_item_id || inv.id === item.product_id
+                  )
 
-                        if (!inventoryItem) {
-                          for (const parentItem of inventoryItems) {
-                            subItem = parentItem.sub_items?.find(sub =>
-                              sub.id === item.inventory_item_id || sub.id === item.product_id
-                            )
-                            if (subItem) {
-                              inventoryItem = parentItem
-                              break
-                            }
-                          }
-                        }
-
-                        const displayName = subItem
-                          ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
-                          : inventoryItem?.item_name || `Item ${index + 1}`
-
-                        const srNo = inventoryItem?.sr_no
-
-                        // Calculate produced quantity from started/completed production records only.
-                        const producedQty = producedQtyForLineItem(productionRecords, item.id, item.quantity)
-
-                        const remainingQty = Math.max(0, item.quantity - producedQty)
-                        const isComplete = remainingQty <= 0
-
-                        // For Full Order mode, use remaining quantity as default, otherwise use manual state
-                        const displayToProduce = productionType === "full" ? remainingQty : (productionQuantities[item.id] || 0)
-
-                        return (
-                          <tr key={item.id} className="hover:bg-orange-50 transition-colors h-13">
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                {srNo && (
-                                  <span className="text-xs font-semibold text-slate-300 w-6 h-6 rounded flex items-center justify-center flex-shrink-0">
-                                    {srNo}
-                                  </span>
-                                )}
-                                <div className="flex flex-col">
-                                  <span className="text-sm font-medium text-slate-900">{displayName}</span>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 text-sm text-center font-medium text-slate-600">{item.quantity}</td>
-                            <td className="px-4 py-4 text-sm text-center font-medium text-slate-600">{producedQty}</td>
-                            <td className="px-4 py-4 text-center">
-                              {isComplete ? (
-                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border-0">
-                                  <Check className="w-3.5 h-3.5" /> Complete
-                                </span>
-                              ) : (
-                                <span className="text-sm font-semibold text-orange-600">{remainingQty}</span>
-                              )}
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <Input
-                                type="number"
-                                min="0"
-                                max={remainingQty}
-                                value={displayToProduce}
-                                onChange={(e) => {
-                                  const val = parseInt(e.target.value) || 0
-                                  setProductionQuantities(prev => ({
-                                    ...prev,
-                                    [item.id]: Math.max(0, Math.min(val, remainingQty))
-                                  }))
-                                  // Switch to partial mode if user edits manually
-                                  if (productionType === "full") setProductionType("partial")
-                                }}
-                                className={`w-16 h-8 text-center font-semibold mx-auto border border-slate-200 rounded-lg transition-all ${productionType === "full"
-                                  ? "bg-slate-50 text-slate-600"
-                                  : "bg-white"
-                                  }`}
-                                disabled={isComplete || (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")}
-                              />
-                            </td>
-                          </tr>
-                        )
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Production Action Bar */}
-              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                {productionRecords.length > 0 && (
-                  <div className="flex items-start gap-2 text-xs text-slate-700 bg-blue-50 border border-blue-200 rounded-lg p-3 flex-1">
-                    <AlertCircle className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
-                    <span>
-                      Order Type fixed to <strong>{productionRecords[0].production_type === "full" ? "Full" : "Partial"}</strong> due to existing records.
-                    </span>
-                  </div>
-                )}
-
-                <Button
-                  onClick={handleCreateProductionRecord}
-                  disabled={
-                    !order?.items ||
-                    order.items.length === 0 ||
-                    order.order_status === "Void" ||
-                    creatingRecord ||
-                    (productionType === "partial" && Object.values(productionQuantities).every(qty => qty === 0)) ||
-                    (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")
+                  if (!inventoryItem) {
+                    for (const parentItem of inventoryItems) {
+                      subItem = parentItem.sub_items?.find(sub =>
+                        sub.id === item.inventory_item_id || sub.id === item.product_id
+                      )
+                      if (subItem) {
+                        inventoryItem = parentItem
+                        break
+                      }
+                    }
                   }
-                  className="bg-orange-500 hover:bg-orange-600 text-white h-9 px-4 rounded-lg font-medium transition-colors whitespace-nowrap"
-                >
-                  {creatingRecord ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin inline" />
-                      Generating PDF...
-                    </>
-                  ) : (
-                    <>
-                      <FileText className="w-4 h-4 mr-2 inline" />
-                      Create Production Record
-                    </>
-                  )}
-                </Button>
-              </div>
+
+                  const displayName = subItem
+                    ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
+                    : inventoryItem?.item_name || `Item ${index + 1}`
+
+                  const srNo = inventoryItem?.sr_no
+
+                  // Calculate produced quantity from started/completed production records only.
+                  const producedQty = producedQtyForLineItem(productionRecords, item.id, item.quantity)
+
+                  const remainingQty = Math.max(0, item.quantity - producedQty)
+                  const isComplete = remainingQty <= 0
+                  const progressPct = item.quantity > 0 ? Math.round((producedQty / item.quantity) * 100) : 0
+
+                  // For Full Order mode, use remaining quantity as default, otherwise use manual state
+                  const displayToProduce = productionType === "full" ? remainingQty : (productionQuantities[item.id] || 0)
+
+                  return (
+                    <div key={item.id} className="px-6 py-4 flex items-center gap-4 hover:bg-slate-50/70 transition-colors">
+                      {/* Sr No */}
+                      <span className="w-5 text-xs font-bold text-slate-300 flex-shrink-0 text-center select-none">
+                        {srNo ?? index + 1}
+                      </span>
+
+                      {/* Item name + progress bar */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800 truncate">{displayName}</p>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className={`h-1.5 rounded-full transition-all duration-500 ${isComplete ? "bg-green-500" : "bg-orange-400"}`}
+                              style={{ width: `${progressPct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-slate-400 flex-shrink-0 tabular-nums">{progressPct}%</span>
+                        </div>
+                      </div>
+
+                      {/* Stats */}
+                      <div className="hidden sm:flex items-center gap-5 flex-shrink-0">
+                        <div className="text-center w-12">
+                          <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">Ordered</p>
+                          <p className="text-sm font-semibold text-slate-700 mt-0.5 tabular-nums">{item.quantity}</p>
+                        </div>
+                        <div className="text-center w-12">
+                          <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">Produced</p>
+                          <p className="text-sm font-semibold text-slate-700 mt-0.5 tabular-nums">{producedQty}</p>
+                        </div>
+                        <div className="text-center w-16">
+                          <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">Remaining</p>
+                          <div className="mt-0.5">
+                            {isComplete ? (
+                              <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-green-600">
+                                <Check className="w-3 h-3" /> Done
+                              </span>
+                            ) : (
+                              <p className="text-sm font-semibold text-orange-500 tabular-nums">{remainingQty}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* To Produce Input */}
+                      <div className="flex-shrink-0 w-20">
+                        <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide text-center mb-1">To Produce</p>
+                        <Input
+                          type="number"
+                          min="0"
+                          max={remainingQty}
+                          value={displayToProduce}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 0
+                            setProductionQuantities(prev => ({
+                              ...prev,
+                              [item.id]: Math.max(0, Math.min(val, remainingQty))
+                            }))
+                            // Switch to partial mode if user edits manually
+                            if (productionType === "full") setProductionType("partial")
+                          }}
+                          className={`h-8 text-center text-sm font-semibold border border-slate-200 rounded-lg transition-all ${productionType === "full"
+                            ? "bg-slate-50 text-slate-500"
+                            : "bg-white text-slate-900"
+                            }`}
+                          disabled={isComplete || (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")}
+                        />
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            {/* Action Bar */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              {productionRecords.length > 0 ? (
+                <div className="flex items-center gap-2 text-xs text-slate-600 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                  <AlertCircle className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                  <span>
+                    Order type locked to <strong>{productionRecords[0].production_type === "full" ? "Full" : "Partial"}</strong> due to existing records.
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">
+                  {productionType === "full"
+                    ? "Full mode — all remaining quantities will be included."
+                    : "Partial mode — enter quantities for each item to produce."}
+                </p>
+              )}
+
+              <Button
+                onClick={handleCreateProductionRecord}
+                disabled={
+                  !order?.items ||
+                  order.items.length === 0 ||
+                  order.order_status === "Void" ||
+                  creatingRecord ||
+                  (productionType === "partial" && Object.values(productionQuantities).every(qty => qty === 0)) ||
+                  (productionRecords.length > 0 && productionRecords[0]?.production_type === "full")
+                }
+                className="bg-orange-500 hover:bg-orange-600 text-white h-9 px-5 rounded-lg font-medium text-sm transition-colors whitespace-nowrap"
+              >
+                {creatingRecord ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 mr-2 animate-spin" />
+                    Generating PDF...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-3.5 h-3.5 mr-2" />
+                    Create Production Record
+                  </>
+                )}
+              </Button>
             </div>
           </div>
 
-          {/* Existing Production Records History */}
+          {/* Production History */}
           {productionRecords.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-lg shadow-none overflow-hidden">
-              <div className="px-6 py-5 border-b border-slate-100">
-                <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide flex items-center gap-2">
-                  <File className="w-4 h-4" />
-                  Production History
-                </h2>
-              </div>
-              <div className="p-0">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-slate-50 border-b border-slate-200">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Record</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Type</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Status</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Date</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">PDF</th>
-                        <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {productionRecords.slice().reverse().map((record) => (
-                        <tr key={record.id} className="hover:bg-orange-50 transition-colors">
-                          <td className="px-6 py-4">
-                            <div className="flex flex-col gap-1.5">
-                              <span className="text-sm font-semibold text-slate-900">{record.production_number}</span>
-                              <span className="text-xs text-slate-500">All items produced</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4 text-center">
-                            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${record.production_type === "full"
-                              ? "bg-purple-100 text-purple-700"
-                              : "bg-orange-100 text-orange-700"
-                              }`}>
-                              {record.production_type.charAt(0).toUpperCase() + record.production_type.slice(1)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-4 text-center">
-                            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${record.status === "completed"
-                              ? "bg-green-100 text-green-700"
-                              : record.status === "in_production"
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-slate-100 text-slate-600"
-                              }`}>
-                              {record.status === "completed" ? "✓ Complete" : record.status.replace('_', ' ').charAt(0).toUpperCase() + record.status.slice(1).replace('_', ' ')}
-                            </span>
-                          </td>
-                          <td className="px-4 py-4 text-center text-xs text-slate-600">
-                            {new Date(record.created_at).toLocaleDateString('en-IN')}
-                          </td>
-                          <td className="px-4 py-4 text-center">
-                            {record.pdf_file_url ? (
-                              <button
-                                onClick={() => window.open(record.pdf_file_url, '_blank')}
-                                className="text-orange-500 hover:text-orange-600 font-medium text-xs transition-colors"
-                              >
-                                <FileDown className="w-4 h-4 inline mr-1" />
-                                View PDF
-                              </button>
-                            ) : (
-                              <span className="text-xs text-slate-300">No PDF</span>
-                            )}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex items-center justify-end gap-2">
-                              {(record.status === "in_production" || record.status === "pending") && (
-                                <Button
-                                  size="sm"
-                                  onClick={async () => {
-                                    const result = await updateProductionRecordStatus(record.id, "completed")
-                                    if (result.success) {
-                                      await loadProductionRecords()
-                                      setSuccess("Completed!")
-                                      setTimeout(() => setSuccess(null), 2000)
-                                    } else {
-                                      setError(result.error || "Failed")
-                                    }
-                                  }}
-                                  className="h-7 text-xs font-semibold bg-green-600 hover:bg-green-700 text-white rounded-lg px-3"
-                                >
-                                  DONE
-                                </Button>
-                              )}
-                              {(record.status === "pending" || record.status === "in_production") && (
-                                <button
-                                  onClick={async () => {
-                                    if (confirm("Delete this record?")) {
-                                      const result = await deleteProductionRecord(record.id)
-                                      if (result.success) {
-                                        await loadProductionRecords()
-                                        setSuccess("Deleted!")
-                                        setTimeout(() => setSuccess(null), 2000)
-                                      } else {
-                                        setError(result.error || "Failed")
-                                      }
-                                    }
-                                  }}
-                                  className="w-7 h-7 flex items-center justify-center rounded-full text-red-600 hover:text-red-700 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center flex-shrink-0">
+                  <File className="w-4 h-4 text-slate-400" />
                 </div>
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-900">Production History</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {productionRecords.length} record{productionRecords.length !== 1 ? "s" : ""} created
+                  </p>
+                </div>
+              </div>
+
+              <div className="divide-y divide-slate-100">
+                {productionRecords.slice().reverse().map((record) => (
+                  <div key={record.id} className="px-6 py-4 flex items-center gap-4 hover:bg-slate-50/50 transition-colors">
+                    {/* Record info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-slate-900">{record.production_number}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${record.production_type === "full"
+                          ? "bg-purple-50 text-purple-600 border-purple-100"
+                          : "bg-orange-50 text-orange-600 border-orange-100"
+                          }`}>
+                          {record.production_type === "full" ? "Full" : "Partial"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {new Date(record.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    </div>
+
+                    {/* Status */}
+                    <span className={`text-xs px-2.5 py-1 rounded-full font-semibold border flex-shrink-0 ${record.status === "completed"
+                      ? "bg-green-50 text-green-700 border-green-100"
+                      : record.status === "in_production"
+                        ? "bg-amber-50 text-amber-700 border-amber-100"
+                        : "bg-slate-50 text-slate-500 border-slate-200"
+                      }`}>
+                      {record.status === "completed"
+                        ? "✓ Completed"
+                        : record.status === "in_production"
+                          ? "In Production"
+                          : "Pending"}
+                    </span>
+
+                    {/* PDF link */}
+                    {record.pdf_file_url ? (
+                      <button
+                        onClick={() => window.open(record.pdf_file_url, '_blank')}
+                        className="flex items-center gap-1.5 text-xs font-medium text-orange-500 hover:text-orange-600 transition-colors flex-shrink-0"
+                      >
+                        <FileDown className="w-4 h-4" />
+                        <span className="hidden sm:inline">View PDF</span>
+                      </button>
+                    ) : (
+                      <span className="w-16 text-xs text-slate-300 text-center flex-shrink-0">No PDF</span>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {(record.status === "in_production" || record.status === "pending") && (
+                        <Button
+                          size="sm"
+                          onClick={async () => {
+                            const result = await updateProductionRecordStatus(record.id, "completed")
+                            if (result.success) {
+                              await loadProductionRecords()
+                              setSuccess("Marked as completed!")
+                              setTimeout(() => setSuccess(null), 2000)
+                            } else {
+                              setError(result.error || "Failed")
+                            }
+                          }}
+                          className="h-7 text-xs font-semibold bg-green-500 hover:bg-green-600 text-white rounded-lg px-3"
+                        >
+                          <Check className="w-3 h-3 mr-1" />Done
+                        </Button>
+                      )}
+                      {(record.status === "pending" || record.status === "in_production") && (
+                        <button
+                          onClick={async () => {
+                            if (confirm("Delete this record?")) {
+                              const result = await deleteProductionRecord(record.id)
+                              if (result.success) {
+                                await loadProductionRecords()
+                                setSuccess("Record deleted.")
+                                setTimeout(() => setSuccess(null), 2000)
+                              } else {
+                                setError(result.error || "Failed")
+                              }
+                            }
+                          }}
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -2219,783 +2212,528 @@ export default function OrderDetailsPage() {
 
 
         {/* Shipment Tab */}
-        <TabsContent value="shipment" className="space-y-6 mt-6">
-          <Card className="shadow-sm">
-            <CardHeader className="bg-gray-50 border-b">
-              <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
-                <Truck className="w-5 h-5 text-blue-600" />
-                Dispatch & Shipment Details
-              </CardTitle>
-              <CardDescription className="mt-1">
-                Manage order dispatches, courier information, and tracking
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6">
-              {/* Show Production Records Ready for Dispatch (without dispatches) */}
-              {productionRecords.length > 0 && (
-                <div className="mb-6">
-                  {productionRecords
-                    .filter(record => {
-                      // Show only completed records that don't have a dispatch yet
-                      const hasDispatch = dispatches.some(d => d.production_records?.id === record.id)
-                      return record.status === "completed" && !hasDispatch
-                    })
-                    .map((record) => (
-                      <Card key={record.id} className="border border-blue-200 bg-blue-50/30 mb-4">
-                        <CardContent className="pt-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <span className="text-base font-semibold text-gray-900">{record.production_number}</span>
-                              <span className={`text-xs px-2 py-1 rounded ${record.production_type === "full"
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-orange-100 text-orange-700"
-                                }`}>
-                                {record.production_type === "full" ? "Full" : "Partial"}
-                              </span>
-                              <span className={`text-xs px-2 py-1 rounded ${record.status === "completed"
-                                ? "bg-green-100 text-green-700"
-                                : "bg-yellow-100 text-yellow-700"
-                                }`}>
-                                {record.status === "completed" ? "Completed" : "In Production"}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {record.pdf_file_url && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => window.open(record.pdf_file_url, '_blank')}
-                                  className="h-8 text-xs"
-                                >
-                                  <File className="w-4 h-4 mr-1" />
-                                  View PDF
-                                </Button>
-                              )}
-                              <Button
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedProductionRecord(record)
-                                  setShowDispatchForm(true)
-                                  setSelectedCourierCompany("")
-                                  setTrackingId("")
-                                  setEstimatedDelivery("")
-                                  setDispatchNotes("")
-                                }}
-                                className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white"
-                              >
-                                <Truck className="w-4 h-4 mr-1" />
-                                Create Dispatch
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                </div>
-              )}
+        <TabsContent value="shipment" className="space-y-4 mt-6">
 
-              {dispatches.length === 0 && productionRecords.length === 0 ? (
-                <div className="text-center py-12">
-                  <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500 font-medium">No dispatches yet</p>
-                  <p className="text-sm text-gray-400 mt-1">Create a production record first, then create a dispatch from here</p>
-                </div>
-              ) : dispatches.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-gray-500 font-medium">No dispatches created yet</p>
-                  <p className="text-sm text-gray-400 mt-1">Use the &quot;Create Dispatch&quot; button above to create a dispatch for a production record</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {dispatches.map((dispatch) => {
-                    const shipmentStatus = dispatch.shipment_status || 'ready'
-                    const statusSteps = [
-                      { value: 'ready', label: 'Ready', icon: Package, color: 'yellow' },
-                      { value: 'picked_up', label: 'Picked Up', icon: Truck, color: 'blue' },
-                      { value: 'delivered', label: 'Delivered', icon: CheckCircle2, color: 'green' }
-                    ]
-                    const currentStepIndex = statusSteps.findIndex(s => s.value === shipmentStatus)
-
-                    // Use production record from dispatch (already included in query)
-                    const productionRecord = dispatch.production_records
-
-                    return (
-                      <Card key={dispatch.id} className="border border-gray-200 shadow-sm">
-                        <CardHeader className="bg-white border-b pb-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <CardTitle className="text-base font-semibold text-gray-900 mb-1">
-                                {dispatch.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
-                              </CardTitle>
-                              <div className="flex items-center gap-3 mt-1 flex-wrap">
-                                <span className="text-xs text-gray-500">
-                                  Dispatched: {new Date(dispatch.dispatch_date).toLocaleDateString('en-US', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    year: 'numeric'
-                                  })}
-                                </span>
-                                {dispatch.estimated_delivery && (
-                                  <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5">
-                                    <Calendar className="w-3 h-3" />
-                                    ETA: {new Date(dispatch.estimated_delivery).toLocaleDateString('en-IN', {
-                                      day: '2-digit', month: 'short', year: 'numeric'
-                                    })}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2.5 py-1 rounded text-xs font-medium ${dispatch.dispatch_type === "full"
-                                ? "bg-green-100 text-green-700"
-                                : "bg-blue-100 text-blue-700"
-                                }`}>
-                                {dispatch.dispatch_type === "full" ? "Full" : "Partial"}
-                              </span>
-                              {(shipmentStatus === 'ready' || shipmentStatus === 'picked_up') && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 px-2.5 text-xs border-gray-300 text-gray-600 hover:bg-gray-50"
-                                  onClick={() => {
-                                    setEditingDispatchId(dispatch.id)
-                                    setEditCourierId(dispatch.courier_company_id || "")
-                                    setEditTrackingId(dispatch.tracking_id || "")
-                                    setEditEstimatedDelivery(dispatch.estimated_delivery || "")
-                                    setExpandedShipments(prev => ({ ...prev, [dispatch.id]: true }))
-                                  }}
-                                >
-                                  <Edit2 className="w-3 h-3 mr-1" />
-                                  Edit
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="pt-5">
-                          <div className="space-y-5">
-                            {/* Production Record Info */}
-                            {productionRecord && (
-                              <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                                <Label className="text-sm font-semibold text-gray-700 mb-3 block">Production Record</Label>
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-base font-semibold text-gray-900">{productionRecord.production_number}</span>
-                                    <span className={`text-xs px-2 py-1 rounded ${productionRecord.production_type === "full"
-                                      ? "bg-blue-100 text-blue-700"
-                                      : "bg-orange-100 text-orange-700"
-                                      }`}>
-                                      {productionRecord.production_type === "full" ? "Full" : "Partial"}
-                                    </span>
-                                    <span className={`text-xs px-2 py-1 rounded ${productionRecord.status === "completed"
-                                      ? "bg-green-100 text-green-700"
-                                      : "bg-yellow-100 text-yellow-700"
-                                      }`}>
-                                      {productionRecord.status === "completed" ? "Completed" : "In Production"}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {productionRecord.pdf_file_url && (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => window.open(productionRecord.pdf_file_url, '_blank')}
-                                        className="h-8 text-xs"
-                                      >
-                                        <File className="w-4 h-4 mr-1" />
-                                        View PDF
-                                      </Button>
-                                    )}
-                                    <span className="text-xs text-green-600 font-medium flex items-center gap-1">
-                                      <Check className="w-4 h-4" />
-                                      Dispatched
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                            <div>
-                              <div className="flex items-center justify-between mb-2">
-                                <Label className="text-sm font-semibold text-gray-700">
-                                  Shipment Status
-                                </Label>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setExpandedShipments(prev => ({
-                                    ...prev,
-                                    [dispatch.id]: !prev[dispatch.id]
-                                  }))}
-                                  className="h-8 py-0 px-2 text-blue-600 hover:text-blue-800 hover:bg-orange-50 gap-1.5"
-                                >
-                                  {expandedShipments[dispatch.id] ? (
-                                    <>
-                                      <span className="text-xs font-bold uppercase tracking-wider">Hide Details</span>
-                                      <ChevronDown className="w-4 h-4" />
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span className="text-xs font-bold uppercase tracking-wider">View Details</span>
-                                      <ChevronRight className="w-4 h-4" />
-                                    </>
-                                  )}
-                                </Button>
-                              </div>
-                              <select
-                                value={shipmentStatus}
-                                onChange={async (e) => {
-                                  const newStatus = e.target.value as 'ready' | 'picked_up' | 'delivered'
-                                  const result = await updateDispatchStatus(dispatch.id, newStatus)
-                                  if (result.success) {
-                                    await loadDispatches()
-                                    setSuccess(`Status updated to ${statusSteps.find(s => s.value === newStatus)?.label}!`)
-                                    setTimeout(() => setSuccess(null), 3000)
-                                  } else {
-                                    setError(result.error || "Failed to update status")
-                                  }
-                                }}
-                                className={`w-full h-10 px-4 border-2 rounded-lg font-medium text-sm focus:outline-none focus:ring-2 focus:ring-sk-primary focus:border-sk-primary transition-all ${shipmentStatus === 'ready' ? 'border-yellow-300 bg-yellow-50 text-yellow-800' :
-                                  shipmentStatus === 'picked_up' ? 'border-blue-300 bg-blue-50 text-blue-800' :
-                                    'border-green-300 bg-green-50 text-green-800'
-                                  }`}
-                              >
-                                {statusSteps.map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-
-                            {/* Collapsible Details Section */}
-                            {expandedShipments[dispatch.id] && (
-                              <div className="space-y-5 animate-in fade-in slide-in-from-top-2 duration-300">
-
-                                {/* ── Inline Edit Form ─────────────────────── */}
-                                {editingDispatchId === dispatch.id ? (
-                                  <div className="rounded-lg border-2 border-orange-200 bg-orange-50/40 p-4 space-y-4">
-                                    <p className="text-xs font-semibold text-orange-700 uppercase tracking-wider">
-                                      Edit Shipment Details
-                                    </p>
-
-                                    {/* Courier */}
-                                    <div>
-                                      <Label className="text-xs font-semibold text-gray-600 mb-1.5 block">Courier Company</Label>
-                                      <select
-                                        value={editCourierId}
-                                        onChange={(e) => setEditCourierId(e.target.value)}
-                                        className="w-full h-9 px-3 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
-                                      >
-                                        <option value="">— No courier —</option>
-                                        {courierCompanies.map((c) => (
-                                          <option key={c.id} value={c.id}>{c.name}</option>
-                                        ))}
-                                      </select>
-                                    </div>
-
-                                    {/* Tracking ID */}
-                                    <div>
-                                      <Label className="text-xs font-semibold text-gray-600 mb-1.5 block">Tracking ID</Label>
-                                      <Input
-                                        value={editTrackingId}
-                                        onChange={(e) => setEditTrackingId(e.target.value)}
-                                        placeholder="Enter tracking ID"
-                                        className="h-9 text-sm font-mono"
-                                      />
-                                    </div>
-
-                                    {/* Estimated Delivery */}
-                                    <div>
-                                      <Label className="text-xs font-semibold text-gray-600 mb-1.5 block">Estimated Delivery</Label>
-                                      <Input
-                                        type="date"
-                                        value={editEstimatedDelivery}
-                                        onChange={(e) => setEditEstimatedDelivery(e.target.value)}
-                                        className="h-9 text-sm"
-                                      />
-                                    </div>
-
-                                    {/* Actions */}
-                                    <div className="flex items-center gap-2 pt-1">
-                                      <Button
-                                        size="sm"
-                                        disabled={savingDispatchEdit}
-                                        onClick={async () => {
-                                          setSavingDispatchEdit(true)
-                                          const result = await updateDispatchDetails(dispatch.id, {
-                                            courier_company_id: editCourierId || null,
-                                            tracking_id: editTrackingId || null,
-                                            estimated_delivery: editEstimatedDelivery || null,
-                                          })
-                                          setSavingDispatchEdit(false)
-                                          if (result.success) {
-                                            setEditingDispatchId(null)
-                                            await loadDispatches()
-                                            setSuccess("Shipment details updated!")
-                                            setTimeout(() => setSuccess(null), 3000)
-                                          } else {
-                                            setError(result.error || "Failed to save changes")
-                                          }
-                                        }}
-                                        className="h-8 text-xs bg-orange-500 hover:bg-orange-600 text-white"
-                                      >
-                                        {savingDispatchEdit ? "Saving…" : "Save Changes"}
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        disabled={savingDispatchEdit}
-                                        onClick={() => setEditingDispatchId(null)}
-                                        className="h-8 text-xs text-gray-600"
-                                      >
-                                        Cancel
-                                      </Button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <>
-                                    {/* ── Read-only view ───────────────────── */}
-                                    {/* Information Grid */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                      {dispatch.courier_companies && (
-                                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-5 bg-gray-50 rounded-lg border border-gray-100 hover:bg-gray-100/80 transition-colors">
-                                          <div className="flex items-center gap-4">
-                                            <div className="p-2.5 bg-white rounded-lg shadow-sm">
-                                              <Truck className="w-5 h-5 text-indigo-600" />
-                                            </div>
-                                            <div className="space-y-1">
-                                              <span className="text-sm font-semibold text-gray-900">
-                                                {dispatch.courier_companies?.name || "Standard Delivery"}
-                                              </span>
-                                              <p className="text-xs text-gray-500 font-medium">
-                                                Shipment on {new Date(dispatch.dispatch_date).toLocaleDateString('en-IN', {
-                                                  day: '2-digit',
-                                                  month: 'short',
-                                                  year: 'numeric'
-                                                })}
-                                              </p>
-                                            </div>
-                                          </div>
-
-                                          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                                            {dispatch.tracking_id && (
-                                              <div className="flex items-center px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-md text-xs font-bold border border-indigo-100">
-                                                ID: {dispatch.tracking_id}
-                                              </div>
-                                            )}
-                                            <div className="flex items-center px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md text-xs font-bold border border-blue-100">
-                                              {dispatch.dispatch_type === 'full' ? 'Full Dispatch' : 'Partial'}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      )}
-                                      {dispatch.tracking_id && (
-                                        <div className="p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border border-gray-200">
-                                          <div className="flex items-center gap-2 mb-2">
-                                            <FileText className="w-4 h-4 text-gray-600" />
-                                            <Label className="text-xs font-semibold text-gray-600">Tracking ID</Label>
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            <p className="text-base font-mono font-bold text-gray-900">{dispatch.tracking_id}</p>
-                                            {dispatch.courier_companies?.tracking_url && (
-                                              <a
-                                                href={dispatch.courier_companies.tracking_url.replace('{tracking_number}', dispatch.tracking_id)}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium flex items-center gap-1"
-                                              >
-                                                <Truck className="w-3 h-3" />
-                                                Track
-                                              </a>
-                                            )}
-                                          </div>
-                                        </div>
-                                      )}
-                                      {dispatch.estimated_delivery && (
-                                        <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-200">
-                                          <div className="flex items-center gap-2 mb-2">
-                                            <Calendar className="w-4 h-4 text-emerald-600" />
-                                            <Label className="text-xs font-semibold text-emerald-700">Expected Delivery</Label>
-                                          </div>
-                                          <p className="text-base font-bold text-emerald-900">
-                                            {new Date(dispatch.estimated_delivery).toLocaleDateString('en-IN', {
-                                              day: '2-digit', month: 'short', year: 'numeric'
-                                            })}
-                                          </p>
-                                          {new Date(dispatch.estimated_delivery) < new Date(new Date().setHours(0,0,0,0)) &&
-                                            dispatch.shipment_status !== 'delivered' && (
-                                              <p className="mt-1 text-xs font-medium text-red-600">Delivery overdue</p>
-                                            )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </>
-                                )}
-
-                                {/* Items Section — always visible */}
-                                {dispatch.dispatch_items && dispatch.dispatch_items.length > 0 && (
-                                  <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                                    <Label className="text-sm font-semibold text-gray-700 mb-3 block">Items Dispatched</Label>
-                                    <div className="space-y-2">
-                                      {dispatch.dispatch_items.map((di: any, idx: number) => {
-                                        const orderItem = di.order_items
-                                        let itemName = `Item ${idx + 1}`
-
-                                        if (orderItem) {
-                                          let inventoryItem: InventoryItem | undefined
-                                          let subItem: SubItem | undefined
-
-                                          inventoryItem = inventoryItems.find(inv =>
-                                            inv.id === orderItem.inventory_item_id || inv.id === orderItem.product_id
-                                          )
-
-                                          if (!inventoryItem) {
-                                            for (const parentItem of inventoryItems) {
-                                              subItem = parentItem.sub_items?.find(sub =>
-                                                sub.id === orderItem.inventory_item_id || sub.id === orderItem.product_id
-                                              )
-                                              if (subItem) {
-                                                inventoryItem = parentItem
-                                                break
-                                              }
-                                            }
-                                          }
-
-                                          itemName = subItem
-                                            ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
-                                            : inventoryItem?.item_name || `Item ${idx + 1}`
-                                        }
-
-                                        return (
-                                          <div key={di.id} className="flex items-center justify-between py-2.5 px-3 bg-white rounded border border-gray-200 hover:border-blue-300 transition-colors">
-                                            <span className="text-sm text-gray-700">{itemName}</span>
-                                            <span className="text-sm font-bold text-gray-900">{di.quantity} units</span>
-                                          </div>
-                                        )
-                                      })}
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Notes */}
-                                {dispatch.notes && (
-                                  <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
-                                    <Label className="text-xs font-semibold text-gray-700 mb-1 block">Notes</Label>
-                                    <p className="text-sm text-gray-700">{dispatch.notes}</p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Dispatch Creation Form Modal */}
+          {/* ── Create Dispatch Form ──────────────────────────────────── */}
           {showDispatchForm && selectedProductionRecord && (
-            <Card className="shadow-lg border-2 border-blue-300">
-              <CardHeader className="bg-blue-50 border-b">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg font-semibold text-gray-900">
-                    Create Dispatch for {selectedProductionRecord.production_number}
-                  </CardTitle>
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm ring-2 ring-orange-300 ring-offset-1">
+              <div className="px-6 py-4 bg-gradient-to-r from-orange-50 to-white border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-bold text-orange-500 uppercase tracking-widest mb-0.5">New Dispatch</p>
+                  <h2 className="text-sm font-bold text-slate-900">{selectedProductionRecord.production_number}</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {selectedProductionRecord.production_type === "full" ? "Full order — all items" : "Partial order — selected quantities only"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setShowDispatchForm(false); setSelectedProductionRecord(null) }}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Left: Items summary */}
+                  {order?.items && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Items in this dispatch</p>
+                      <div className="rounded-lg border border-slate-200 overflow-hidden">
+                        {order.items.map((item, index) => {
+                          let inventoryItem: InventoryItem | undefined
+                          let subItem: SubItem | undefined
+                          inventoryItem = inventoryItems.find(inv => inv.id === item.inventory_item_id || inv.id === item.product_id)
+                          if (!inventoryItem) {
+                            for (const parentItem of inventoryItems) {
+                              subItem = parentItem.sub_items?.find(sub => sub.id === item.inventory_item_id || sub.id === item.product_id)
+                              if (subItem) { inventoryItem = parentItem; break }
+                            }
+                          }
+                          const displayName = subItem
+                            ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
+                            : inventoryItem?.item_name || `Item ${index + 1}`
+                          let dispatchQty = 0
+                          if (selectedProductionRecord.production_type === "full") {
+                            dispatchQty = item.quantity
+                          } else if (selectedProductionRecord.selected_quantities && selectedProductionRecord.selected_quantities[item.id]) {
+                            dispatchQty = selectedProductionRecord.selected_quantities[item.id] as number
+                          }
+                          if (dispatchQty === 0) return null
+                          return (
+                            <div key={item.id} className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 last:border-0 bg-slate-50/40">
+                              <span className="text-sm text-slate-700">{displayName}</span>
+                              <span className="text-sm font-bold text-slate-900 tabular-nums">
+                                {dispatchQty} <span className="font-normal text-slate-400 text-xs">units</span>
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {/* Right: Form fields */}
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                        Courier Company <span className="text-red-400">*</span>
+                      </Label>
+                      <select
+                        value={selectedCourierCompany}
+                        onChange={(e) => setSelectedCourierCompany(e.target.value)}
+                        disabled={creatingDispatch}
+                        className="w-full h-9 px-3 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
+                        required
+                      >
+                        <option value="">Select courier...</option>
+                        {courierCompanies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                        Expected Delivery <span className="text-red-400">*</span>
+                      </Label>
+                      <Input
+                        type="date"
+                        value={estimatedDelivery}
+                        onChange={(e) => setEstimatedDelivery(e.target.value)}
+                        disabled={creatingDispatch}
+                        min={new Date().toISOString().split("T")[0]}
+                        className={`h-9 text-sm ${!estimatedDelivery ? "border-red-300" : ""}`}
+                        required
+                      />
+                      {!estimatedDelivery && <p className="mt-1 text-xs text-red-400">Required — needed to track on-time delivery</p>}
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                        Tracking ID <span className="text-slate-400 font-normal">(optional)</span>
+                      </Label>
+                      <Input
+                        type="text"
+                        placeholder="e.g. 1Z999AA10123456784"
+                        value={trackingId}
+                        onChange={(e) => setTrackingId(e.target.value)}
+                        disabled={creatingDispatch}
+                        className="h-9 text-sm font-mono"
+                      />
+                      {selectedCourierCompany && trackingId && (() => {
+                        const co = courierCompanies.find(c => c.id === selectedCourierCompany)
+                        return co?.tracking_url
+                          ? <a href={co.tracking_url.replace('{tracking_number}', trackingId)} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline mt-1 block">Preview tracking link →</a>
+                          : null
+                      })()}
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                        Notes <span className="text-slate-400 font-normal">(optional)</span>
+                      </Label>
+                      <textarea
+                        value={dispatchNotes}
+                        onChange={(e) => setDispatchNotes(e.target.value)}
+                        disabled={creatingDispatch}
+                        placeholder="e.g. Handle with care, call before delivery..."
+                        className="w-full h-[68px] rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
+                      />
+                    </div>
+                  </div>
+                </div>
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => {
-                      setShowDispatchForm(false)
-                      setSelectedProductionRecord(null)
+                      setShowDispatchForm(false); setSelectedProductionRecord(null)
+                      setSelectedCourierCompany(""); setTrackingId(""); setEstimatedDelivery(""); setDispatchNotes("")
                     }}
+                    disabled={creatingDispatch}
+                    className="h-8 text-sm text-slate-500"
                   >
-                    <X className="w-4 h-4" />
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={async () => {
+                      if (!selectedCourierCompany) { setError("Please select a courier company"); return }
+                      if (!estimatedDelivery) { setError("Expected Delivery date is required"); return }
+                      if (!order?.items) { setError("Order items not available"); return }
+                      setCreatingDispatch(true); setError(null)
+                      try {
+                        const dispatchItems: Array<{ order_item_id: string; quantity: number }> = []
+                        order.items.forEach((item) => {
+                          let qty = 0
+                          if (selectedProductionRecord.production_type === "full") qty = item.quantity
+                          else if (selectedProductionRecord.selected_quantities && selectedProductionRecord.selected_quantities[item.id]) qty = selectedProductionRecord.selected_quantities[item.id] as number
+                          if (qty > 0) dispatchItems.push({ order_item_id: item.id, quantity: qty })
+                        })
+                        if (dispatchItems.length === 0) { setError("No items to dispatch"); setCreatingDispatch(false); return }
+                        const result = await createDispatch(
+                          orderId,
+                          selectedProductionRecord.production_type === "full" ? "full" : "partial",
+                          dispatchItems,
+                          dispatchNotes || undefined,
+                          selectedCourierCompany,
+                          trackingId || undefined,
+                          selectedProductionRecord.id,
+                          estimatedDelivery
+                        )
+                        if (result.success) {
+                          setSuccess(`Dispatch created for ${selectedProductionRecord.production_number}!`)
+                          setShowDispatchForm(false); setSelectedProductionRecord(null)
+                          setSelectedCourierCompany(""); setTrackingId(""); setEstimatedDelivery(""); setDispatchNotes("")
+                          await loadDispatches()
+                          setTimeout(() => setSuccess(null), 3000)
+                        } else {
+                          setError(result.error || "Failed to create dispatch")
+                        }
+                      } catch (err: any) {
+                        setError(err.message || "Failed to create dispatch")
+                      } finally {
+                        setCreatingDispatch(false)
+                      }
+                    }}
+                    disabled={creatingDispatch || !selectedCourierCompany || !estimatedDelivery}
+                    className="h-8 text-sm bg-orange-500 hover:bg-orange-600 text-white px-5"
+                  >
+                    <Truck className="w-3.5 h-3.5 mr-2" />
+                    {creatingDispatch ? "Creating..." : "Confirm Dispatch"}
                   </Button>
                 </div>
-                <CardDescription className="mt-1">
-                  {selectedProductionRecord.production_type === "full"
-                    ? "Create a dispatch for the full order production"
-                    : "Create a dispatch for the partial production quantities"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-6">
-                <div className="space-y-4">
-                  {/* Production Record Info */}
-                  <div className="p-4 bg-gray-50 rounded-lg border">
-                    <Label className="text-sm font-semibold text-gray-700 mb-2 block">Production Record Details</Label>
-                    <div className="space-y-1 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Production Number:</span>
-                        <span className="font-medium text-gray-900">{selectedProductionRecord.production_number}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Type:</span>
-                        <span className={`px-2 py-0.5 rounded text-xs ${selectedProductionRecord.production_type === "full"
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-orange-100 text-orange-700"
-                          }`}>
-                          {selectedProductionRecord.production_type === "full" ? "Full" : "Partial"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+              </div>
+            </div>
+          )}
 
-                  {/* Items to Dispatch */}
-                  {order && order.items && (
-                    <div>
-                      <Label className="text-sm font-semibold text-gray-700 mb-2 block">Items to Dispatch</Label>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full">
-                          <thead className="bg-gray-50 border-b">
-                            <tr>
-                              <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Item</th>
-                              <th className="px-4 py-2 text-center text-xs font-semibold text-gray-700">Quantity</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {order.items.map((item, index) => {
-                              // Find inventory item for display name
-                              let inventoryItem: InventoryItem | undefined
-                              let subItem: SubItem | undefined
-
-                              inventoryItem = inventoryItems.find(inv =>
-                                inv.id === item.inventory_item_id || inv.id === item.product_id
-                              )
-
-                              if (!inventoryItem) {
-                                for (const parentItem of inventoryItems) {
-                                  subItem = parentItem.sub_items?.find(sub =>
-                                    sub.id === item.inventory_item_id || sub.id === item.product_id
-                                  )
-                                  if (subItem) {
-                                    inventoryItem = parentItem
-                                    break
-                                  }
-                                }
-                              }
-
-                              const displayName = subItem
-                                ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
-                                : inventoryItem?.item_name || `Item ${index + 1}`
-
-                              // Get quantity from production record
-                              let dispatchQty = 0
-                              if (selectedProductionRecord.production_type === "full") {
-                                dispatchQty = item.quantity
-                              } else if (selectedProductionRecord.selected_quantities && selectedProductionRecord.selected_quantities[item.id]) {
-                                dispatchQty = selectedProductionRecord.selected_quantities[item.id] as number
-                              }
-
-                              if (dispatchQty === 0) return null
-
-                              return (
-                                <tr key={item.id} className="hover:bg-gray-50">
-                                  <td className="px-4 py-2 text-sm text-gray-900">{displayName}</td>
-                                  <td className="px-4 py-2 text-sm text-center text-gray-600 font-medium">{dispatchQty}</td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Courier Company */}
-                  <div>
-                    <Label className="text-sm font-semibold text-gray-700 mb-2 block">
-                      Courier Company <span className="text-red-500">*</span>
-                    </Label>
-                    <select
-                      value={selectedCourierCompany}
-                      onChange={(e) => setSelectedCourierCompany(e.target.value)}
-                      disabled={creatingDispatch}
-                      className="w-full h-10 px-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-sk-primary"
-                      required
-                    >
-                      <option value="">Select courier company...</option>
-                      {courierCompanies.map((company) => (
-                        <option key={company.id} value={company.id}>
-                          {company.name}
-                        </option>
+          {/* ── Ready to Dispatch Banner ──────────────────────────────── */}
+          {!showDispatchForm && (() => {
+            const readyRecords = productionRecords.filter(r =>
+              r.status === "completed" && !dispatches.some(d => d.production_records?.id === r.id)
+            )
+            if (!readyRecords.length) return null
+            return (
+              <div className="rounded-xl border border-green-200 bg-green-50/50 px-5 py-4">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-green-800 mb-2.5">
+                      {readyRecords.length === 1 ? "1 production record" : `${readyRecords.length} production records`} ready to dispatch
+                    </p>
+                    <div className="space-y-2">
+                      {readyRecords.map(record => (
+                        <div key={record.id} className="flex items-center justify-between gap-3 bg-white rounded-lg px-4 py-2.5 border border-green-100">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-slate-900">{record.production_number}</span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${record.production_type === "full" ? "bg-purple-100 text-purple-700" : "bg-orange-100 text-orange-700"}`}>
+                              {record.production_type === "full" ? "Full" : "Partial"}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {record.pdf_file_url && (
+                              <button onClick={() => window.open(record.pdf_file_url, '_blank')}
+                                className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors">
+                                <FileDown className="w-3.5 h-3.5" /> PDF
+                              </button>
+                            )}
+                            <Button size="sm"
+                              onClick={() => {
+                                setSelectedProductionRecord(record)
+                                setShowDispatchForm(true)
+                                setSelectedCourierCompany(""); setTrackingId(""); setEstimatedDelivery(""); setDispatchNotes("")
+                              }}
+                              className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white px-3">
+                              <Truck className="w-3 h-3 mr-1.5" /> Dispatch
+                            </Button>
+                          </div>
+                        </div>
                       ))}
-                    </select>
-                  </div>
-
-                  {/* Tracking ID */}
-                  <div>
-                    <Label className="text-sm font-semibold text-gray-700 mb-2 block">
-                      Tracking ID (Optional)
-                    </Label>
-                    <Input
-                      type="text"
-                      placeholder="Enter tracking ID..."
-                      value={trackingId}
-                      onChange={(e) => setTrackingId(e.target.value)}
-                      disabled={creatingDispatch}
-                      className="h-10"
-                    />
-                    {selectedCourierCompany && trackingId && (() => {
-                      const company = courierCompanies.find(c => c.id === selectedCourierCompany)
-                      if (company?.tracking_url) {
-                        const trackingUrl = company.tracking_url.replace('{tracking_number}', trackingId)
-                        return (
-                          <p className="text-xs text-blue-600 mt-1">
-                            <a href={trackingUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                              Track shipment →
-                            </a>
-                          </p>
-                        )
-                      }
-                      return null
-                    })()}
-                  </div>
-
-                  {/* Expected Delivery */}
-                  <div>
-                    <Label className="text-sm font-semibold text-gray-700 mb-2 block">
-                      Expected Delivery Date <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      type="date"
-                      value={estimatedDelivery}
-                      onChange={(e) => setEstimatedDelivery(e.target.value)}
-                      disabled={creatingDispatch}
-                      min={new Date().toISOString().split("T")[0]}
-                      className={`h-10 ${!estimatedDelivery ? "border-red-300 focus-visible:ring-red-400" : ""}`}
-                      required
-                    />
-                    {!estimatedDelivery && (
-                      <p className="mt-1 text-xs text-red-500">Required — helps track on-time delivery</p>
-                    )}
-                  </div>
-
-                  {/* Notes */}
-                  <div>
-                    <Label className="text-sm font-semibold text-gray-700 mb-2 block">
-                      Notes (Optional)
-                    </Label>
-                    <textarea
-                      value={dispatchNotes}
-                      onChange={(e) => setDispatchNotes(e.target.value)}
-                      disabled={creatingDispatch}
-                      placeholder="Add any notes about this dispatch..."
-                      className="w-full min-h-[80px] rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sk-primary"
-                    />
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex items-center justify-end gap-3 pt-4 border-t">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setShowDispatchForm(false)
-                        setSelectedProductionRecord(null)
-                        setSelectedCourierCompany("")
-                        setTrackingId("")
-                        setEstimatedDelivery("")
-                        setDispatchNotes("")
-                      }}
-                      disabled={creatingDispatch}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      onClick={async () => {
-                        if (!selectedCourierCompany) {
-                          setError("Please select a courier company")
-                          return
-                        }
-
-                        if (!estimatedDelivery) {
-                          setError("Expected Delivery date is required")
-                          return
-                        }
-
-                        if (!order || !order.items) {
-                          setError("Order items not available")
-                          return
-                        }
-
-                        setCreatingDispatch(true)
-                        setError(null)
-
-                        try {
-                          // Prepare dispatch items based on production record
-                          const dispatchItems: Array<{ order_item_id: string; quantity: number }> = []
-
-                          order.items.forEach((item) => {
-                            let qty = 0
-                            if (selectedProductionRecord.production_type === "full") {
-                              qty = item.quantity
-                            } else if (selectedProductionRecord.selected_quantities && selectedProductionRecord.selected_quantities[item.id]) {
-                              qty = selectedProductionRecord.selected_quantities[item.id] as number
-                            }
-
-                            if (qty > 0) {
-                              dispatchItems.push({
-                                order_item_id: item.id,
-                                quantity: qty
-                              })
-                            }
-                          })
-
-                          if (dispatchItems.length === 0) {
-                            setError("No items to dispatch")
-                            setCreatingDispatch(false)
-                            return
-                          }
-
-                          const result = await createDispatch(
-                            orderId,
-                            selectedProductionRecord.production_type === "full" ? "full" : "partial",
-                            dispatchItems,
-                            dispatchNotes || undefined,
-                            selectedCourierCompany,
-                            trackingId || undefined,
-                            selectedProductionRecord.id,
-                            estimatedDelivery
-                          )
-
-                          if (result.success) {
-                            setSuccess(`Dispatch created successfully for ${selectedProductionRecord.production_number}!`)
-                            setShowDispatchForm(false)
-                            setSelectedProductionRecord(null)
-                            setSelectedCourierCompany("")
-                            setTrackingId("")
-                            setEstimatedDelivery("")
-                            setDispatchNotes("")
-                            await loadDispatches()
-                            setTimeout(() => setSuccess(null), 3000)
-                          } else {
-                            setError(result.error || "Failed to create dispatch")
-                          }
-                        } catch (err: any) {
-                          setError(err.message || "Failed to create dispatch")
-                        } finally {
-                          setCreatingDispatch(false)
-                        }
-                      }}
-                      disabled={creatingDispatch || !selectedCourierCompany || !estimatedDelivery}
-                      className="bg-green-600 hover:bg-green-700 text-white"
-                    >
-                      <Truck className="w-4 h-4 mr-2" />
-                      {creatingDispatch ? "Creating..." : "Create Dispatch"}
-                    </Button>
+                    </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              </div>
+            )
+          })()}
+
+          {/* ── Dispatches ───────────────────────────────────────────── */}
+          {dispatches.length === 0 && !showDispatchForm ? (
+            <div className="bg-white border border-slate-200 rounded-xl px-6 py-16 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center mx-auto mb-4">
+                <Truck className="w-6 h-6 text-slate-300" />
+              </div>
+              <p className="text-sm font-semibold text-slate-400">No dispatches yet</p>
+              <p className="text-xs text-slate-300 mt-1">
+                {productionRecords.length === 0
+                  ? "Complete production first, then dispatch from here"
+                  : "Mark a production record complete, then use the Dispatch button above"}
+              </p>
+            </div>
+          ) : dispatches.length > 0 ? (
+            <div className="space-y-3">
+              {dispatches.map((dispatch) => {
+                const shipmentStatus = dispatch.shipment_status || 'ready'
+                const statusMeta = {
+                  ready:     { label: 'Ready to Ship', leftBorder: 'border-l-amber-400',  badgeCls: 'bg-amber-50 text-amber-700 border-amber-200'  },
+                  picked_up: { label: 'In Transit',    leftBorder: 'border-l-blue-400',   badgeCls: 'bg-blue-50 text-blue-700 border-blue-200'    },
+                  delivered: { label: 'Delivered',     leftBorder: 'border-l-green-400',  badgeCls: 'bg-green-50 text-green-700 border-green-200'  },
+                }
+                const statusSteps = [
+                  { value: 'ready',     label: 'Ready',     icon: Package      },
+                  { value: 'picked_up', label: 'Picked Up', icon: Truck        },
+                  { value: 'delivered', label: 'Delivered', icon: CheckCircle2 },
+                ]
+                const currentStepIndex = statusSteps.findIndex(s => s.value === shipmentStatus)
+                const meta = statusMeta[shipmentStatus as keyof typeof statusMeta] || statusMeta.ready
+                const productionRecord = dispatch.production_records
+                const isOverdue = dispatch.estimated_delivery &&
+                  shipmentStatus !== 'delivered' &&
+                  new Date(dispatch.estimated_delivery) < new Date(new Date().setHours(0, 0, 0, 0))
+
+                return (
+                  <div key={dispatch.id} className={`bg-white border border-slate-200 border-l-4 ${meta.leftBorder} rounded-xl overflow-hidden`}>
+
+                    {/* Card Header */}
+                    <div className="px-5 py-4 flex items-start justify-between gap-3 border-b border-slate-100">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-slate-900">
+                            {dispatch.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
+                          </span>
+                          {productionRecord && (
+                            <span className="text-xs text-slate-400 font-medium">· {productionRecord.production_number}</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Dispatched on {new Date(dispatch.dispatch_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${meta.badgeCls}`}>
+                          {meta.label}
+                        </span>
+                        {(shipmentStatus === 'ready' || shipmentStatus === 'picked_up') && editingDispatchId !== dispatch.id && (
+                          <button
+                            onClick={() => {
+                              setEditingDispatchId(dispatch.id)
+                              setEditCourierId(dispatch.courier_company_id || "")
+                              setEditTrackingId(dispatch.tracking_id || "")
+                              setEditEstimatedDelivery(dispatch.estimated_delivery || "")
+                              setExpandedShipments(prev => ({ ...prev, [dispatch.id]: true }))
+                            }}
+                            className="text-xs font-medium text-slate-400 hover:text-slate-700 hover:bg-slate-100 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" /> Edit
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="px-5 py-5 space-y-5">
+
+                      {/* ── Shipment Progress Stepper ── */}
+                      <div>
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-3">
+                          Shipment Progress <span className="normal-case font-normal">· click a step to update</span>
+                        </p>
+                        <div className="flex items-center">
+                          {statusSteps.map((step, idx) => {
+                            const isActive = step.value === shipmentStatus
+                            const isDone = idx < currentStepIndex
+                            const StepIcon = step.icon
+                            return (
+                              <div key={step.value} className={`flex items-center ${idx < statusSteps.length - 1 ? "flex-1" : ""}`}>
+                                <button
+                                  onClick={async () => {
+                                    if (step.value === shipmentStatus) return
+                                    const newStatus = step.value as 'ready' | 'picked_up' | 'delivered'
+                                    const result = await updateDispatchStatus(dispatch.id, newStatus)
+                                    if (result.success) {
+                                      await loadDispatches()
+                                      setSuccess(`Status updated to ${step.label}!`)
+                                      setTimeout(() => setSuccess(null), 3000)
+                                    } else {
+                                      setError(result.error || "Failed to update status")
+                                    }
+                                  }}
+                                  className="flex flex-col items-center gap-1.5 group flex-shrink-0"
+                                  title={`Set to ${step.label}`}
+                                >
+                                  <div className={`w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all ${
+                                    isActive
+                                      ? shipmentStatus === 'ready'     ? 'bg-amber-500  border-amber-500  text-white'
+                                      : shipmentStatus === 'picked_up' ? 'bg-blue-500   border-blue-500   text-white'
+                                      :                                   'bg-green-500  border-green-500  text-white'
+                                    : isDone
+                                      ? 'bg-green-400 border-green-400 text-white'
+                                      : 'bg-white border-slate-200 text-slate-300 hover:border-slate-400 hover:text-slate-500'
+                                  }`}>
+                                    {isDone ? <Check className="w-4 h-4" /> : <StepIcon className="w-4 h-4" />}
+                                  </div>
+                                  <span className={`text-[10px] font-bold whitespace-nowrap ${
+                                    isActive ? 'text-slate-800' : isDone ? 'text-green-600' : 'text-slate-400 group-hover:text-slate-600'
+                                  }`}>
+                                    {step.label}
+                                  </span>
+                                </button>
+                                {idx < statusSteps.length - 1 && (
+                                  <div className={`flex-1 h-0.5 mx-2 mb-5 rounded-full transition-colors ${
+                                    idx < currentStepIndex ? 'bg-green-400' : 'bg-slate-200'
+                                  }`} />
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      {/* ── Edit Form ── */}
+                      {editingDispatchId === dispatch.id ? (
+                        <div className="rounded-xl border border-orange-200 bg-orange-50/30 p-4 space-y-3">
+                          <p className="text-xs font-bold text-orange-700 uppercase tracking-wide">Edit Shipment Details</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div>
+                              <Label className="text-xs font-semibold text-slate-500 mb-1.5 block">Courier</Label>
+                              <select value={editCourierId} onChange={(e) => setEditCourierId(e.target.value)}
+                                className="w-full h-9 px-3 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400">
+                                <option value="">— No courier —</option>
+                                {courierCompanies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <Label className="text-xs font-semibold text-slate-500 mb-1.5 block">Tracking ID</Label>
+                              <Input value={editTrackingId} onChange={(e) => setEditTrackingId(e.target.value)}
+                                placeholder="Tracking ID" className="h-9 text-sm font-mono" />
+                            </div>
+                            <div>
+                              <Label className="text-xs font-semibold text-slate-500 mb-1.5 block">Estimated Delivery</Label>
+                              <Input type="date" value={editEstimatedDelivery} onChange={(e) => setEditEstimatedDelivery(e.target.value)}
+                                className="h-9 text-sm" />
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 pt-1">
+                            <Button size="sm" disabled={savingDispatchEdit}
+                              onClick={async () => {
+                                setSavingDispatchEdit(true)
+                                const result = await updateDispatchDetails(dispatch.id, {
+                                  courier_company_id: editCourierId || null,
+                                  tracking_id: editTrackingId || null,
+                                  estimated_delivery: editEstimatedDelivery || null,
+                                })
+                                setSavingDispatchEdit(false)
+                                if (result.success) {
+                                  setEditingDispatchId(null)
+                                  await loadDispatches()
+                                  setSuccess("Shipment details updated!")
+                                  setTimeout(() => setSuccess(null), 3000)
+                                } else {
+                                  setError(result.error || "Failed to save changes")
+                                }
+                              }}
+                              className="h-8 text-xs bg-orange-500 hover:bg-orange-600 text-white">
+                              {savingDispatchEdit ? "Saving…" : "Save Changes"}
+                            </Button>
+                            <Button variant="ghost" size="sm" disabled={savingDispatchEdit}
+                              onClick={() => setEditingDispatchId(null)} className="h-8 text-xs text-slate-500">
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* ── Shipment Details (read-only) ── */
+                        (dispatch.courier_companies || dispatch.tracking_id || dispatch.estimated_delivery) && (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 px-4 py-4 bg-slate-50/70 rounded-xl border border-slate-100">
+                            {dispatch.courier_companies && (
+                              <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Via Courier</p>
+                                <div className="flex items-center gap-1.5">
+                                  <Truck className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                  <span className="text-sm font-semibold text-slate-800">{dispatch.courier_companies.name}</span>
+                                </div>
+                              </div>
+                            )}
+                            {dispatch.tracking_id && (
+                              <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Tracking No.</p>
+                                <p className="text-sm font-mono font-semibold text-slate-800">{dispatch.tracking_id}</p>
+                                {dispatch.courier_companies?.tracking_url && (
+                                  <a
+                                    href={dispatch.courier_companies.tracking_url.replace('{tracking_number}', dispatch.tracking_id)}
+                                    target="_blank" rel="noopener noreferrer"
+                                    className="text-xs text-blue-500 hover:text-blue-700 hover:underline font-medium mt-0.5 block">
+                                    Track package →
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                            {dispatch.estimated_delivery && (
+                              <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expected Delivery</p>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`text-sm font-semibold ${isOverdue ? 'text-red-600' : 'text-slate-800'}`}>
+                                    {new Date(dispatch.estimated_delivery).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                  </span>
+                                  {isOverdue && (
+                                    <span className="text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
+                                      Overdue
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      )}
+
+                      {/* ── Items Dispatched ── */}
+                      {dispatch.dispatch_items && dispatch.dispatch_items.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Items Dispatched</p>
+                          <div className="rounded-lg border border-slate-100 overflow-hidden divide-y divide-slate-100">
+                            {dispatch.dispatch_items.map((di: any, idx: number) => {
+                              const orderItem = di.order_items
+                              let itemName = `Item ${idx + 1}`
+                              if (orderItem) {
+                                let inventoryItem: InventoryItem | undefined
+                                let subItem: SubItem | undefined
+                                inventoryItem = inventoryItems.find(inv => inv.id === orderItem.inventory_item_id || inv.id === orderItem.product_id)
+                                if (!inventoryItem) {
+                                  for (const parentItem of inventoryItems) {
+                                    subItem = parentItem.sub_items?.find(sub => sub.id === orderItem.inventory_item_id || sub.id === orderItem.product_id)
+                                    if (subItem) { inventoryItem = parentItem; break }
+                                  }
+                                }
+                                itemName = subItem
+                                  ? `${inventoryItem?.item_name || ""} → ${subItem.item_name}`
+                                  : inventoryItem?.item_name || `Item ${idx + 1}`
+                              }
+                              return (
+                                <div key={di.id} className="flex items-center justify-between px-4 py-2.5 bg-slate-50/30 hover:bg-slate-50 transition-colors">
+                                  <span className="text-sm text-slate-700">{itemName}</span>
+                                  <span className="text-sm font-bold text-slate-900 tabular-nums">
+                                    {di.quantity} <span className="font-normal text-slate-400 text-xs">units</span>
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── Notes ── */}
+                      {dispatch.notes && (
+                        <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 border border-amber-100 rounded-lg">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-amber-800">{dispatch.notes}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : null}
         </TabsContent>
 
-        {/* Payment Tab — Invoice-centric */}
+        {/* Payment Tab — Accordion layout */}
         <TabsContent value="payment" className="mt-6">
-          <div className="mx-auto max-w-[1200px] space-y-5 px-6">
-            {/* KPI Summary */}
+          <div className="mx-auto max-w-[860px] space-y-5 px-6">
+
+            {/* ── KPI Summary ── */}
             <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
               <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-400">Total Invoiced</p>
@@ -3017,47 +2755,24 @@ export default function OrderDetailsPage() {
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-400">Status</p>
-                <span
-                  className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-                    derivedPaymentStatus === "complete"
-                      ? "bg-green-100 text-green-800"
-                      : derivedPaymentStatus === "partial"
-                        ? "bg-yellow-100 text-yellow-800"
-                        : "bg-amber-100 text-amber-800"
-                  }`}
-                >
+                <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                  derivedPaymentStatus === "complete" ? "bg-green-100 text-green-800" :
+                  derivedPaymentStatus === "partial"  ? "bg-yellow-100 text-yellow-800" :
+                  "bg-amber-100 text-amber-800"
+                }`}>
                   {derivedPaymentStatus === "complete" ? "Paid" : derivedPaymentStatus === "partial" ? "Partial" : "Pending"}
                 </span>
               </div>
             </div>
 
-            {/* Alerts */}
-            {(!paymentSummary.hasInvoices || paymentSummary.amountDue > 0 || !canRecordPayment || order.cash_discount) && (
+            {/* ── Alerts ── */}
+            {(!canRecordPayment || order.cash_discount) && (
               <div className="space-y-2">
-                {!paymentSummary.hasInvoices && (
-                  <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                    <p className="text-sm text-slate-600">
-                      No invoices yet. Create an invoice (manual or linked to a dispatch) to track payments clearly.
-                    </p>
-                  </div>
-                )}
-                {paymentSummary.amountDue > 0 && (
-                  <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                    <AlertCircle className="h-4 w-4 shrink-0 text-amber-500" />
-                    <p className="text-sm text-amber-800">
-                      <span className="font-semibold">
-                        ₹{paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })} pending
-                      </span>{" "}
-                      — across all invoices.
-                    </p>
-                  </div>
-                )}
                 {!canRecordPayment && (
                   <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                     <p className="text-sm text-slate-600">
-                      Payment recording is available after at least one dispatch is created. Go to the <strong>Shipment</strong> tab first.
+                      Payment recording requires at least one dispatch. Go to the <strong>Shipment</strong> tab first.
                     </p>
                   </div>
                 )}
@@ -3072,272 +2787,220 @@ export default function OrderDetailsPage() {
               </div>
             )}
 
-            {/* Main layout */}
-            <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[1fr_1.4fr]">
-              {/* LEFT: Invoice list */}
-              <div className="space-y-4">
-                <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                  <div className="mb-4 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-slate-400" />
-                      <h3 className="text-sm font-semibold text-slate-900">Invoices</h3>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedInvoiceId(null)
-                          setInvoiceDraftId(null)
-                          setInvoiceDraftDispatchId("")
-                          setInvoiceDraftNumber(`INV-${order.internal_order_number || order.id.slice(0, 8)}-${(orderInvoices.length || 0) + 1}`)
-                          setInvoiceDraftDate(new Date().toISOString().split("T")[0])
-                          setInvoiceDraftAmount("")
-                          setInvoiceDraftNotes("")
-                        }}
-                        className="h-8 rounded-lg border-slate-200 text-xs text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
-                      >
-                        <Plus className="mr-1.5 h-3.5 w-3.5" />
-                        Add manual
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={async () => {
-                          const res = await getOrderInvoices(orderId)
-                          if (res.success) setOrderInvoices(res.data)
-                        }}
-                        className="h-8 w-8 rounded-full p-0 text-slate-400 hover:bg-orange-50 hover:text-orange-500"
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  {orderInvoices.length === 0 ? (
-                    <div className="flex min-h-[110px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50">
-                      <FileText className="h-7 w-7 text-slate-200" />
-                      <p className="mt-2 text-[12px] text-slate-400">No invoices yet</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {orderInvoices.map((inv: any) => {
-                        const isActive = selectedInvoiceId === inv.id
-                        const badge = inv.dispatch_id ? "Dispatch" : "Manual"
-                        const statusCls =
-                          inv.status === "paid"
-                            ? "bg-green-100 text-green-700"
-                            : inv.status === "partial"
-                              ? "bg-amber-100 text-amber-700"
-                              : "bg-slate-100 text-slate-600"
-                        return (
-                          <button
-                            key={inv.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedInvoiceId(inv.id)
-                              setInvoiceDraftId(inv.id)
-                              setInvoiceDraftNumber(inv.invoice_number ?? "")
-                              setInvoiceDraftDate(String(inv.invoice_date || "").split("T")[0] || new Date().toISOString().split("T")[0])
-                              setInvoiceDraftAmount(String(inv.invoice_amount ?? ""))
-                              setInvoiceDraftDispatchId(inv.dispatch_id ?? "")
-                              setInvoiceDraftNotes(inv.notes ?? "")
-                            }}
-                            className={`w-full rounded-xl border p-4 text-left transition-colors ${
-                              isActive
-                                ? "border-orange-300 bg-orange-50"
-                                : "border-slate-200 bg-white hover:border-orange-200 hover:bg-orange-50/40"
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-slate-900">{inv.invoice_number}</p>
-                                <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                                  <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">{badge}</span>
-                                  <span>
-                                    {inv.invoice_date
-                                      ? new Date(inv.invoice_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-                                      : "—"}
-                                  </span>
-                                </div>
-                              </div>
-                              <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusCls}`}>
-                                {inv.status === "paid" ? "Paid" : inv.status === "partial" ? "Partial" : "Pending"}
-                              </span>
-                            </div>
-                            <div className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
-                              <div>
-                                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Amount</p>
-                                <p className="font-semibold text-slate-800">
-                                  ₹{Number(inv.invoice_amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Paid</p>
-                                <p className="font-semibold text-green-600">
-                                  ₹{Number(inv.total_paid || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Due</p>
-                                <p className={`font-semibold ${Number(inv.amount_due || 0) > 0 ? "text-red-600" : "text-slate-800"}`}>
-                                  ₹{Number(inv.amount_due || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                                </p>
-                              </div>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {/* Dispatches missing invoices */}
+            {/* ── Dispatches missing invoices — orange callout ── */}
+            {dispatches?.filter((d: any) => d.dispatch_type !== "return").some((d: any) => !orderInvoices.some((i: any) => i.dispatch_id === d.id)) && (
+              <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-orange-500" />
+                  <p className="text-sm font-semibold text-orange-800">Dispatches missing an invoice</p>
+                </div>
+                <div className="space-y-2">
                   {dispatches
-                    ?.filter((d: any) => d.dispatch_type !== "return")
-                    .some((d: any) => !orderInvoices.some((i: any) => i.dispatch_id === d.id)) && (
-                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Dispatches without invoice</p>
-                      <div className="mt-2 space-y-2">
-                        {dispatches
-                          .filter((d: any) => d.dispatch_type !== "return")
-                          .filter((d: any) => !orderInvoices.some((i: any) => i.dispatch_id === d.id))
-                          .map((d: any) => {
-                            const dispDate = d.dispatch_date
-                              ? new Date(d.dispatch_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
-                              : "—"
-                            return (
-                              <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                                <div className="min-w-0">
-                                  <p className="truncate text-xs font-semibold text-slate-800">
-                                    {d.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
-                                  </p>
-                                  <p className="text-[11px] text-slate-400">{dispDate}</p>
-                                </div>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  className="h-8 rounded-lg bg-orange-500 px-3 text-xs text-white hover:bg-orange-600"
-                                  onClick={() => {
-                                    setSelectedInvoiceId(null)
-                                    setInvoiceDraftId(null)
-                                    setInvoiceDraftDispatchId(d.id)
-                                    setInvoiceDraftNumber(`INV-${order.internal_order_number || order.id.slice(0, 8)}-${(orderInvoices.length || 0) + 1}`)
-                                    setInvoiceDraftDate(new Date().toISOString().split("T")[0])
-                                    setInvoiceDraftAmount("")
-                                    setInvoiceDraftNotes("")
-                                  }}
-                                >
-                                  Create invoice
-                                </Button>
-                              </div>
-                            )
-                          })}
-                      </div>
-                    </div>
-                  )}
+                    .filter((d: any) => d.dispatch_type !== "return")
+                    .filter((d: any) => !orderInvoices.some((i: any) => i.dispatch_id === d.id))
+                    .map((d: any) => {
+                      const dispDate = d.dispatch_date
+                        ? new Date(d.dispatch_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                        : "—"
+                      return (
+                        <div key={d.id} className="flex items-center justify-between gap-2 rounded-xl border border-orange-200 bg-white px-4 py-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-800">
+                              {d.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
+                            </p>
+                            <p className="text-xs text-slate-500">{dispDate}</p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 rounded-lg bg-orange-500 px-4 text-xs font-semibold text-white hover:bg-orange-600"
+                            onClick={() => {
+                              setSelectedInvoiceId(null)
+                              setInvoiceDraftId(null)
+                              setInvoiceDraftDispatchId(d.id)
+                              setInvoiceDraftNumber(`INV-${order.internal_order_number || order.id.slice(0, 8)}-${(orderInvoices.length || 0) + 1}`)
+                              setInvoiceDraftDate(new Date().toISOString().split("T")[0])
+                              setInvoiceDraftAmount("")
+                              setInvoiceDraftNotes("")
+                            }}
+                          >
+                            Create Invoice
+                          </Button>
+                        </div>
+                      )
+                    })}
                 </div>
               </div>
+            )}
 
-              {/* RIGHT: Invoice details + payments + attachments */}
-              <div className="flex flex-col gap-4 lg:sticky lg:top-5">
-                <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                  {(() => {
-                    const isInvoiceLocked = !!invoiceDraftId
-                    const selectedInvoiceAttachments = selectedInvoiceId
-                      ? invoiceAttachments.filter((a: any) => a.invoice_id === selectedInvoiceId)
-                      : []
-                    return (
-                      <>
-                  <div className="mb-4 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-semibold text-slate-900">{invoiceDraftId ? "Invoice details" : "Create invoice"}</h3>
-                      {isInvoiceLocked && (
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
-                          Locked
-                        </span>
-                      )}
-                    </div>
+            {/* ── Create Invoice form — visible when no invoice is selected and draft is empty ── */}
+            {invoiceDraftId === null && selectedInvoiceId === null && (
+              <div className="rounded-2xl border-2 border-dashed border-orange-300 bg-orange-50/30 p-5">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-100">
+                    <FileText className="h-4 w-4 text-orange-500" />
                   </div>
-
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="sm:col-span-2">
-                      <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Invoice Number</Label>
-                      <Input
-                        value={invoiceDraftNumber}
-                        onChange={(e) => setInvoiceDraftNumber(e.target.value)}
-                        disabled={isInvoiceLocked}
-                        className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                      />
-                    </div>
-                    <div>
-                      <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Invoice Date</Label>
-                      <Input
-                        type="date"
-                        value={invoiceDraftDate || new Date().toISOString().split("T")[0]}
-                        onChange={(e) => setInvoiceDraftDate(e.target.value)}
-                        disabled={isInvoiceLocked}
-                        className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                      />
-                    </div>
-                    <div>
-                      <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Invoice Amount (₹)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={invoiceDraftAmount}
-                        onChange={(e) => setInvoiceDraftAmount(e.target.value)}
-                        disabled={isInvoiceLocked}
-                        className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Link to Dispatch (optional)</Label>
-                      <select
-                        value={invoiceDraftDispatchId}
-                        onChange={(e) => setInvoiceDraftDispatchId(e.target.value)}
-                        disabled={isInvoiceLocked}
-                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-orange-500 focus:outline-none focus:ring-[3px] focus:ring-orange-500/15"
-                      >
-                        <option value="">Manual / Not linked</option>
-                        {(dispatches || [])
-                          .filter((d: any) => d.dispatch_type !== "return")
-                          .map((d: any) => {
-                            const dispDate = d.dispatch_date
-                              ? new Date(d.dispatch_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-                              : "—"
-                            return (
-                              <option key={d.id} value={d.id}>
-                                {d.dispatch_type === "full" ? "Full" : "Partial"} • {dispDate}
-                              </option>
-                            )
-                          })}
-                      </select>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Notes</Label>
-                      <Input
-                        value={invoiceDraftNotes}
-                        onChange={(e) => setInvoiceDraftNotes(e.target.value)}
-                        disabled={isInvoiceLocked}
-                        className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                      />
-                    </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">New Invoice</h3>
+                    <p className="text-[11px] text-slate-500">Fill in the details and save to create the invoice</p>
                   </div>
-
-                  {isInvoiceLocked && (
-                    <p className="mt-3 text-xs text-slate-500">
-                      Invoice is locked after save and cannot be edited.
-                    </p>
-                  )}
-
-                  <div className="mt-4 flex items-center justify-end gap-2">
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Invoice Number</Label>
+                    <Input
+                      value={invoiceDraftNumber}
+                      onChange={(e) => setInvoiceDraftNumber(e.target.value)}
+                      className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                    />
+                  </div>
+                  <div>
+                    <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Invoice Date</Label>
+                    <Input
+                      type="date"
+                      value={invoiceDraftDate || new Date().toISOString().split("T")[0]}
+                      onChange={(e) => setInvoiceDraftDate(e.target.value)}
+                      className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                    />
+                  </div>
+                  <div>
+                    <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Invoice Amount (₹)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={invoiceDraftAmount}
+                      onChange={(e) => setInvoiceDraftAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                    />
+                  </div>
+                  <div>
+                    <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Link to Dispatch (optional)</Label>
+                    <select
+                      value={invoiceDraftDispatchId}
+                      onChange={(e) => setInvoiceDraftDispatchId(e.target.value)}
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-orange-500 focus:outline-none focus:ring-[3px] focus:ring-orange-500/15"
+                    >
+                      <option value="">Manual / Not linked</option>
+                      {(dispatches || [])
+                        .filter((d: any) => d.dispatch_type !== "return")
+                        .map((d: any) => {
+                          const dispDate = d.dispatch_date
+                            ? new Date(d.dispatch_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                            : "—"
+                          return (
+                            <option key={d.id} value={d.id}>
+                              {d.dispatch_type === "full" ? "Full" : "Partial"} • {dispDate}
+                            </option>
+                          )
+                        })}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Notes (optional)</Label>
+                    <Input
+                      value={invoiceDraftNotes}
+                      onChange={(e) => setInvoiceDraftNotes(e.target.value)}
+                      placeholder="Any additional notes..."
+                      className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center justify-end gap-2">
+                  {orderInvoices.length > 0 && (
                     <Button
                       type="button"
                       variant="outline"
                       disabled={savingInvoice}
+                      onClick={() => {
+                        const last = orderInvoices[orderInvoices.length - 1]
+                        setSelectedInvoiceId(last.id)
+                        setInvoiceDraftId(last.id)
+                        setInvoiceDraftNumber(last.invoice_number ?? "")
+                        setInvoiceDraftDate(String(last.invoice_date || "").split("T")[0] || new Date().toISOString().split("T")[0])
+                        setInvoiceDraftAmount(String(last.invoice_amount ?? ""))
+                        setInvoiceDraftDispatchId(last.dispatch_id ?? "")
+                        setInvoiceDraftNotes(last.notes ?? "")
+                      }}
+                      className="h-9 rounded-lg border-slate-200 px-4 text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    disabled={savingInvoice || !invoiceDraftNumber.trim() || invoiceDraftAmount.trim() === ""}
+                    onClick={async () => {
+                      setError(null)
+                      const amt = Number(invoiceDraftAmount)
+                      if (!Number.isFinite(amt) || amt < 0) {
+                        setError("Enter a valid invoice amount.")
+                        return
+                      }
+                      setSavingInvoice(true)
+                      try {
+                        const res = await createOrUpdateOrderInvoice({
+                          orderId,
+                          invoiceId: undefined,
+                          invoiceNumber: invoiceDraftNumber,
+                          invoiceDate: invoiceDraftDate || undefined,
+                          invoiceAmount: amt,
+                          notes: invoiceDraftNotes || undefined,
+                          dispatchId: invoiceDraftDispatchId || null,
+                        })
+                        if (!res.success) {
+                          setError(res.error || "Failed to save invoice")
+                          return
+                        }
+                        const invRes = await getOrderInvoices(orderId)
+                        if (invRes.success) setOrderInvoices(invRes.data)
+                        const savedId = (res as any).data?.id
+                        if (savedId) setSelectedInvoiceId(savedId)
+                        setSuccess("Invoice saved!")
+                        setTimeout(() => setSuccess(null), 2000)
+                      } finally {
+                        setSavingInvoice(false)
+                      }
+                    }}
+                    className="h-9 rounded-lg bg-orange-500 px-6 text-xs font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
+                  >
+                    {savingInvoice ? "Saving..." : "Save Invoice"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Invoices accordion list ── */}
+            <div className="space-y-3">
+              {/* Section header */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-slate-400" />
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    Invoices{orderInvoices.length > 0 ? ` (${orderInvoices.length})` : ""}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      const res = await getOrderInvoices(orderId)
+                      if (res.success) setOrderInvoices(res.data)
+                      await loadOrderPayments()
+                    }}
+                    disabled={loadingPayments}
+                    className="h-8 w-8 rounded-full p-0 text-slate-400 hover:bg-orange-50 hover:text-orange-500"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${loadingPayments ? "animate-spin" : ""}`} />
+                  </Button>
+                  {(invoiceDraftId !== null || selectedInvoiceId !== null) && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
                       onClick={() => {
                         setSelectedInvoiceId(null)
                         setInvoiceDraftId(null)
@@ -3347,296 +3010,226 @@ export default function OrderDetailsPage() {
                         setInvoiceDraftAmount("")
                         setInvoiceDraftNotes("")
                       }}
-                      className="h-9 rounded-lg border-slate-200 px-4 text-xs text-slate-600 hover:bg-slate-50"
+                      className="h-8 rounded-lg border-slate-200 text-xs text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
                     >
-                      New invoice
+                      <Plus className="mr-1.5 h-3.5 w-3.5" />
+                      New Invoice
                     </Button>
-                    <Button
+                  )}
+                </div>
+              </div>
+
+              {/* Empty state */}
+              {orderInvoices.length === 0 && (invoiceDraftId !== null || selectedInvoiceId !== null) && (
+                <div className="flex min-h-[110px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50">
+                  <FileText className="h-7 w-7 text-slate-200" />
+                  <p className="mt-2 text-[12px] text-slate-400">No invoices yet — create one above</p>
+                </div>
+              )}
+
+              {/* Invoice accordion cards */}
+              {orderInvoices.map((inv: any) => {
+                const isOpen = selectedInvoiceId === inv.id
+                const isInvoiceLocked = !!invoiceDraftId
+                const invPayments = orderPayments.filter((p: any) => p.invoice_id === inv.id)
+                const invAttachments = invoiceAttachments.filter((a: any) => a.invoice_id === inv.id)
+                const invPaid    = Number(inv.total_paid || 0)
+                const invAmount  = Number(inv.invoice_amount || 0)
+                const invDue     = Number(inv.amount_due || 0)
+                const paidPct    = invAmount > 0 ? Math.min(100, (invPaid / invAmount) * 100) : 0
+                const borderCls  = inv.status === "paid"    ? "border-l-green-400"
+                                 : inv.status === "partial" ? "border-l-amber-400"
+                                 : "border-l-slate-300"
+                const badgeCls   = inv.status === "paid"    ? "bg-green-100 text-green-700 border-green-200"
+                                 : inv.status === "partial" ? "bg-amber-100 text-amber-700 border-amber-200"
+                                 : "bg-slate-100 text-slate-600 border-slate-200"
+
+                return (
+                  <div key={inv.id} className={`overflow-hidden rounded-2xl border border-l-4 bg-white shadow-sm ${borderCls}`}>
+
+                    {/* ── Card header — click to expand/collapse ── */}
+                    <button
                       type="button"
-                      disabled={isInvoiceLocked || savingInvoice || !invoiceDraftNumber.trim() || invoiceDraftAmount.trim() === ""}
-                      onClick={async () => {
-                        setError(null)
-                        const amt = Number(invoiceDraftAmount)
-                        if (!Number.isFinite(amt) || amt < 0) {
-                          setError("Enter a valid invoice amount.")
-                          return
-                        }
-                        setSavingInvoice(true)
-                        try {
-                          const res = await createOrUpdateOrderInvoice({
-                            orderId,
-                            invoiceId: invoiceDraftId || undefined,
-                            invoiceNumber: invoiceDraftNumber,
-                            invoiceDate: invoiceDraftDate || undefined,
-                            invoiceAmount: amt,
-                            notes: invoiceDraftNotes || undefined,
-                            dispatchId: invoiceDraftDispatchId || null,
-                          })
-                          if (!res.success) {
-                            setError(res.error || "Failed to save invoice")
-                            return
-                          }
-                          const invRes = await getOrderInvoices(orderId)
-                          if (invRes.success) setOrderInvoices(invRes.data)
-                          const savedId = (res as any).data?.id
-                          if (savedId) setSelectedInvoiceId(savedId)
-                          setSuccess("Invoice saved!")
-                          setTimeout(() => setSuccess(null), 2000)
-                        } finally {
-                          setSavingInvoice(false)
+                      onClick={() => {
+                        if (isOpen) {
+                          setSelectedInvoiceId(null)
+                        } else {
+                          setSelectedInvoiceId(inv.id)
+                          setInvoiceDraftId(inv.id)
+                          setInvoiceDraftNumber(inv.invoice_number ?? "")
+                          setInvoiceDraftDate(String(inv.invoice_date || "").split("T")[0] || new Date().toISOString().split("T")[0])
+                          setInvoiceDraftAmount(String(inv.invoice_amount ?? ""))
+                          setInvoiceDraftDispatchId(inv.dispatch_id ?? "")
+                          setInvoiceDraftNotes(inv.notes ?? "")
+                          void loadInvoiceAttachments()
                         }
                       }}
-                      className="h-9 rounded-lg bg-orange-500 px-5 text-xs font-semibold text-white hover:bg-orange-600"
+                      className="w-full px-5 py-4 text-left transition-colors hover:bg-slate-50/60"
                     >
-                      {isInvoiceLocked ? "Locked" : savingInvoice ? "Saving..." : "Save invoice"}
-                    </Button>
-                  </div>
-
-                  {/* Attachments in Invoice Details only */}
-                  <div className="mt-5 border-t border-slate-100 pt-4">
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-slate-400" />
-                        <h4 className="text-sm font-semibold text-slate-900">Attachments</h4>
-                      </div>
-                      <span className="text-[11px] text-slate-400">PDF, JPG, PNG</span>
-                    </div>
-
-                    <input
-                      id="invoice-attachment-input"
-                      type="file"
-                      accept="application/pdf,image/*"
-                      className="hidden"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0]
-                        if (file) handleInvoiceAttachmentUpload(file)
-                        event.target.value = ""
-                      }}
-                    />
-
-                    {selectedInvoiceAttachments.length === 0 ? (
-                      <div
-                        onClick={() => {
-                          if (!selectedInvoiceId || isInvoiceLocked) return
-                          ;(document.getElementById("invoice-attachment-input") as HTMLInputElement | null)?.click()
-                        }}
-                        className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 py-7 text-center transition-colors ${
-                          selectedInvoiceId && !isInvoiceLocked ? "cursor-pointer hover:border-orange-300 hover:bg-orange-50" : "opacity-60"
-                        }`}
-                      >
-                        <Upload className="h-6 w-6 text-slate-300" />
-                        <p className="text-[12px] font-medium text-slate-500">
-                          {uploadingInvoiceAttachment
-                            ? "Uploading..."
-                            : !selectedInvoiceId
-                              ? "Select an invoice to upload"
-                              : isInvoiceLocked
-                                ? "Attachments are locked after invoice save"
-                                : "Click to upload file"}
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {selectedInvoiceAttachments.map((attachment: any) => (
-                          <div key={attachment.id} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-3">
-                            <div className="rounded-lg bg-white p-2 shadow-sm">
-                              <File className="h-4 w-4 text-slate-400" />
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          {/* Invoice number + type badge */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-slate-900">{inv.invoice_number}</p>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                              {inv.dispatch_id ? "Dispatch" : "Manual"}
+                            </span>
+                            {inv.invoice_date && (
+                              <span className="text-[11px] text-slate-400">
+                                {new Date(inv.invoice_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                              </span>
+                            )}
+                          </div>
+                          {/* Amount stats */}
+                          <div className="mt-2.5 grid grid-cols-3 gap-3">
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Amount</p>
+                              <p className="text-xs font-semibold text-slate-800">₹{invAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
                             </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium text-slate-800">{attachment.file_name}</p>
-                              <p className="text-[11px] text-slate-400">
-                                {attachment.file_size ? `${(attachment.file_size / 1024).toFixed(1)} KB` : ""}
-                                {attachment.created_at ? ` • ${new Date(attachment.created_at).toLocaleDateString()}` : ""}
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Paid</p>
+                              <p className="text-xs font-semibold text-green-600">₹{invPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Due</p>
+                              <p className={`text-xs font-semibold ${invDue > 0 ? "text-red-600" : "text-slate-800"}`}>
+                                ₹{invDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                               </p>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => window.open(attachment.file_url, "_blank")}
-                                className="h-8 rounded-lg border-slate-200 px-2.5 text-xs text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
-                              >
-                                <Download className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                disabled={isInvoiceLocked}
-                                onClick={async () => {
-                                  if (confirm("Delete this attachment?")) {
-                                    const result = await deleteInvoiceAttachment(attachment.id)
-                                    if (result.success) {
-                                      await loadInvoiceAttachments()
-                                      setSuccess("Attachment deleted!")
-                                      setTimeout(() => setSuccess(null), 2000)
-                                    } else {
-                                      setError(result.error || "Failed to delete attachment")
-                                    }
-                                  }
-                                }}
-                                className="h-8 w-8 rounded-full p-0 text-red-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                          </div>
+                          {/* Progress bar */}
+                          <div className="mt-2.5">
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  inv.status === "paid" ? "bg-green-400" : "bg-amber-400"
+                                }`}
+                                style={{ width: `${paidPct}%` }}
+                              />
                             </div>
                           </div>
-                        ))}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={uploadingInvoiceAttachment || !selectedInvoiceId || isInvoiceLocked}
-                          onClick={() => (document.getElementById("invoice-attachment-input") as HTMLInputElement | null)?.click()}
-                          className="mt-1 h-8 w-full rounded-lg border-dashed border-slate-200 text-xs text-slate-500 hover:border-orange-300 hover:text-orange-600 disabled:opacity-50"
-                        >
-                          <Plus className="mr-1.5 h-3.5 w-3.5" />
-                          {uploadingInvoiceAttachment ? "Uploading..." : "Add attachment"}
-                        </Button>
+                        </div>
+                        {/* Status + chevron */}
+                        <div className="flex shrink-0 flex-col items-end gap-2">
+                          <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${badgeCls}`}>
+                            {inv.status === "paid" ? "Paid" : inv.status === "partial" ? "Partial" : "Pending"}
+                          </span>
+                          <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                        </div>
                       </div>
-                    )}
-                  </div>
-                      </>
-                    )
-                  })()}
-                </div>
+                    </button>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Receipt className="h-4 w-4 text-slate-400" />
-                      <h3 className="text-sm font-semibold text-slate-900">Payments (selected invoice)</h3>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={loadOrderPayments}
-                      disabled={loadingPayments}
-                      className="h-8 w-8 rounded-full p-0 text-slate-400 hover:bg-orange-50 hover:text-orange-500"
-                    >
-                      <RefreshCw className={`h-4 w-4 ${loadingPayments ? "animate-spin" : ""}`} />
-                    </Button>
-                  </div>
+                    {/* ── Expanded section ── */}
+                    {isOpen && (
+                      <div className="border-t border-slate-100 bg-slate-50/40">
 
-                  {(() => {
-                    const inv = selectedInvoiceId ? orderInvoices.find((i: any) => i.id === selectedInvoiceId) : null
-                    const due = inv ? Number(inv.amount_due || 0) : 0
-                    const paid = inv ? Number(inv.total_paid || 0) : 0
-                    const amount = inv ? Number(inv.invoice_amount || 0) : 0
-                    const payments = selectedInvoiceId ? orderPayments.filter((p: any) => p.invoice_id === selectedInvoiceId) : []
+                        {/* Attachment upload input (hidden) */}
+                        <input
+                          id="invoice-attachment-input"
+                          type="file"
+                          accept="application/pdf,image/*"
+                          className="hidden"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            if (file) handleInvoiceAttachmentUpload(file)
+                            event.target.value = ""
+                          }}
+                        />
 
-                    return (
-                      <>
-                        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                            <span>
-                              Invoice: <span className="font-semibold text-slate-800">{inv?.invoice_number || "—"}</span>
-                            </span>
-                            <span className="text-slate-300">|</span>
-                            <span>
-                              Amount:{" "}
-                              <span className="font-semibold text-slate-800">₹{amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-                            </span>
-                            <span className="text-slate-300">|</span>
-                            <span>
-                              Paid:{" "}
-                              <span className="font-semibold text-green-600">₹{paid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-                            </span>
-                            <span className="text-slate-300">|</span>
-                            <span>
-                              Due:{" "}
-                              <span className={`font-semibold ${due > 0 ? "text-red-600" : "text-slate-800"}`}>
-                                ₹{due.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                              </span>
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                            <div>
-                              <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Amount (₹)</Label>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={paymentAmount}
-                                onChange={(e) => setPaymentAmount(e.target.value)}
-                                className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                                disabled={!canRecordPayment || !selectedInvoiceId || addingPayment}
-                              />
-                            </div>
-                            <div>
-                              <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Date</Label>
-                              <Input
-                                type="date"
-                                value={paymentDate || new Date().toISOString().split("T")[0]}
-                                onChange={(e) => setPaymentDate(e.target.value)}
-                                className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                                disabled={!canRecordPayment || !selectedInvoiceId || addingPayment}
-                              />
-                            </div>
-                            <div>
-                              <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Method</Label>
-                              <Select value={paymentMethod || "cash"} onValueChange={setPaymentMethod} disabled={!canRecordPayment || !selectedInvoiceId || addingPayment}>
-                                <SelectTrigger className="h-10 rounded-lg border-slate-200 focus:ring-[3px] focus:ring-orange-500/15 focus:ring-offset-0">
-                                  <SelectValue placeholder="Select method" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="cash">Cash</SelectItem>
-                                  <SelectItem value="upi">UPI</SelectItem>
-                                  <SelectItem value="neft">NEFT</SelectItem>
-                                  <SelectItem value="cheque">Cheque</SelectItem>
-                                  <SelectItem value="rtgs">RTGS</SelectItem>
-                                  <SelectItem value="card">Card</SelectItem>
-                                  <SelectItem value="other">Other</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
+                        {/* ── Record Payment ── */}
+                        <div className="p-5">
+                          <div className="mb-3 flex items-center gap-2">
+                            <Receipt className="h-4 w-4 text-slate-400" />
+                            <h4 className="text-sm font-semibold text-slate-800">Record a Payment</h4>
                           </div>
 
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <div>
-                              <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Reference / UTR</Label>
-                              <Input
-                                value={paymentReference}
-                                onChange={(e) => setPaymentReference(e.target.value)}
-                                className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                                disabled={!canRecordPayment || !selectedInvoiceId || addingPayment}
-                              />
-                            </div>
-                            <div>
-                              <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Notes</Label>
-                              <Input
-                                value={paymentNotes}
-                                onChange={(e) => setPaymentNotes(e.target.value)}
-                                className="h-10 rounded-lg border-slate-200 focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                                disabled={!canRecordPayment || !selectedInvoiceId || addingPayment}
-                              />
-                            </div>
-                          </div>
-
-                          <Button
-                            type="button"
-                            onClick={handleAddPaymentRecord}
-                            disabled={!canRecordPayment || !selectedInvoiceId || addingPayment || !paymentAmount}
-                            className="h-10 w-full rounded-lg bg-orange-500 text-[13px] font-medium text-white hover:bg-orange-600 disabled:opacity-50"
-                          >
-                            {addingPayment ? "Saving..." : "Save payment"}
-                          </Button>
-                        </div>
-
-                        <div className="mt-5">
-                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Payment history</p>
-                          {payments.length === 0 ? (
-                            <div className="flex min-h-[90px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50">
-                              <Receipt className="h-7 w-7 text-slate-200" />
-                              <p className="mt-2 text-[12px] text-slate-400">No payments for this invoice</p>
+                          {!canRecordPayment ? (
+                            <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                              <p className="text-xs text-slate-500">Create a dispatch first to enable payment recording.</p>
                             </div>
                           ) : (
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-3 gap-3">
+                                <div>
+                                  <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Amount (₹)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={paymentAmount}
+                                    onChange={(e) => setPaymentAmount(e.target.value)}
+                                    className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                                    disabled={addingPayment}
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Date</Label>
+                                  <Input
+                                    type="date"
+                                    value={paymentDate || new Date().toISOString().split("T")[0]}
+                                    onChange={(e) => setPaymentDate(e.target.value)}
+                                    className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                                    disabled={addingPayment}
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Method</Label>
+                                  <Select value={paymentMethod || "cash"} onValueChange={setPaymentMethod} disabled={addingPayment}>
+                                    <SelectTrigger className="h-10 rounded-lg border-slate-200 bg-white focus:ring-[3px] focus:ring-orange-500/15 focus:ring-offset-0">
+                                      <SelectValue placeholder="Method" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="cash">Cash</SelectItem>
+                                      <SelectItem value="upi">UPI</SelectItem>
+                                      <SelectItem value="neft">NEFT</SelectItem>
+                                      <SelectItem value="cheque">Cheque</SelectItem>
+                                      <SelectItem value="rtgs">RTGS</SelectItem>
+                                      <SelectItem value="card">Card</SelectItem>
+                                      <SelectItem value="other">Other</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Reference / UTR</Label>
+                                  <Input
+                                    value={paymentReference}
+                                    onChange={(e) => setPaymentReference(e.target.value)}
+                                    className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                                    disabled={addingPayment}
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Notes</Label>
+                                  <Input
+                                    value={paymentNotes}
+                                    onChange={(e) => setPaymentNotes(e.target.value)}
+                                    className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
+                                    disabled={addingPayment}
+                                  />
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                onClick={handleAddPaymentRecord}
+                                disabled={addingPayment || !paymentAmount}
+                                className="h-10 w-full rounded-lg bg-orange-500 text-[13px] font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+                              >
+                                {addingPayment ? "Saving..." : "Save Payment"}
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ── Payment History ── */}
+                        {invPayments.length > 0 && (
+                          <div className="border-t border-slate-100 px-5 pb-5 pt-4">
+                            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Payment History</p>
                             <div className="space-y-1">
-                              {payments.map((p: any, idx: number) => (
-                                <div key={p.id} className="group flex items-start gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-slate-50">
+                              {invPayments.map((p: any, idx: number) => (
+                                <div key={p.id} className="group flex items-start gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-white">
                                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-green-100 text-[10px] font-bold text-green-700">
                                     {idx + 1}
                                   </div>
@@ -3655,7 +3248,7 @@ export default function OrderDetailsPage() {
                                       {p.payment_date
                                         ? new Date(p.payment_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
                                         : "—"}
-                                      {p.reference && <span> • Ref: {p.reference}</span>}
+                                      {p.reference && <span> · Ref: {p.reference}</span>}
                                     </div>
                                     {p.notes && <p className="mt-0.5 text-[11px] text-slate-500">{p.notes}</p>}
                                   </div>
@@ -3683,31 +3276,121 @@ export default function OrderDetailsPage() {
                                 </div>
                               ))}
                             </div>
+                          </div>
+                        )}
+
+                        {/* ── Attachments ── */}
+                        <div className="border-t border-slate-100 px-5 pb-5 pt-4">
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Attachments</p>
+                            <span className="text-[10px] text-slate-400">PDF, JPG, PNG</span>
+                          </div>
+
+                          {invAttachments.length === 0 ? (
+                            <div
+                              onClick={() => {
+                                if (isInvoiceLocked) return
+                                ;(document.getElementById("invoice-attachment-input") as HTMLInputElement | null)?.click()
+                              }}
+                              className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 py-6 text-center transition-colors ${
+                                !isInvoiceLocked ? "cursor-pointer hover:border-orange-300 hover:bg-orange-50" : "opacity-50"
+                              }`}
+                            >
+                              <Upload className="h-5 w-5 text-slate-300" />
+                              <p className="text-[12px] font-medium text-slate-500">
+                                {uploadingInvoiceAttachment
+                                  ? "Uploading..."
+                                  : isInvoiceLocked
+                                    ? "Attachments locked after save"
+                                    : "Click to upload a file"}
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {invAttachments.map((attachment: any) => (
+                                <div key={attachment.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3">
+                                  <div className="rounded-lg bg-slate-50 p-2">
+                                    <File className="h-4 w-4 text-slate-400" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-medium text-slate-800">{attachment.file_name}</p>
+                                    <p className="text-[11px] text-slate-400">
+                                      {attachment.file_size ? `${(attachment.file_size / 1024).toFixed(1)} KB` : ""}
+                                      {attachment.created_at ? ` · ${new Date(attachment.created_at).toLocaleDateString()}` : ""}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => window.open(attachment.file_url, "_blank")}
+                                      className="h-8 rounded-lg border-slate-200 px-2.5 text-xs text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
+                                    >
+                                      <Download className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={isInvoiceLocked}
+                                      onClick={async () => {
+                                        if (confirm("Delete this attachment?")) {
+                                          const result = await deleteInvoiceAttachment(attachment.id)
+                                          if (result.success) {
+                                            await loadInvoiceAttachments()
+                                            setSuccess("Attachment deleted!")
+                                            setTimeout(() => setSuccess(null), 2000)
+                                          } else {
+                                            setError(result.error || "Failed to delete attachment")
+                                          }
+                                        }
+                                      }}
+                                      className="h-8 w-8 rounded-full p-0 text-red-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                              {!isInvoiceLocked && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={uploadingInvoiceAttachment}
+                                  onClick={() => (document.getElementById("invoice-attachment-input") as HTMLInputElement | null)?.click()}
+                                  className="mt-1 h-8 w-full rounded-lg border-dashed border-slate-200 text-xs text-slate-500 hover:border-orange-300 hover:text-orange-600 disabled:opacity-50"
+                                >
+                                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                                  {uploadingInvoiceAttachment ? "Uploading..." : "Add attachment"}
+                                </Button>
+                              )}
+                            </div>
                           )}
                         </div>
-                      </>
-                    )
-                  })()}
-                </div>
-
-                {/* Billing details (Zoho) */}
-                <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-slate-900">Billing details (Zoho)</h3>
-                    <Button type="button" onClick={handleSaveZohoBilling} className="h-8 rounded-lg bg-slate-900 px-3 text-xs text-white hover:bg-slate-800">
-                      Save
-                    </Button>
+                      </div>
+                    )}
                   </div>
-                  <textarea
-                    value={zohoBillingDetails}
-                    onChange={(e) => setZohoBillingDetails(e.target.value)}
-                    rows={5}
-                    placeholder="Paste Zoho JSON or notes"
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-700 focus:border-orange-500 focus:outline-none focus:ring-[3px] focus:ring-orange-500/15"
-                  />
-                </div>
-              </div>
+                )
+              })}
             </div>
+
+            {/* ── Zoho Billing ── */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-slate-900">Billing Details (Zoho)</h3>
+                <Button type="button" onClick={handleSaveZohoBilling} className="h-8 rounded-lg bg-slate-900 px-3 text-xs text-white hover:bg-slate-800">
+                  Save
+                </Button>
+              </div>
+              <textarea
+                value={zohoBillingDetails}
+                onChange={(e) => setZohoBillingDetails(e.target.value)}
+                rows={5}
+                placeholder="Paste Zoho JSON or notes"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-700 focus:border-orange-500 focus:outline-none focus:ring-[3px] focus:ring-orange-500/15"
+              />
+            </div>
+
           </div>
         </TabsContent>
 

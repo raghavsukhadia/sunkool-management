@@ -183,7 +183,7 @@ export function ShipmentDetailDrawer({ shipment, open, onClose, onUpdated }: Pro
     setNotes([])
     setNewNote("")
     setSaveMsg(null)
-  }, [shipment?.dispatch_id])
+  }, [shipment])
 
   // Load notes when drawer opens
   const loadNotes = useCallback(async () => {
@@ -192,11 +192,11 @@ export function ShipmentDetailDrawer({ shipment, open, onClose, onUpdated }: Pro
     const res = await getShipmentNotes(shipment.dispatch_id)
     if (res.success && res.data) setNotes(res.data)
     setNotesLoading(false)
-  }, [shipment?.dispatch_id])
+  }, [shipment])
 
   useEffect(() => {
     if (open && shipment) loadNotes()
-  }, [open, shipment?.dispatch_id])
+  }, [open, shipment, loadNotes])
 
   const handleSave = async () => {
     if (!shipment) return

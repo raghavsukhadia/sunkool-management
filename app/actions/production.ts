@@ -160,6 +160,7 @@ export async function getProductionQueue(options?: {
   ])
 
   if (productionRecordsResult.error) return { success: false, error: productionRecordsResult.error.message }
+  if (newOrdersResult.error) return { success: false, error: newOrdersResult.error.message }
 
   const allProductionRecords = productionRecordsResult.data || []
   const orderIds = Array.from(new Set(allProductionRecords.map((r) => r.order_id).filter(Boolean)))
@@ -260,9 +261,38 @@ export async function getProductionQueue(options?: {
       : Promise.resolve({ data: [] }),
   ])
 
-  const nameById: Record<string, string> = {}
+  // Build a preliminary map so we can resolve parent names for sub-items.
+  const invMap = new Map<string, { item_name: string; parent_item_id: string | null }>()
   for (const inv of inventoryItems || []) {
-    nameById[inv.id] = inv.item_name || "Item"
+    invMap.set(inv.id, { item_name: inv.item_name ?? "", parent_item_id: inv.parent_item_id ?? null })
+  }
+
+  // Fetch parent items that aren't already in invMap (sub-items reference them by ID).
+  const missingParentIds = [
+    ...new Set(
+      [...invMap.values()]
+        .map((v) => v.parent_item_id)
+        .filter((pid): pid is string => !!pid && !invMap.has(pid))
+    ),
+  ]
+  if (missingParentIds.length > 0) {
+    const { data: parents } = await supabase
+      .from("inventory_items")
+      .select("id, item_name, parent_item_id")
+      .in("id", missingParentIds)
+    for (const p of parents || []) {
+      invMap.set(p.id, { item_name: p.item_name ?? "", parent_item_id: null })
+    }
+  }
+
+  const nameById: Record<string, string> = {}
+  for (const [id, inv] of invMap) {
+    if (inv.parent_item_id) {
+      const parent = invMap.get(inv.parent_item_id)
+      nameById[id] = parent ? `${parent.item_name} → ${inv.item_name}` : inv.item_name || "Item"
+    } else {
+      nameById[id] = inv.item_name || "Item"
+    }
   }
   for (const p of products || []) {
     nameById[p.id] = (p as { name?: string }).name || "Product"

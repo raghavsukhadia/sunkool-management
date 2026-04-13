@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import Image from "next/image"
 import { createClient } from "@/lib/supabase/client"
 import {
@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  Layers,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MobileBottomNav } from "@/components/dashboard/MobileBottomNav"
@@ -41,6 +42,7 @@ const NAV = [
       { href: "/dashboard/follow-up",  label: "Follow Up",  icon: DollarSign   },
       { href: "/dashboard/tracking",   label: "Tracking",   icon: Truck        },
       { href: "/dashboard/customers",  label: "Customers",  icon: Users        },
+      { href: "/dashboard/items",      label: "Items",      icon: Layers       },
     ],
   },
   {
@@ -61,6 +63,7 @@ function resolveTitle(pathname: string) {
   if (pathname.startsWith("/dashboard/follow-up"))     return "Follow Up"
   if (pathname.startsWith("/dashboard/notifications")) return "Notifications"
   if (pathname.startsWith("/dashboard/management"))    return "Management"
+  if (pathname.startsWith("/dashboard/items"))         return "Items"
   return "Order Management"
 }
 
@@ -98,7 +101,7 @@ function NavItem({
       )} />
 
       <span className={cn(
-        "overflow-hidden whitespace-nowrap text-[13px] font-medium leading-none transition-all duration-[280ms]",
+        "overflow-hidden whitespace-nowrap text-[13px] font-medium leading-none transition-all duration-300",
         collapsed ? "w-0 opacity-0" : "w-auto opacity-100",
       )}>
         {label}
@@ -188,7 +191,8 @@ function UserFooter({
 export default function DashboardSidebar({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router   = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
+  const auth = supabase.auth
 
   const [collapsed, setCollapsed] = useState(false)
   const [mounted,   setMounted]   = useState(false)
@@ -203,10 +207,10 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
     if (stored === "1") setCollapsed(true)
     setMounted(true)
 
-    supabase.auth.getUser().then(({ data }) => {
+    auth.getUser().then(({ data }) => {
       if (data?.user?.email) setUserEmail(data.user.email)
     })
-  }, [])
+  }, [auth])
 
   // ── Manual toggle ──────────────────────────────────────────────────────────
   const toggleCollapsed = () => {
@@ -218,7 +222,7 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
   }
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    await auth.signOut()
     router.push("/login")
     router.refresh()
   }
@@ -275,7 +279,7 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
               {/* Full logo */}
               <div
                 className={cn(
-                  "flex items-center justify-center transition-all duration-[280ms]",
+                  "flex items-center justify-center transition-all duration-300",
                   collapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100",
                 )}
                 style={{ width: collapsed ? 0 : 152 }}
@@ -293,7 +297,7 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
               {/* Icon logo */}
               <div
                 className={cn(
-                  "flex items-center justify-center transition-all duration-[280ms]",
+                  "flex items-center justify-center transition-all duration-300",
                   collapsed ? "opacity-100" : "w-0 overflow-hidden opacity-0",
                 )}
                 style={{ width: collapsed ? 34 : 0 }}
@@ -325,7 +329,7 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
           {/* ── Tagline below logo ────────────────────────────────────────── */}
           <div
             className={cn(
-              "overflow-hidden text-center transition-all duration-[280ms]",
+              "overflow-hidden text-center transition-all duration-300",
               collapsed ? "max-h-0 opacity-0 py-0" : "max-h-8 opacity-100 py-1.5",
             )}
           >

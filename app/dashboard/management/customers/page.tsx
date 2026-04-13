@@ -5,28 +5,29 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
 import { createCustomer, getCustomers, deleteCustomer, updateCustomer } from "@/app/actions/management"
 import { useRouter } from "next/navigation"
-import { Users, Plus, ArrowLeft, Search, ArrowUp, ArrowDown, ArrowUpDown, Trash2, Edit2, X, Filter } from "lucide-react"
+import {
+  Users, Plus, ArrowLeft, Search, ArrowUp, ArrowDown, ArrowUpDown,
+  Trash2, Edit2, X, Phone, Mail, MapPin, User, Building2, FileText,
+  CheckCircle2, AlertCircle,
+} from "lucide-react"
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@/components/ui/sheet"
 
 interface Customer {
@@ -51,6 +52,200 @@ const customerSchema = z.object({
 
 type CustomerFormValues = z.infer<typeof customerSchema>
 
+function getInitials(name: string) {
+  return name
+    .split(" ")
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase()
+}
+
+const AVATAR_COLORS = [
+  "bg-blue-100 text-blue-700",
+  "bg-violet-100 text-violet-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-amber-100 text-amber-700",
+  "bg-rose-100 text-rose-700",
+  "bg-cyan-100 text-cyan-700",
+]
+
+function avatarColor(name: string) {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
+}
+
+// ─── Customer Form ────────────────────────────────────────────────────────────
+
+function CustomerForm({
+  form,
+  onSubmit,
+  isSubmitting,
+  editingCustomer,
+  onCancel,
+  isMobile = false,
+}: {
+  form: ReturnType<typeof useForm<CustomerFormValues>>
+  onSubmit: (data: CustomerFormValues) => void
+  isSubmitting: boolean
+  editingCustomer: Customer | null
+  onCancel: () => void
+  isMobile?: boolean
+}) {
+  const inputCls = isMobile ? "min-h-[44px]" : ""
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+
+        {/* Section: Business Info */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 pb-1 border-b border-gray-100">
+            <Building2 className="w-4 h-4 text-blue-500" />
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Business Info</span>
+          </div>
+          <FormField
+            control={form.control}
+            name="name"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-sm font-medium text-gray-700">
+                  Customer / Company Name <span className="text-red-500">*</span>
+                </FormLabel>
+                <FormControl>
+                  <Input
+                    placeholder="e.g. Acme Corporation"
+                    className={inputCls}
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="contact_person"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-sm font-medium text-gray-700">Contact Person</FormLabel>
+                <FormControl>
+                  <Input placeholder="e.g. John Smith" className={inputCls} {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        {/* Section: Contact Details */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 pb-1 border-b border-gray-100">
+            <Phone className="w-4 h-4 text-blue-500" />
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Contact Details</span>
+          </div>
+          <div className={`grid gap-4 ${isMobile ? "grid-cols-1" : "grid-cols-2"}`}>
+            <FormField
+              control={form.control}
+              name="phone"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-sm font-medium text-gray-700">Phone</FormLabel>
+                  <FormControl>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <Input placeholder="+91 98765 43210" className={`pl-9 ${inputCls}`} {...field} />
+                    </div>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="email"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-sm font-medium text-gray-700">Email</FormLabel>
+                  <FormControl>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <Input type="email" placeholder="email@company.com" className={`pl-9 ${inputCls}`} {...field} />
+                    </div>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+          <FormField
+            control={form.control}
+            name="address"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-sm font-medium text-gray-700">Address</FormLabel>
+                <FormControl>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input placeholder="Street, City, State, PIN" className={`pl-9 ${inputCls}`} {...field} />
+                  </div>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        {/* Section: Notes */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 pb-1 border-b border-gray-100">
+            <FileText className="w-4 h-4 text-blue-500" />
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Notes</span>
+          </div>
+          <FormField
+            control={form.control}
+            name="notes"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-sm font-medium text-gray-700">Additional Notes</FormLabel>
+                <FormControl>
+                  <textarea
+                    placeholder="Payment terms, special requirements, preferences…"
+                    rows={3}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-3 pt-2 border-t border-gray-100">
+          <Button type="submit" disabled={isSubmitting} className={`flex-1 gap-2 ${isMobile ? "min-h-[44px]" : ""}`}>
+            {isSubmitting
+              ? (editingCustomer ? "Saving…" : "Creating…")
+              : (editingCustomer ? "Save Changes" : "Create Customer")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className={`gap-2 ${isMobile ? "min-h-[44px]" : ""}`}
+            onClick={onCancel}
+          >
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </Form>
+  )
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
 export default function CustomersPage() {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -59,40 +254,26 @@ export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
-  const [showSearchPanel, setShowSearchPanel] = useState(true)
-  const [searchSheetOpen, setSearchSheetOpen] = useState(false)
-  const [addFormSheetOpen, setAddFormSheetOpen] = useState(false)
-  const [showAddForm, setShowAddForm] = useState(false)
+  const [mobileSheetMode, setMobileSheetMode] = useState<"form" | "search" | null>(null)
+  const [showDesktopForm, setShowDesktopForm] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [sortBy, setSortBy] = useState<"name" | "created_at">("name")
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
 
   const form = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
-    defaultValues: {
-      name: "",
-      email: "",
-      phone: "",
-      address: "",
-      contact_person: "",
-      notes: "",
-    },
+    defaultValues: { name: "", email: "", phone: "", address: "", contact_person: "", notes: "" },
   })
 
-  useEffect(() => {
-    loadCustomers()
-  }, [])
+  useEffect(() => { loadCustomers() }, [])
 
   const loadCustomers = async () => {
     setLoading(true)
     setError(null)
     try {
       const result = await getCustomers()
-      if (result.success && result.data) {
-        setCustomers(result.data as Customer[])
-      } else {
-        setError(result.error || "Failed to load customers")
-      }
+      if (result.success && result.data) setCustomers(result.data as Customer[])
+      else setError(result.error || "Failed to load customers")
     } catch (err: any) {
       setError(err.message || "An error occurred")
     } finally {
@@ -100,15 +281,50 @@ export default function CustomersPage() {
     }
   }
 
+  const openAddForm = () => {
+    setEditingCustomer(null)
+    form.reset()
+    setError(null)
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setMobileSheetMode("form")
+    } else {
+      setShowDesktopForm(true)
+    }
+  }
+
+  const openEditForm = (customer: Customer) => {
+    setEditingCustomer(customer)
+    form.reset({
+      name: customer.name,
+      email: customer.email || "",
+      phone: customer.phone || "",
+      address: customer.address || "",
+      contact_person: customer.contact_person || "",
+      notes: customer.notes || "",
+    })
+    setError(null)
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setMobileSheetMode("form")
+    } else {
+      setShowDesktopForm(true)
+    }
+  }
+
+  const closeForm = () => {
+    setShowDesktopForm(false)
+    setMobileSheetMode(null)
+    setEditingCustomer(null)
+    form.reset()
+    setError(null)
+  }
+
   async function onSubmit(data: CustomerFormValues) {
     setIsSubmitting(true)
     setError(null)
     setSuccess(null)
-
     try {
       let result
       if (editingCustomer) {
-        // Update existing customer
         result = await updateCustomer(editingCustomer.id, {
           name: data.name,
           email: data.email || undefined,
@@ -118,7 +334,6 @@ export default function CustomersPage() {
           notes: data.notes || undefined,
         })
       } else {
-        // Create new customer
         result = await createCustomer({
           name: data.name,
           email: data.email || undefined,
@@ -128,17 +343,11 @@ export default function CustomersPage() {
           notes: data.notes || undefined,
         })
       }
-
       if (result.success) {
         setSuccess(editingCustomer ? "Customer updated successfully!" : "Customer created successfully!")
-        form.reset()
-        setShowAddForm(false)
-        setEditingCustomer(null)
-        setAddFormSheetOpen(false)
+        closeForm()
         await loadCustomers()
-        setTimeout(() => {
-          setSuccess(null)
-        }, 3000)
+        setTimeout(() => setSuccess(null), 4000)
       } else {
         setError(result.error || (editingCustomer ? "Failed to update customer" : "Failed to create customer"))
       }
@@ -149,30 +358,12 @@ export default function CustomersPage() {
     }
   }
 
-  const handleEdit = (customer: Customer) => {
-    setEditingCustomer(customer)
-    form.reset({
-      name: customer.name,
-      email: customer.email || "",
-      phone: customer.phone || "",
-      address: customer.address || "",
-      contact_person: customer.contact_person || "",
-      notes: customer.notes || "",
-    })
-    setShowAddForm(true)
-    setError(null)
-    if (typeof window !== "undefined" && window.innerWidth < 1024) setAddFormSheetOpen(true)
-  }
-
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this customer?")) {
-      return
-    }
-
+    if (!confirm("Delete this customer? This cannot be undone.")) return
     try {
       const result = await deleteCustomer(id)
       if (result.success) {
-        setSuccess("Customer deleted successfully!")
+        setSuccess("Customer deleted.")
         await loadCustomers()
         setTimeout(() => setSuccess(null), 3000)
       } else {
@@ -183,702 +374,397 @@ export default function CustomersPage() {
     }
   }
 
-  // Filter and sort customers
-  const filteredAndSortedCustomers = (() => {
-    let filtered = customers
+  const toggleSort = (field: "name" | "created_at") => {
+    if (sortBy === field) setSortDir(d => d === "asc" ? "desc" : "asc")
+    else { setSortBy(field); setSortDir("asc") }
+  }
 
-    // Search
+  const filteredCustomers = (() => {
+    let list = [...customers]
     if (searchTerm) {
-      const term = searchTerm.toLowerCase()
-      filtered = customers.filter(customer =>
-        customer.name.toLowerCase().includes(term) ||
-        (customer.email && customer.email.toLowerCase().includes(term)) ||
-        (customer.phone && customer.phone.toLowerCase().includes(term)) ||
-        (customer.contact_person && customer.contact_person.toLowerCase().includes(term)) ||
-        (customer.address && customer.address.toLowerCase().includes(term))
+      const t = searchTerm.toLowerCase()
+      list = list.filter(c =>
+        c.name.toLowerCase().includes(t) ||
+        (c.email && c.email.toLowerCase().includes(t)) ||
+        (c.phone && c.phone.toLowerCase().includes(t)) ||
+        (c.contact_person && c.contact_person.toLowerCase().includes(t)) ||
+        (c.address && c.address.toLowerCase().includes(t))
       )
     }
-
-    // Sort
-    filtered.sort((a, b) => {
-      let aVal: any
-      let bVal: any
-
-      switch (sortBy) {
-        case "name":
-          aVal = a.name.toLowerCase()
-          bVal = b.name.toLowerCase()
-          break
-        case "created_at":
-          aVal = new Date(a.created_at).getTime()
-          bVal = new Date(b.created_at).getTime()
-          break
-        default:
-          return 0
-      }
-
-      if (aVal < bVal) return sortDirection === "asc" ? -1 : 1
-      if (aVal > bVal) return sortDirection === "asc" ? 1 : -1
+    list.sort((a, b) => {
+      const av = sortBy === "name" ? a.name.toLowerCase() : new Date(a.created_at).getTime()
+      const bv = sortBy === "name" ? b.name.toLowerCase() : new Date(b.created_at).getTime()
+      if (av < bv) return sortDir === "asc" ? -1 : 1
+      if (av > bv) return sortDir === "asc" ? 1 : -1
       return 0
     })
-
-    return filtered
+    return list
   })()
 
+  const SortIcon = ({ field }: { field: "name" | "created_at" }) => {
+    if (sortBy !== field) return <ArrowUpDown className="w-3.5 h-3.5 text-gray-400" />
+    return sortDir === "asc"
+      ? <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+      : <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+  }
+
   return (
-    <div className="space-y-4 lg:space-y-6 pb-8">
-      {/* Header Section - compact on mobile */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 mb-1 lg:mb-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 min-h-[44px] lg:min-h-0"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back
-            </Button>
-          </div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 tracking-tight">Customer</h1>
-          <p className="text-gray-600 mt-1.5 text-sm">Manage customer information and contacts</p>
-        </div>
-        <div className="flex gap-2">
+    <div className="space-y-5 pb-10 max-w-5xl mx-auto">
+
+      {/* ── Page Header ─────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
           <Button
-            onClick={() => {
-              setShowAddForm(true)
-              setEditingCustomer(null)
-              form.reset()
-              setError(null)
-            }}
-            className="hidden lg:inline-flex items-center gap-2 shadow-sm"
+            variant="ghost"
+            size="sm"
+            onClick={() => router.back()}
+            className="text-gray-500 hover:text-gray-800 min-h-[40px] px-2"
           >
-            <Plus className="w-4 h-4" />
-            Add Customer
+            <ArrowLeft className="w-4 h-4 mr-1" />
+            Back
           </Button>
-          <Sheet open={addFormSheetOpen} onOpenChange={(o) => { setAddFormSheetOpen(o); if (!o) { setShowAddForm(false); setEditingCustomer(null); form.reset() } }}>
-            <SheetTrigger asChild className="lg:hidden">
-              <Button
-                onClick={() => {
-                  setShowAddForm(true)
-                  setEditingCustomer(null)
-                  form.reset()
-                  setError(null)
-                  setAddFormSheetOpen(true)
-                }}
-                className="flex items-center gap-2 shadow-sm min-h-[44px]"
-              >
-                <Plus className="w-4 h-4" />
-                Add Customer
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="bottom" className="h-[85vh] rounded-t-2xl overflow-y-auto">
-              <SheetHeader>
-                <SheetTitle>{editingCustomer ? "Edit Customer" : "Add Customer"}</SheetTitle>
-                <SheetDescription>{editingCustomer ? "Update customer information" : "Enter customer information"}</SheetDescription>
-              </SheetHeader>
-              <div className="mt-4">
-                <Form {...form}>
-                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                    <FormField
-                      control={form.control}
-                      name="name"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Customer Name *</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Customer name" className="min-h-[44px]" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="contact_person"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Contact Person</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Contact person" className="min-h-[44px]" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="email"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Email</FormLabel>
-                          <FormControl>
-                            <Input type="email" placeholder="email@example.com" className="min-h-[44px]" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="phone"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Phone</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Phone" className="min-h-[44px]" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="address"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Address</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Address" className="min-h-[44px]" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="notes"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Notes</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Notes (optional)" className="min-h-[44px]" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <div className="flex gap-2 pt-2">
-                      <Button type="submit" disabled={isSubmitting} className="flex-1 min-h-[44px]">
-                        {isSubmitting ? (editingCustomer ? "Updating..." : "Creating...") : (editingCustomer ? "Update" : "Create")}
-                      </Button>
-                      <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => { setAddFormSheetOpen(false); setEditingCustomer(null); form.reset() }}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </form>
-                </Form>
-              </div>
-            </SheetContent>
-          </Sheet>
+          <div className="h-5 w-px bg-gray-200" />
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-600 rounded-lg shadow-sm">
+              <Users className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-gray-900 leading-tight">Customers</h1>
+              <p className="text-xs text-gray-500">Manage contacts & customer info</p>
+            </div>
+          </div>
+          {!loading && (
+            <Badge variant="secondary" className="ml-1 hidden sm:inline-flex">
+              {customers.length} total
+            </Badge>
+          )}
         </div>
+        <Button onClick={openAddForm} className="gap-2 shadow-sm min-h-[40px]">
+          <Plus className="w-4 h-4" />
+          New Customer
+        </Button>
       </div>
 
-      {/* Messages */}
+      {/* ── Alerts ──────────────────────────────────────────────────────── */}
       {error && (
-        <div className="p-4 text-sm text-red-700 bg-red-50 border-l-4 border-red-500 rounded-r-md flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
-            <span className="font-medium">{error}</span>
-          </div>
-          <button onClick={() => setError(null)} className="text-red-600 hover:text-red-800 transition-colors">
+        <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-red-500" />
+          <span className="flex-1 font-medium">{error}</span>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
       {success && (
-        <div className="p-4 text-sm text-green-700 bg-green-50 border-l-4 border-green-500 rounded-r-md flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-            <span className="font-medium">{success}</span>
-          </div>
-          <button onClick={() => setSuccess(null)} className="text-green-600 hover:text-green-800 transition-colors">
+        <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700">
+          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-green-500" />
+          <span className="flex-1 font-medium">{success}</span>
+          <button onClick={() => setSuccess(null)} className="text-green-400 hover:text-green-600">
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* Add New Customer Form - desktop only; mobile uses sheet */}
-      {showAddForm && (
+      {/* ── Desktop: Add / Edit Form ─────────────────────────────────────── */}
+      {showDesktopForm && (
         <Card className="hidden lg:block border-2 border-blue-100 shadow-md">
-          <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
+          <CardHeader className="pb-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b rounded-t-xl">
             <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-xl font-semibold text-gray-900 flex items-center">
-                  {editingCustomer ? (
-                    <>
-                      <Edit2 className="w-5 h-5 mr-2" />
-                      Edit Customer
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="w-5 h-5 mr-2" />
-                      Add New Customer
-                    </>
-                  )}
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-blue-600 rounded-md">
+                  {editingCustomer ? <Edit2 className="w-4 h-4 text-white" /> : <Plus className="w-4 h-4 text-white" />}
+                </div>
+                <CardTitle className="text-base font-semibold text-gray-900">
+                  {editingCustomer ? "Edit Customer" : "New Customer"}
                 </CardTitle>
-                <CardDescription className="mt-1">
-                  {editingCustomer ? "Update customer information below" : "Enter customer information below"}
-                </CardDescription>
+                {editingCustomer && (
+                  <Badge variant="outline" className="text-xs text-blue-700 border-blue-200 bg-blue-50">
+                    {editingCustomer.name}
+                  </Badge>
+                )}
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setShowAddForm(false)
-                  setEditingCustomer(null)
-                  form.reset()
-                  setError(null)
-                }}
-                className="text-gray-500 hover:text-gray-700"
-              >
+              <Button variant="ghost" size="sm" onClick={closeForm} className="text-gray-400 hover:text-gray-700 h-8 w-8 p-0">
                 <X className="w-4 h-4" />
               </Button>
             </div>
           </CardHeader>
           <CardContent className="pt-6">
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Customer Name *</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Enter customer name" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input type="email" placeholder="customer@example.com" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="phone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Phone</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Phone number" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <FormField
-                control={form.control}
-                name="contact_person"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Contact Person</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Primary contact person name" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="address"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Address</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Customer address" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Additional notes (optional)" {...field} />
-                    </FormControl>
-                    <FormDescription>
-                      Any additional information about this customer
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-                <div className="flex gap-3 pt-2 border-t">
-                  <Button type="submit" disabled={isSubmitting} className="px-6">
-                    {isSubmitting 
-                      ? (editingCustomer ? "Updating..." : "Creating...") 
-                      : (editingCustomer ? "Update Customer" : "Create Customer")
-                    }
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setShowAddForm(false)
-                      setEditingCustomer(null)
-                      form.reset()
-                      setError(null)
-                    }}
-                    className="border-gray-300"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </Form>
+            <CustomerForm
+              form={form}
+              onSubmit={onSubmit}
+              isSubmitting={isSubmitting}
+              editingCustomer={editingCustomer}
+              onCancel={closeForm}
+            />
           </CardContent>
         </Card>
       )}
 
-      {/* Mobile: Search & Sort sheet trigger */}
-      <div className="lg:hidden flex justify-end">
-        <Sheet open={searchSheetOpen} onOpenChange={setSearchSheetOpen}>
-          <SheetTrigger asChild>
-            <Button variant="outline" className="flex items-center gap-2 min-h-[44px] border-gray-300">
-              <Filter className="w-4 h-4" />
-              Search & Sort
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="bottom" className="h-[75vh] rounded-t-2xl overflow-y-auto">
-            <SheetHeader>
-              <SheetTitle>Search & Sort</SheetTitle>
-              <SheetDescription>Filter and sort customers</SheetDescription>
-            </SheetHeader>
-            <div className="mt-4 space-y-4">
-              <div className="relative">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Search by name, email, phone..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 pr-10 min-h-[44px]"
-                />
-                {searchTerm && (
-                  <button
-                    onClick={() => setSearchTerm("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                    title="Clear search"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
+      {/* ── Mobile: Form + Search Sheets ────────────────────────────────── */}
+      <Sheet
+        open={mobileSheetMode === "form"}
+        onOpenChange={(o) => { if (!o) closeForm() }}
+      >
+        <SheetContent side="bottom" className="h-[90vh] rounded-t-2xl overflow-y-auto">
+          <SheetHeader className="pb-4 border-b mb-2">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-blue-600 rounded-md">
+                {editingCustomer ? <Edit2 className="w-4 h-4 text-white" /> : <Plus className="w-4 h-4 text-white" />}
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Sort by</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant={sortBy === "name" ? "default" : "outline"}
-                    size="sm"
-                    className="min-h-[44px]"
-                    onClick={() => { setSortBy("name"); setSortDirection(sortDirection === "asc" ? "desc" : "asc") }}
-                  >
-                    Name
-                  </Button>
-                  <Button
-                    variant={sortBy === "created_at" ? "default" : "outline"}
-                    size="sm"
-                    className="min-h-[44px]"
-                    onClick={() => { setSortBy("created_at"); setSortDirection(sortDirection === "asc" ? "desc" : "asc") }}
-                  >
-                    Created
-                  </Button>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full min-h-[44px]"
-                  onClick={() => setSortDirection(sortDirection === "asc" ? "desc" : "asc")}
+              <SheetTitle className="text-base font-semibold">
+                {editingCustomer ? "Edit Customer" : "New Customer"}
+              </SheetTitle>
+            </div>
+          </SheetHeader>
+          <CustomerForm
+            form={form}
+            onSubmit={onSubmit}
+            isSubmitting={isSubmitting}
+            editingCustomer={editingCustomer}
+            onCancel={closeForm}
+            isMobile
+          />
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Search & Sort Toolbar ────────────────────────────────────────── */}
+      <Card className="shadow-sm">
+        <CardContent className="p-4">
+          <div className="flex flex-col sm:flex-row gap-3">
+            {/* Search */}
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Input
+                placeholder="Search by name, phone, email, address…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 pr-9 h-10"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
-                  {sortDirection === "asc" ? <ArrowUp className="w-4 h-4 mr-1" /> : <ArrowDown className="w-4 h-4 mr-1" />}
-                  {sortDirection === "asc" ? "Ascending" : "Descending"}
-                </Button>
-              </div>
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-100">
-                  <div className="text-xl font-bold text-blue-700">{filteredAndSortedCustomers.length}</div>
-                  <div className="text-xs font-medium text-gray-600">Customers</div>
-                </div>
-                <div className="text-center p-3 bg-purple-50 rounded-lg border border-purple-100">
-                  <div className="text-lg font-bold text-purple-700">{searchTerm ? "Filtered" : "All"}</div>
-                  <div className="text-xs font-medium text-gray-600">View</div>
-                </div>
-              </div>
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
-          </SheetContent>
-        </Sheet>
-      </div>
-
-      {/* Search & Sort Panel - desktop only */}
-      <Card className="hidden lg:block shadow-sm">
-        <CardHeader className="pb-4 bg-gray-50 border-b">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 bg-blue-100 rounded-md">
-                <Filter className="w-4 h-4 text-blue-600" />
-              </div>
-              <CardTitle className="text-lg font-semibold text-gray-900">Search & Sort</CardTitle>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowSearchPanel(!showSearchPanel)}
-              className="flex items-center gap-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-            >
-              {showSearchPanel ? "Hide" : "Show"} Options
-              {showSearchPanel ? <ArrowDown className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-6 space-y-5">
-          {/* Search Bar */}
-          <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <Input
-              placeholder="Search customers by name, email, phone, contact person, or address..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-10 h-11 text-sm border-gray-300 focus:border-sk-primary focus:ring-sk-primary"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm("")}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-100"
-                title="Clear search"
+            {/* Sort */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs text-gray-500 font-medium hidden sm:inline">Sort:</span>
+              <Button
+                variant={sortBy === "name" ? "default" : "outline"}
+                size="sm"
+                className="h-10 gap-1.5 text-xs"
+                onClick={() => toggleSort("name")}
               >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {/* Advanced Options */}
-          {showSearchPanel && (
-            <div className="pt-5 border-t border-gray-200 space-y-5">
-              {/* Quick Stats */}
-              <div className="grid grid-cols-2 gap-4 pt-3">
-                <div className="text-center p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-100">
-                  <div className="text-3xl font-bold text-blue-700">{filteredAndSortedCustomers.length}</div>
-                  <div className="text-xs font-medium text-gray-600 mt-1.5">Total Customers</div>
-                </div>
-                <div className="text-center p-4 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg border border-purple-100">
-                  <div className="text-lg font-bold text-purple-700 mt-1">
-                    {searchTerm ? "Filtered" : "All"}
-                  </div>
-                  <div className="text-xs font-medium text-gray-600 mt-1.5">View Status</div>
-                </div>
-              </div>
+                Name <SortIcon field="name" />
+              </Button>
+              <Button
+                variant={sortBy === "created_at" ? "default" : "outline"}
+                size="sm"
+                className="h-10 gap-1.5 text-xs"
+                onClick={() => toggleSort("created_at")}
+              >
+                Added <SortIcon field="created_at" />
+              </Button>
             </div>
+          </div>
+          {/* Result count */}
+          {searchTerm && (
+            <p className="text-xs text-gray-500 mt-2 pl-1">
+              {filteredCustomers.length} result{filteredCustomers.length !== 1 ? "s" : ""} for &ldquo;{searchTerm}&rdquo;
+            </p>
           )}
         </CardContent>
       </Card>
 
-      {/* Customers List */}
-      <Card className="shadow-sm">
-        <CardHeader className="bg-gray-50 border-b">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2.5 text-lg font-semibold text-gray-900">
-                <div className="p-1.5 bg-blue-100 rounded-md">
-                  <Users className="w-4 h-4 text-blue-600" />
-                </div>
-                All Customers
-                <span className="text-sm font-normal text-gray-500 ml-1">
-                  ({filteredAndSortedCustomers.length})
-                </span>
-              </CardTitle>
-              <CardDescription className="mt-1.5">View and manage all customers</CardDescription>
-            </div>
+      {/* ── Customer List ────────────────────────────────────────────────── */}
+      <Card className="shadow-sm overflow-hidden">
+        <CardHeader className="py-3 px-5 bg-gray-50 border-b">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-gray-500" />
+            <CardTitle className="text-sm font-semibold text-gray-700">
+              All Customers
+            </CardTitle>
+            <Badge variant="secondary" className="ml-auto text-xs">
+              {filteredCustomers.length}
+            </Badge>
           </div>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
-            <div className="text-center py-12 text-gray-500">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-3"></div>
-              <p className="text-sm">Loading customers...</p>
+            <div className="py-16 flex flex-col items-center gap-3 text-gray-400">
+              <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+              <p className="text-sm">Loading customers…</p>
             </div>
-          ) : filteredAndSortedCustomers.length === 0 ? (
-            <div className="text-center py-12">
-              <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500 font-medium">
-                {searchTerm ? "No customers found matching your search." : "No customers yet."}
+          ) : filteredCustomers.length === 0 ? (
+            <div className="py-16 flex flex-col items-center gap-3 text-gray-400">
+              <div className="p-4 bg-gray-100 rounded-full">
+                <Users className="w-8 h-8 text-gray-300" />
+              </div>
+              <p className="text-sm font-medium text-gray-500">
+                {searchTerm ? "No customers match your search." : "No customers yet."}
               </p>
               {!searchTerm && (
-                <p className="text-sm text-gray-400 mt-1">Create your first customer using the form above.</p>
+                <Button variant="outline" size="sm" onClick={openAddForm} className="gap-2 mt-1">
+                  <Plus className="w-4 h-4" /> Add your first customer
+                </Button>
               )}
             </div>
           ) : (
             <>
-              {/* Mobile card list */}
-              <div className="lg:hidden p-4 space-y-3">
-                {filteredAndSortedCustomers.map((customer) => (
-                  <Card key={customer.id} className="border shadow-sm">
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-gray-900">{customer.name}</p>
-                          {customer.contact_person && (
-                            <p className="text-xs text-gray-600 mt-0.5">{customer.contact_person}</p>
-                          )}
-                          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-sm">
-                            {customer.phone && (
-                              <a href={`tel:${customer.phone}`} className="text-blue-600 hover:text-blue-700 font-medium">
-                                {customer.phone}
-                              </a>
-                            )}
-                            {customer.email && (
-                              <a href={`mailto:${customer.email}`} className="text-blue-600 hover:text-blue-700 font-medium">
-                                {customer.email}
-                              </a>
-                            )}
-                          </div>
-                          {customer.address && (
-                            <p className="text-xs text-gray-500 mt-1 line-clamp-2">{customer.address}</p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-9 w-9 p-0 min-h-[44px] min-w-[44px] text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                            onClick={() => handleEdit(customer)}
-                            title="Edit"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-9 w-9 p-0 min-h-[44px] min-w-[44px] text-red-600 hover:text-red-700 hover:bg-red-50"
-                            onClick={() => handleDelete(customer.id)}
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
+              {/* ── Mobile cards ── */}
+              <div className="lg:hidden divide-y divide-gray-100">
+                {filteredCustomers.map((customer) => (
+                  <div key={customer.id} className="p-4 flex items-start gap-3">
+                    {/* Avatar */}
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm shrink-0 ${avatarColor(customer.name)}`}>
+                      {getInitials(customer.name)}
+                    </div>
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{customer.name}</p>
+                      {customer.contact_person && (
+                        <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                          <User className="w-3 h-3" /> {customer.contact_person}
+                        </p>
+                      )}
+                      <div className="mt-1.5 flex flex-col gap-1">
+                        {customer.phone && (
+                          <a href={`tel:${customer.phone}`} className="text-xs text-blue-600 flex items-center gap-1.5 hover:underline">
+                            <Phone className="w-3 h-3" /> {customer.phone}
+                          </a>
+                        )}
+                        {customer.email && (
+                          <a href={`mailto:${customer.email}`} className="text-xs text-blue-600 flex items-center gap-1.5 hover:underline truncate">
+                            <Mail className="w-3 h-3" /> {customer.email}
+                          </a>
+                        )}
+                        {customer.address && (
+                          <p className="text-xs text-gray-500 flex items-start gap-1.5">
+                            <MapPin className="w-3 h-3 mt-0.5 shrink-0" />
+                            <span className="line-clamp-1">{customer.address}</span>
+                          </p>
+                        )}
                       </div>
-                    </CardContent>
-                  </Card>
+                    </div>
+                    {/* Actions */}
+                    <div className="flex flex-col gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-9 w-9 p-0 text-blue-600 hover:bg-blue-50"
+                        onClick={() => openEditForm(customer)}
+                        title="Edit"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-9 w-9 p-0 text-red-500 hover:bg-red-50"
+                        onClick={() => handleDelete(customer.id)}
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
                 ))}
               </div>
-              {/* Desktop table */}
+
+              {/* ── Desktop table ── */}
               <div className="hidden lg:block overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="border-b bg-gray-50/50">
-                    <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">
-                      <button
-                        onClick={() => {
-                          if (sortBy === "name") {
-                            setSortDirection(sortDirection === "asc" ? "desc" : "asc")
-                          } else {
-                            setSortBy("name")
-                            setSortDirection("asc")
-                          }
-                        }}
-                        className="flex items-center gap-1.5 hover:text-gray-900 transition-colors group"
-                      >
-                        Customer Name
-                        {sortBy === "name" ? (
-                          sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-blue-600" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
-                        ) : (
-                          <ArrowUpDown className="w-3.5 h-3.5 text-gray-400 group-hover:text-gray-600" />
-                        )}
-                      </button>
-                    </th>
-                    <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Contact Person</th>
-                    <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Email</th>
-                    <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Phone</th>
-                    <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Address</th>
-                    <th className="text-left p-4 font-semibold text-xs text-gray-700 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredAndSortedCustomers.map((customer) => (
-                    <tr key={customer.id} className="border-b hover:bg-blue-50/30 transition-colors">
-                      <td className="p-4">
-                        <span className="text-sm font-medium text-gray-900">{customer.name}</span>
-                      </td>
-                      <td className="p-4">
-                        <span className="text-sm text-gray-600">{customer.contact_person || "-"}</span>
-                      </td>
-                      <td className="p-4">
-                        {customer.email ? (
-                          <a
-                            href={`mailto:${customer.email}`}
-                            className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
-                          >
-                            {customer.email}
-                          </a>
-                        ) : (
-                          <span className="text-sm text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        {customer.phone ? (
-                          <a
-                            href={`tel:${customer.phone}`}
-                            className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
-                          >
-                            {customer.phone}
-                          </a>
-                        ) : (
-                          <span className="text-sm text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <span className="text-sm text-gray-600">{customer.address || "-"}</span>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex gap-1.5">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEdit(customer)}
-                            className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-colors"
-                            title="Edit customer"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(customer.id)}
-                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 transition-colors"
-                            title="Delete customer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </td>
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b bg-gray-50/60">
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-8" />
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        <button
+                          onClick={() => toggleSort("name")}
+                          className="flex items-center gap-1.5 hover:text-gray-800 transition-colors"
+                        >
+                          Customer <SortIcon field="name" />
+                        </button>
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Contact Person</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Phone</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Address</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        <button
+                          onClick={() => toggleSort("created_at")}
+                          className="flex items-center gap-1.5 hover:text-gray-800 transition-colors"
+                        >
+                          Added <SortIcon field="created_at" />
+                        </button>
+                      </th>
+                      <th className="px-4 py-3" />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredCustomers.map((customer) => (
+                      <tr key={customer.id} className="hover:bg-blue-50/30 transition-colors group">
+                        {/* Avatar */}
+                        <td className="pl-5 pr-2 py-3.5">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-xs ${avatarColor(customer.name)}`}>
+                            {getInitials(customer.name)}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <span className="text-sm font-semibold text-gray-900">{customer.name}</span>
+                          {customer.notes && (
+                            <p className="text-xs text-gray-400 mt-0.5 max-w-[180px] truncate">{customer.notes}</p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <span className="text-sm text-gray-600">{customer.contact_person || <span className="text-gray-300">—</span>}</span>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          {customer.phone
+                            ? <a href={`tel:${customer.phone}`} className="text-sm text-blue-600 hover:underline">{customer.phone}</a>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          {customer.email
+                            ? <a href={`mailto:${customer.email}`} className="text-sm text-blue-600 hover:underline">{customer.email}</a>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <span className="text-sm text-gray-500 max-w-[200px] truncate block">{customer.address || <span className="text-gray-300">—</span>}</span>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <span className="text-xs text-gray-400">
+                            {new Date(customer.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEditForm(customer)}
+                              className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(customer.id)}
+                              className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </>
           )}
@@ -887,4 +773,3 @@ export default function CustomersPage() {
     </div>
   )
 }
-

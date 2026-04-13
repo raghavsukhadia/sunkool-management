@@ -531,12 +531,13 @@ export function TimelineDrawer({ orderId, orderNumber }: TimelineDrawerProps) {
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      {/* Trigger button — matches the style of other header buttons */}
+      {/* Trigger button */}
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-orange-50 hover:border-orange-300 hover:text-orange-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+        title="View Timeline"
+        className="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:text-orange-700 hover:border-orange-300 hover:bg-orange-50 transition-colors text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
       >
-        <Activity className="h-4 w-4" />
+        <Activity className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Timeline</span>
       </button>
 
