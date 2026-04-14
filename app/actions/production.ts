@@ -145,7 +145,16 @@ export async function getProductionQueue(options?: {
 
   // Fetch production records + all open orders in parallel (step 1).
   // "Open" = any status that still has outstanding production work (not Delivered/Void).
-  const OPEN_ORDER_STATUSES = ["New Order", "In Progress", "Partial Delivered"] as const
+  // Includes Ready for Dispatch, Invoiced, In Transit — these may still have items in production
+  // or awaiting batch closure and must remain visible in the production queue.
+  const OPEN_ORDER_STATUSES = [
+    "New Order",
+    "In Progress",
+    "Ready for Dispatch",
+    "Invoiced",
+    "In Transit",
+    "Partial Delivered",
+  ] as const
 
   const [productionRecordsResult, newOrdersResult] = await Promise.all([
     supabase

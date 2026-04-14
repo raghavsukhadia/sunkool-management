@@ -135,8 +135,7 @@ export default function ProductionPage() {
   const [queueSortKey, setQueueSortKey] = useState<QueueSortKey>("orderNumber")
   const [queueSortDirection, setQueueSortDirection] = useState<QueueSortDirection>("asc")
   const [kpiFilter, setKpiFilter] = useState<KpiFilter>("none")
-  const [useDefaultOpenOnlyFilter, setUseDefaultOpenOnlyFilter] = useState(true)
-  /** When false (default), hide line items with 0 remaining (fully allocated on an open batch until DONE on the order). */
+  /** When false, hide line items with 0 remaining until DONE (fully allocated on an open batch awaiting closure). */
   const [showLinesAwaitingClosure, setShowLinesAwaitingClosure] = useState(true)
   const [nfpSearch, setNfpSearch] = useState("")
   const [nfpSortKey, setNfpSortKey] = useState<"itemName" | "inProductionQty" | "remainingQty" | "sum">("sum")
@@ -247,15 +246,12 @@ export default function ProductionPage() {
         if (queueItemFilter && row.itemName !== queueItemFilter) return false
 
         if (kpiFilter !== "noProduction") {
-          if (useDefaultOpenOnlyFilter && !showLinesAwaitingClosure && row.remaining === 0 && !isNoProductionRow) {
+          // Hide awaiting-closure rows (remainingUntilDone === 0 but batch still open) when checkbox is off
+          if (!showLinesAwaitingClosure && row.remainingUntilDone === 0 && !isNoProductionRow) {
             return false
           }
           const rowStatus = getQueueRowStatus(row)
-          if (queueStatusFilter === "All") {
-            if (useDefaultOpenOnlyFilter && rowStatus === "Completed") {
-              return false
-            }
-          } else if (rowStatus !== queueStatusFilter) {
+          if (queueStatusFilter !== "All" && rowStatus !== queueStatusFilter) {
             return false
           }
         }
@@ -286,7 +282,6 @@ export default function ProductionPage() {
       queueItemFilter,
       queueStatusFilter,
       showLinesAwaitingClosure,
-      useDefaultOpenOnlyFilter,
     ]
   )
 
@@ -339,8 +334,8 @@ export default function ProductionPage() {
     queueCustomerFilter.length > 0 ||
     queueItemFilter.length > 0 ||
     queueStatusFilter !== "All" ||
-    !useDefaultOpenOnlyFilter ||
-    showLinesAwaitingClosure
+    kpiFilter !== "none" ||
+    !showLinesAwaitingClosure
 
   // Needed: total remaining quantity per item across ALL open order lines — matches the Queue exactly.
   const neededList = useMemo(() => {
@@ -646,14 +641,12 @@ export default function ProductionPage() {
   const handleNeededItemClick = (itemName: string) => {
     setFilter("pending")
     setQueueItemFilter(itemName)
-    setUseDefaultOpenOnlyFilter(true)
   }
 
   const handleUnderProductionItemClick = (itemName: string) => {
     setFilter("pending")
     setQueueItemFilter(itemName)
     setQueueStatusFilter("In Progress")
-    setUseDefaultOpenOnlyFilter(false)
   }
 
   const handlePrintUnderProduction = async () => {
@@ -805,7 +798,6 @@ export default function ProductionPage() {
     setFilter("pending")
     setQueueItemFilter(itemName)
     setQueueStatusFilter("All")
-    setUseDefaultOpenOnlyFilter(false)
   }
 
   const handlePrintNfp = async () => {
@@ -963,7 +955,6 @@ export default function ProductionPage() {
 
   const handleQueueStatusChange = (value: QueueStatusFilter) => {
     setQueueStatusFilter(value)
-    setUseDefaultOpenOnlyFilter(false)
   }
 
   const handleClearQueueFilters = () => {
@@ -972,8 +963,7 @@ export default function ProductionPage() {
     setQueueCustomerFilter("")
     setQueueItemFilter("")
     setKpiFilter("none")
-    setUseDefaultOpenOnlyFilter(true)
-    setShowLinesAwaitingClosure(false)
+    setShowLinesAwaitingClosure(true)
   }
 
   const applyKpiFilter = (next: KpiFilter) => {
@@ -981,8 +971,7 @@ export default function ProductionPage() {
     setQueueSearch("")
     setQueueCustomerFilter("")
     setQueueItemFilter("")
-    setUseDefaultOpenOnlyFilter(false)
-    setShowLinesAwaitingClosure(false)
+    setShowLinesAwaitingClosure(true)
     if (next === "completedMonth") setQueueStatusFilter("Completed")
     else setQueueStatusFilter("All")
   }
