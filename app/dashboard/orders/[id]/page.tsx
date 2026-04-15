@@ -52,6 +52,7 @@ import {
   deleteOrderPayment,
 } from "@/app/actions/orders"
 import { TimelineDrawer } from "@/components/orders/TimelineDrawer"
+import { OrderCommentSection } from "@/components/orders/OrderCommentSection"
 import { getCourierCompanies } from "@/app/actions/management"
 import {
   ShoppingCart,
@@ -83,6 +84,7 @@ import {
   RefreshCw,
   CreditCard,
   Receipt,
+  MessageSquare,
 } from "lucide-react"
 import { producedQtyForLineItem } from "@/lib/production-quantity"
 
@@ -158,6 +160,7 @@ export default function OrderDetailsPage() {
   const [dispatchQuantities, setDispatchQuantities] = useState<Record<string, number>>({})
   const [dispatchNotes, setDispatchNotes] = useState<string>("")
   const [estimatedDelivery, setEstimatedDelivery] = useState<string>("")
+  const [dispatchDate, setDispatchDate] = useState<string>(new Date().toISOString().split("T")[0])
   const [dispatching, setDispatching] = useState(false)
   const [courierCompanies, setCourierCompanies] = useState<any[]>([])
   const [selectedCourierCompany, setSelectedCourierCompany] = useState<string>("")
@@ -196,6 +199,7 @@ export default function OrderDetailsPage() {
   const [invoiceDraftDispatchId, setInvoiceDraftDispatchId] = useState<string>("")
   const [invoiceDraftNotes, setInvoiceDraftNotes] = useState<string>("")
   const [savingInvoice, setSavingInvoice] = useState(false)
+  const [commentCount, setCommentCount] = useState(0)
   const [orderPayments, setOrderPayments] = useState<any[]>([])
   const [loadingPayments, setLoadingPayments] = useState(false)
   const [addingPayment, setAddingPayment] = useState(false)
@@ -1039,7 +1043,8 @@ export default function OrderDetailsPage() {
         selectedCourierCompany || undefined,
         trackingId || undefined,
         undefined,
-        estimatedDelivery
+        estimatedDelivery,
+        dispatchDate || new Date().toISOString().split("T")[0]
       )
 
       if (result.success) {
@@ -1051,6 +1056,7 @@ export default function OrderDetailsPage() {
         setEstimatedDelivery("")
         setSelectedCourierCompany("")
         setTrackingId("")
+        setDispatchDate(new Date().toISOString().split("T")[0])
         await loadOrderDetails()
         await loadDispatches()
         setTimeout(() => setSuccess(null), 3000)
@@ -1625,6 +1631,19 @@ export default function OrderDetailsPage() {
               Payment Followup
             </TabsTrigger>
           )}
+
+          <TabsTrigger
+            value="comments"
+            className="relative flex-shrink-0 rounded-none border-b-2 border-transparent px-5 py-3 font-medium text-sm text-slate-400 hover:text-orange-500 hover:bg-orange-50 transition-none data-[state=active]:border-b-2 data-[state=active]:border-orange-500 data-[state=active]:text-orange-500 data-[state=active]:bg-transparent flex items-center"
+          >
+            <MessageSquare className="w-4 h-4 mr-2" />
+            Comments
+            {commentCount > 0 && (
+              <span className="ml-2 inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold bg-orange-500 text-white" title={`${commentCount} comment${commentCount !== 1 ? "s" : ""}`}>
+                {commentCount}
+              </span>
+            )}
+          </TabsTrigger>
 
         </TabsList>
 
@@ -2275,6 +2294,19 @@ export default function OrderDetailsPage() {
                   <div className="space-y-3">
                     <div>
                       <Label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                        Dispatch Date
+                      </Label>
+                      <Input
+                        type="date"
+                        value={dispatchDate}
+                        onChange={(e) => setDispatchDate(e.target.value || new Date().toISOString().split("T")[0])}
+                        disabled={creatingDispatch}
+                        className="h-9 text-sm"
+                      />
+                      <p className="mt-1 text-[11px] text-slate-400">Defaults to today if not changed</p>
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-slate-500 mb-1.5 block">
                         Courier Company <span className="text-red-400">*</span>
                       </Label>
                       <select
@@ -2344,6 +2376,7 @@ export default function OrderDetailsPage() {
                     onClick={() => {
                       setShowDispatchForm(false); setSelectedProductionRecord(null)
                       setSelectedCourierCompany(""); setTrackingId(""); setEstimatedDelivery(""); setDispatchNotes("")
+                      setDispatchDate(new Date().toISOString().split("T")[0])
                     }}
                     disabled={creatingDispatch}
                     className="h-8 text-sm text-slate-500"
@@ -2373,12 +2406,14 @@ export default function OrderDetailsPage() {
                           selectedCourierCompany,
                           trackingId || undefined,
                           selectedProductionRecord.id,
-                          estimatedDelivery
+                          estimatedDelivery,
+                          dispatchDate || new Date().toISOString().split("T")[0]
                         )
                         if (result.success) {
                           setSuccess(`Dispatch created for ${selectedProductionRecord.production_number}!`)
                           setShowDispatchForm(false); setSelectedProductionRecord(null)
                           setSelectedCourierCompany(""); setTrackingId(""); setEstimatedDelivery(""); setDispatchNotes("")
+                          setDispatchDate(new Date().toISOString().split("T")[0])
                           await loadDispatches()
                           setTimeout(() => setSuccess(null), 3000)
                         } else {
@@ -3549,6 +3584,13 @@ export default function OrderDetailsPage() {
           </TabsContent>
         )}
 
+        {/* Comments Tab */}
+        <TabsContent value="comments" className="mt-6">
+          <div className="mx-auto max-w-[860px] px-1">
+            <OrderCommentSection orderId={orderId} onCountChange={setCommentCount} />
+          </div>
+        </TabsContent>
+
       </Tabs>
 
       {/* Dispatch Modal */}
@@ -3743,6 +3785,20 @@ export default function OrderDetailsPage() {
 
                       <div>
                         <Label className="text-sm font-semibold text-gray-700 mb-2 block">
+                          Dispatch Date
+                        </Label>
+                        <Input
+                          type="date"
+                          value={dispatchDate}
+                          onChange={(e) => setDispatchDate(e.target.value || new Date().toISOString().split("T")[0])}
+                          disabled={dispatching}
+                          className="h-10"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">Defaults to today if not changed</p>
+                      </div>
+
+                      <div>
+                        <Label className="text-sm font-semibold text-gray-700 mb-2 block">
                           Expected Delivery Date <span className="text-red-500">*</span>
                         </Label>
                         <Input
@@ -3787,6 +3843,7 @@ export default function OrderDetailsPage() {
                     if (!dispatching) {
                       setShowDispatchModal(false)
                       setDispatchType(null)
+                      setDispatchDate(new Date().toISOString().split("T")[0])
                     }
                   }}
                   disabled={dispatching}

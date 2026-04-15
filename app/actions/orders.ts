@@ -1036,7 +1036,7 @@ export async function removeItemFromOrder(orderItemId: string) {
       title:       "Item Removed",
       description: "An item was removed from the order.",
       actor:       "admin",
-      metadata:    { order_item_id: orderItemId },
+      metadata:    {},
     })
     revalidatePath(`/dashboard/orders/${orderItem.order_id}`)
   }
@@ -1053,7 +1053,8 @@ export async function createDispatch(
   courierCompanyId?: string,
   trackingId?: string,
   productionRecordId?: string,
-  estimatedDelivery?: string
+  estimatedDelivery?: string,
+  dispatchDate?: string
 ) {
   const supabase = await createClient()
 
@@ -1144,7 +1145,7 @@ export async function createDispatch(
     .insert({
       order_id: orderId,
       dispatch_type: dispatchType,
-      dispatch_date: new Date().toISOString().split('T')[0],
+      dispatch_date: dispatchDate || new Date().toISOString().split('T')[0],
       notes: notes || null,
       courier_company_id: courierCompanyId || null,
       tracking_id: trackingId || null,
@@ -1217,10 +1218,9 @@ export async function createDispatch(
     actor:       "admin",
     actor_id:    profile.id,
     metadata: {
-      dispatch_id:   dispatch.id,
-      dispatch_type: dispatchType,
-      item_count:    dispatchItems.length,
-      tracking_id:   trackingId    ?? null,
+      dispatch_type:  dispatchType,
+      item_count:     dispatchItems.length,
+      ...(trackingId ? { tracking_id: trackingId } : {}),
     },
   })
 
@@ -1344,8 +1344,7 @@ export async function createReturnDispatch(
     actor:       "admin",
     actor_id:    profile.id,
     metadata: {
-      dispatch_id: returnDispatch.id,
-      item_count:  returnItems.length,
+      item_count: returnItems.length,
     },
   })
 
@@ -1645,8 +1644,7 @@ export async function updateDispatchStatus(
       actor:       "admin",
       actor_id:    profile?.id ?? null,
       metadata: {
-        new_status:  status,
-        dispatch_id: dispatchId,
+        new_status: status,
       },
     })
   }
@@ -1718,8 +1716,7 @@ export async function updateDispatchDetails(
       actor:       "admin",
       actor_id:    profile?.id ?? null,
       metadata: {
-        dispatch_id: dispatchId,
-        tracking_id: fields.tracking_id ?? null,
+        ...(fields.tracking_id ? { tracking_id: fields.tracking_id } : {}),
       },
     })
   }
@@ -2753,9 +2750,8 @@ export async function createProductionRecord(
     actor:       "admin",
     actor_id:    profile.id,
     metadata: {
-      production_record_id: productionRecord.id,
-      production_number:    productionNumber,
-      production_type:      productionType,
+      production_number: productionNumber,
+      production_type:   productionType,
     },
   })
 
@@ -2799,7 +2795,7 @@ export async function updateProductionRecordStatus(
   // Get order_id before updating
   const { data: record } = await supabase
     .from("production_records")
-    .select("order_id")
+    .select("order_id, production_number")
     .eq("id", recordId)
     .single()
 
@@ -2846,7 +2842,7 @@ export async function updateProductionRecordStatus(
         title:       "Production In Progress",
         description: "Production record resumed and is now in progress.",
         actor:       "admin",
-        metadata:    { production_record_id: recordId },
+        metadata:    { production_number: (record as any).production_number ?? "" },
       })
     } else if (status === "completed") {
       void logTimelineEvent(supabase, record.order_id, {
@@ -2854,7 +2850,7 @@ export async function updateProductionRecordStatus(
         title:       "Production Completed",
         description: "Production record has been marked as completed.",
         actor:       "admin",
-        metadata:    { production_record_id: recordId },
+        metadata:    { production_number: (record as any).production_number ?? "" },
       })
     }
     revalidatePath(`/dashboard/orders/${record.order_id}`)

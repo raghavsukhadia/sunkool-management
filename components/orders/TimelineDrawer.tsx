@@ -245,37 +245,81 @@ function CompactProgressBar({ entries }: { entries: TimelineEntry[] }) {
 
 // ─── Metadata pills ───────────────────────────────────────────────────────────
 
-const METADATA_LABELS: Record<string, string> = {
-  courier_name:   "Courier",
-  tracking_id:    "Tracking ID",
-  dispatch_type:  "Type",
-  new_status:     "Status",
-  old_status:     "Previous",
-  amount:         "Amount",
-  payment_method: "Method",
-  invoice_number: "Invoice",
-  item_count:     "Items",
+// UUID pattern — internal DB reference values should never be shown
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isHiddenMetaKey(key: string, value: unknown): boolean {
+  if (key.endsWith("_id")) return true
+  if (typeof value === "string" && UUID_RE.test(value)) return true
+  if (value == null || value === "") return true
+  return false
 }
 
-// Keys we never want to render as visible pills
-const METADATA_HIDDEN = new Set([
-  "dispatch_id", "invoice_id", "order_id", "reference",
-])
+const META_LABELS: Record<string, string> = {
+  courier_name:          "Courier",
+  tracking_id:           "Tracking",
+  dispatch_type:         "Dispatch",
+  production_type:       "Production",
+  new_status:            "Status",
+  old_status:            "Previous Status",
+  amount:                "Amount",
+  invoice_amount:        "Amount",
+  payment_method:        "Method",
+  invoice_number:        "Invoice",
+  item_count:            "Items",
+  production_number:     "Ref",
+  item_name:             "Item",
+  quantity:              "Qty",
+  note_preview:          "Note",
+  estimated_delivery:    "Est. Delivery",
+  customer_name:         "Customer",
+  internal_order_number: "Order No.",
+}
+
+const VALUE_LABELS: Record<string, string> = {
+  full:             "Full Order",
+  partial:          "Partial Order",
+  pending:          "Pending",
+  ready:            "Ready for Pickup",
+  picked_up:        "Picked Up",
+  in_transit:       "In Transit",
+  out_for_delivery: "Out for Delivery",
+  delivered:        "Delivered",
+  failed_delivery:  "Failed Delivery",
+  rto_initiated:    "RTO Initiated",
+  returned:         "Returned",
+  cancelled:        "Cancelled",
+  cash:             "Cash",
+  upi:              "UPI",
+  neft:             "NEFT",
+  cheque:           "Cheque",
+  rtgs:             "RTGS",
+  card:             "Card",
+  other:            "Other",
+}
+
+function formatMetaValue(key: string, value: unknown): string {
+  if (key === "amount" || key === "invoice_amount") {
+    return `₹${Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
+  }
+  if (key === "item_count") {
+    return `${value} item${Number(value) !== 1 ? "s" : ""}`
+  }
+  const str = String(value)
+  return VALUE_LABELS[str] ?? str.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+}
 
 function MetadataPills({ metadata }: { metadata: Record<string, unknown> }) {
   const visible = Object.entries(metadata).filter(
-    ([k, v]) => !METADATA_HIDDEN.has(k) && v != null && v !== "",
+    ([k, v]) => !isHiddenMetaKey(k, v),
   )
   if (visible.length === 0) return null
 
   return (
     <div className="mt-1.5 flex flex-wrap gap-1">
       {visible.map(([key, value]) => {
-        const label   = METADATA_LABELS[key] ?? key.replace(/_/g, " ")
-        const display =
-          key === "amount"
-            ? `₹${Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
-            : String(value)
+        const label   = META_LABELS[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+        const display = formatMetaValue(key, value)
 
         return (
           <span

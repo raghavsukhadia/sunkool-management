@@ -148,32 +148,89 @@ function formatAbsolute(isoString: string): string {
 
 // ─── Metadata renderer ────────────────────────────────────────────────────────
 
-function MetadataPills({ metadata }: { metadata: Record<string, unknown> }) {
-  const entries = Object.entries(metadata).filter(([, v]) => v != null && v !== "")
-  if (entries.length === 0) return null
+// UUID pattern — values matching this are internal DB references, never show them
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-  // Human-friendly label mapping
-  const LABELS: Record<string, string> = {
-    courier_name:    "Courier",
-    tracking_id:     "Tracking ID",
-    dispatch_type:   "Type",
-    new_status:      "New Status",
-    old_status:      "Previous",
-    amount:          "Amount",
-    payment_method:  "Method",
-    invoice_number:  "Invoice",
-    item_count:      "Items",
-    note_preview:    "Note",
+function isHiddenMetaKey(key: string, value: unknown): boolean {
+  // Hide any key that ends with _id (almost always a raw UUID foreign key)
+  if (key.endsWith("_id")) return true
+  // Belt-and-suspenders: hide any value that looks like a UUID
+  if (typeof value === "string" && UUID_RE.test(value)) return true
+  // Hide null / empty strings
+  if (value == null || value === "") return true
+  return false
+}
+
+// Human-readable labels for metadata keys
+const META_LABELS: Record<string, string> = {
+  courier_name:      "Courier",
+  tracking_id:       "Tracking",
+  dispatch_type:     "Dispatch",
+  production_type:   "Production",
+  new_status:        "Status",
+  old_status:        "Previous Status",
+  amount:            "Amount",
+  invoice_amount:    "Amount",
+  payment_method:    "Method",
+  invoice_number:    "Invoice",
+  item_count:        "Items",
+  production_number: "Ref",
+  item_name:         "Item",
+  quantity:          "Qty",
+  note_preview:      "Note",
+  estimated_delivery:"Est. Delivery",
+  customer_name:     "Customer",
+  internal_order_number: "Order No.",
+}
+
+// Friendly display values (raw DB enums → readable strings)
+const VALUE_LABELS: Record<string, string> = {
+  // Dispatch / production type
+  full:             "Full Order",
+  partial:          "Partial Order",
+  // Shipment statuses
+  pending:          "Pending",
+  ready:            "Ready for Pickup",
+  picked_up:        "Picked Up",
+  in_transit:       "In Transit",
+  out_for_delivery: "Out for Delivery",
+  delivered:        "Delivered",
+  failed_delivery:  "Failed Delivery",
+  rto_initiated:    "RTO Initiated",
+  returned:         "Returned",
+  cancelled:        "Cancelled",
+  // Payment methods
+  cash:             "Cash",
+  upi:              "UPI",
+  neft:             "NEFT",
+  cheque:           "Cheque",
+  rtgs:             "RTGS",
+  card:             "Card",
+  other:            "Other",
+}
+
+function formatMetaValue(key: string, value: unknown): string {
+  if (key === "amount" || key === "invoice_amount") {
+    return `₹${Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
   }
+  if (key === "item_count") {
+    return `${value} item${Number(value) !== 1 ? "s" : ""}`
+  }
+  const str = String(value)
+  return VALUE_LABELS[str] ?? str.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function MetadataPills({ metadata }: { metadata: Record<string, unknown> }) {
+  const visible = Object.entries(metadata).filter(
+    ([k, v]) => !isHiddenMetaKey(k, v),
+  )
+  if (visible.length === 0) return null
 
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
-      {entries.map(([key, value]) => {
-        const label = LABELS[key] ?? key.replace(/_/g, " ")
-        const display =
-          key === "amount"
-            ? `₹${Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
-            : String(value)
+      {visible.map(([key, value]) => {
+        const label   = META_LABELS[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+        const display = formatMetaValue(key, value)
 
         return (
           <span

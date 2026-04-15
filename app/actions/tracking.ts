@@ -322,7 +322,7 @@ export async function addShipmentNote(dispatchId: string, note: string): Promise
       description: trimmed.length > 120 ? trimmed.slice(0, 117) + "…" : trimmed,
       actor:       "admin",
       actor_id:    profile?.id ?? null,
-      metadata: { dispatch_id: dispatchId },
+      metadata: {},
     })
   }
 
@@ -366,8 +366,7 @@ export async function updateShipmentTracking(
       actor:       "admin",
       actor_id:    profile?.id ?? null,
       metadata: {
-        new_status:  fields.shipment_status,
-        dispatch_id: dispatchId,
+        new_status: fields.shipment_status,
       },
     })
   }
