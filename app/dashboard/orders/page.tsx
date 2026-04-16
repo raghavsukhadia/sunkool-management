@@ -62,6 +62,22 @@ function getOrderDisplayTotal(order: Order): number {
   return order.requested_payment_amount != null ? Number(order.requested_payment_amount) : (order.total_price ?? 0)
 }
 
+function derivePaymentStatus(order: Order): string {
+  const totalInvoiced = Number(order.total_invoiced ?? 0)
+  const totalPaid = Number(order.total_paid ?? 0)
+  const amountDue = Number(order.amount_due ?? Math.max(0, totalInvoiced - totalPaid))
+
+  const isPaid = amountDue === 0 && (totalInvoiced > 0 || totalPaid > 0)
+  if (isPaid) return "Paid"
+
+  // If the order is delivered but still has due, show stronger label
+  const deliveredLike = order.order_status === "Delivered" || order.order_status === "Partial Delivered"
+  if (deliveredLike && amountDue > 0 && totalPaid === 0) return "Delivered Unpaid"
+
+  if (totalPaid > 0) return "Partial"
+  return "Pending"
+}
+
 const VALID_STATUSES = ["New Order", "In Progress", "Ready for Dispatch", "Invoiced", "In Transit", "Partial Delivered", "Delivered", "Void"]
 
 export default function OrdersPage() {
@@ -507,7 +523,7 @@ export default function OrdersPage() {
 
     // Payment status filter
     if (paymentFilter !== "all") {
-      filtered = filtered.filter(({ order }) => order.payment_status === paymentFilter)
+      filtered = filtered.filter(({ order }) => derivePaymentStatus(order) === paymentFilter)
     }
 
     // Customer filter
@@ -1151,9 +1167,16 @@ export default function OrdersPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3.5 align-middle">
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${getPaymentStatusColor(order.payment_status)}`}>
-                          {order.payment_status}
-                        </span>
+                        {(() => {
+                          const paymentStatus = derivePaymentStatus(order)
+                          return (
+                            <span
+                              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${getPaymentStatusColor(paymentStatus)}`}
+                            >
+                              {paymentStatus}
+                            </span>
+                          )
+                        })()}
                       </td>
                       <td className="px-4 py-3.5 align-middle">
                         <span className="text-sm font-semibold text-sk-text-1">
