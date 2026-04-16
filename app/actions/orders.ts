@@ -423,29 +423,37 @@ export async function getAllOrders() {
     return { success: false, error: error.message, data: null }
   }
 
-  // Get payment totals per order
+  // Get payment totals and invoice totals per order
   if (orders && orders.length > 0) {
     const orderIds = orders.map(o => o.id)
 
-    const { data: payments } = await supabase
-      .from("order_payments")
-      .select("order_id, amount")
-      .in("order_id", orderIds)
+    const [{ data: payments }, { data: invoices }] = await Promise.all([
+      supabase.from("order_payments").select("order_id, amount").in("order_id", orderIds),
+      supabase.from("order_invoices").select("order_id, invoice_amount").in("order_id", orderIds),
+    ])
 
     const totalPaidByOrder: Record<string, number> = {}
     payments?.forEach(p => {
-      const id = p.order_id
-      totalPaidByOrder[id] = (totalPaidByOrder[id] || 0) + Number(p.amount || 0)
+      totalPaidByOrder[p.order_id] = (totalPaidByOrder[p.order_id] || 0) + Number(p.amount || 0)
+    })
+
+    const totalInvoicedByOrder: Record<string, number> = {}
+    invoices?.forEach(inv => {
+      totalInvoicedByOrder[inv.order_id] = (totalInvoicedByOrder[inv.order_id] || 0) + Number(inv.invoice_amount || 0)
     })
 
     const ordersWithCounts = orders.map(order => {
-      const requested = order.requested_payment_amount != null
-        ? Number(order.requested_payment_amount)
-        : (order.total_price ?? 0)
+      const totalInvoiced = totalInvoicedByOrder[order.id] || 0
       const totalPaid = totalPaidByOrder[order.id] || 0
-      const amountDue = Math.max(0, requested - totalPaid)
+      // Use actual invoice total as the basis; fall back to requested/total_price if no invoices yet
+      const basis = totalInvoiced > 0
+        ? totalInvoiced
+        : order.requested_payment_amount != null
+          ? Number(order.requested_payment_amount)
+          : (order.total_price ?? 0)
+      const amountDue = Math.max(0, basis - totalPaid)
       const derivedPaymentStatus =
-        amountDue === 0 && (requested > 0 || totalPaid > 0)
+        amountDue === 0 && (basis > 0 || totalPaid > 0)
           ? "Paid"
           : totalPaid > 0
             ? "Partial"
@@ -457,6 +465,9 @@ export async function getAllOrders() {
         ...order,
         item_count,
         payment_status: derivedPaymentStatus,
+        total_invoiced: totalInvoiced,
+        total_paid: totalPaid,
+        amount_due: amountDue,
       }
     })
 
@@ -3015,6 +3026,7 @@ export type OrderInvoiceRow = {
     dispatch_date: string | null
     dispatch_type: string | null
     shipment_status?: string | null
+    production_records?: { id: string; production_number: string | null } | Array<{ id: string; production_number: string | null }> | null
   } | null
 }
 
@@ -3038,7 +3050,11 @@ export async function getOrderInvoices(orderId: string): Promise<
         id,
         dispatch_date,
         dispatch_type,
-        shipment_status
+        shipment_status,
+        production_records (
+          id,
+          production_number
+        )
       ),
       order_payments (
         amount
@@ -3081,6 +3097,7 @@ export async function createOrUpdateOrderInvoice(params: {
   invoiceAmount: number
   notes?: string
   dispatchId?: string | null
+  dispatchLinkMode?: "manual" | "full" | "batch"
 }): Promise<{ success: true; data: any } | { success: false; error: string }> {
   const supabase = await createClient()
 
@@ -3101,24 +3118,11 @@ export async function createOrUpdateOrderInvoice(params: {
     return { success: false, error: "Invoice amount must be a valid number (>= 0)" }
   }
 
-  const dispatchId = params.dispatchId ?? null
-  if (dispatchId) {
-    const { data: disp, error: dispErr } = await supabase
-      .from("dispatches")
-      .select("id, order_id")
-      .eq("id", dispatchId)
-      .single()
-    if (dispErr || !disp) return { success: false, error: "Dispatch not found" }
-    if ((disp as any).order_id !== params.orderId) {
-      return { success: false, error: "Dispatch does not belong to this order" }
-    }
-  }
-
-  // Once saved, invoice details are immutable by business rule.
+  // ── UPDATE existing invoice ──────────────────────────────────────────────
   if (params.invoiceId) {
     const { data: existingInvoice, error: existingErr } = await supabase
       .from("order_invoices")
-      .select("id, order_id")
+      .select("id, order_id, dispatch_id")
       .eq("id", params.invoiceId)
       .single()
 
@@ -3128,7 +3132,101 @@ export async function createOrUpdateOrderInvoice(params: {
     if ((existingInvoice as any).order_id !== params.orderId) {
       return { success: false, error: "Invoice does not belong to this order" }
     }
-    return { success: false, error: "Invoice is locked after save and cannot be edited." }
+
+    const dispatchId = params.dispatchId ?? null
+
+    // If dispatch link is changing, make sure the new dispatch isn't already linked to another invoice
+    if (dispatchId && dispatchId !== (existingInvoice as any).dispatch_id) {
+      const { data: existingForDispatch } = await supabase
+        .from("order_invoices")
+        .select("id")
+        .eq("dispatch_id", dispatchId)
+        .neq("id", params.invoiceId)
+        .limit(1)
+      if ((existingForDispatch || []).length > 0) {
+        return { success: false, error: "This dispatch already has an invoice linked to it." }
+      }
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from("order_invoices")
+      .update({
+        invoice_number: invoiceNumber,
+        invoice_date: params.invoiceDate || new Date().toISOString().split("T")[0],
+        invoice_amount: params.invoiceAmount,
+        notes: params.notes?.trim() || null,
+        dispatch_id: dispatchId,
+      })
+      .eq("id", params.invoiceId)
+      .select()
+      .single()
+
+    if (updateErr) {
+      if (isUniqueViolation(updateErr)) {
+        return { success: false, error: `Invoice number "${invoiceNumber}" is already used on another invoice for this order. Please use a different invoice number.` }
+      }
+      return { success: false, error: "Failed to update invoice. Please try again." }
+    }
+
+    void logTimelineEvent(supabase, params.orderId, {
+      event_type:  "invoice_updated",
+      title:       `Invoice Updated: ${invoiceNumber}`,
+      description: `Invoice ${invoiceNumber} updated to ₹${params.invoiceAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}.`,
+      actor:       "admin",
+      actor_id:    profile.id,
+      metadata: { invoice_id: params.invoiceId, invoice_number: invoiceNumber, invoice_amount: params.invoiceAmount },
+    })
+
+    revalidatePath(`/dashboard/orders/${params.orderId}`)
+    return { success: true, data: updated }
+  }
+
+  // ── CREATE new invoice ────────────────────────────────────────────────────
+  const dispatchId = params.dispatchId ?? null
+  const dispatchLinkMode = params.dispatchLinkMode ?? (dispatchId ? "batch" : "manual")
+  let dispatchType: string | null = null
+  if (dispatchId) {
+    const { data: disp, error: dispErr } = await supabase
+      .from("dispatches")
+      .select("id, order_id, dispatch_type")
+      .eq("id", dispatchId)
+      .single()
+    if (dispErr || !disp) return { success: false, error: "Dispatch not found" }
+    if ((disp as any).order_id !== params.orderId) {
+      return { success: false, error: "Dispatch does not belong to this order" }
+    }
+    dispatchType = (disp as any).dispatch_type ?? null
+
+    const { data: existingForDispatch } = await supabase
+      .from("order_invoices")
+      .select("id")
+      .eq("dispatch_id", dispatchId)
+      .limit(1)
+    if ((existingForDispatch || []).length > 0) {
+      return { success: false, error: "This dispatch/batch already has an invoice." }
+    }
+  }
+
+  if (dispatchLinkMode === "manual" && dispatchId) {
+    return { success: false, error: "Manual mode cannot be linked to a dispatch." }
+  }
+
+  if (dispatchLinkMode === "full") {
+    if (!dispatchId) {
+      return { success: false, error: "Full Dispatch mode requires selecting a full dispatch record." }
+    }
+    if (dispatchType !== "full") {
+      return { success: false, error: "Selected dispatch is not a full dispatch." }
+    }
+  }
+
+  if (dispatchLinkMode === "batch") {
+    if (!dispatchId) {
+      return { success: false, error: "Batch mode requires selecting a dispatch batch." }
+    }
+    if (dispatchType === "full") {
+      return { success: false, error: "Full dispatch cannot be used in batch mode." }
+    }
   }
 
   const payload: any = {
@@ -3144,7 +3242,12 @@ export async function createOrUpdateOrderInvoice(params: {
   const q = supabase.from("order_invoices").insert(payload).select().single()
 
   const { data, error } = await q
-  if (error) return { success: false, error: error.message }
+  if (error) {
+    if (isUniqueViolation(error)) {
+      return { success: false, error: `Invoice number "${invoiceNumber}" already exists for this order. Please use a unique invoice number (e.g. ${invoiceNumber}-2).` }
+    }
+    return { success: false, error: "Failed to save invoice. Please try again." }
+  }
 
   // Timeline: invoice created
   void logTimelineEvent(supabase, params.orderId, {
@@ -3305,7 +3408,7 @@ export async function addOrderPayment(
     .single()
 
   if (error) {
-    return { success: false, error: error.message }
+    return { success: false, error: "Failed to record payment. Please try again." }
   }
 
   // Timeline: log payment received
@@ -3340,7 +3443,7 @@ export async function deleteOrderPayment(paymentId: string) {
     .single()
 
   if (fetchError || !payment) {
-    return { success: false, error: fetchError?.message || "Payment record not found" }
+    return { success: false, error: "Payment record not found. It may have already been deleted." }
   }
 
   const { error } = await supabase
@@ -3349,7 +3452,7 @@ export async function deleteOrderPayment(paymentId: string) {
     .eq("id", paymentId)
 
   if (error) {
-    return { success: false, error: error.message }
+    return { success: false, error: "Failed to delete payment record. Please try again." }
   }
 
   revalidatePath(`/dashboard/orders/${payment.order_id}`)

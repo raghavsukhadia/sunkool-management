@@ -171,7 +171,6 @@ export default function OrderDetailsPage() {
   const [creatingDispatch, setCreatingDispatch] = useState(false)
   const [dispatches, setDispatches] = useState<any[]>([])
   const [paymentFollowups, setPaymentFollowups] = useState<any[]>([])
-  const [zohoBillingDetails, setZohoBillingDetails] = useState<string>("")
   const [paymentDate, setPaymentDate] = useState<string>("")
   const [showEditModal, setShowEditModal] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -197,8 +196,12 @@ export default function OrderDetailsPage() {
   const [invoiceDraftDate, setInvoiceDraftDate] = useState<string>("")
   const [invoiceDraftAmount, setInvoiceDraftAmount] = useState<string>("")
   const [invoiceDraftDispatchId, setInvoiceDraftDispatchId] = useState<string>("")
+  const [invoiceDraftLinkMode, setInvoiceDraftLinkMode] = useState<"manual" | "full" | "batch">("manual")
   const [invoiceDraftNotes, setInvoiceDraftNotes] = useState<string>("")
+  const [invoiceDraftAttachment, setInvoiceDraftAttachment] = useState<File | null>(null)
   const [savingInvoice, setSavingInvoice] = useState(false)
+  const [showCreateInvoiceForm, setShowCreateInvoiceForm] = useState(false)
+  const [paymentTimelineOpen, setPaymentTimelineOpen] = useState(true)
   const [commentCount, setCommentCount] = useState(0)
   const [orderPayments, setOrderPayments] = useState<any[]>([])
   const [loadingPayments, setLoadingPayments] = useState(false)
@@ -224,6 +227,62 @@ export default function OrderDetailsPage() {
     const amountDue = Math.max(0, totalInvoiced - totalPaid)
     return { totalPaid, totalInvoiced, amountDue, hasInvoices: totalInvoiced > 0 }
   }, [orderInvoices, orderPayments])
+
+  const invoiceDispatchIds = useMemo(
+    () => new Set((orderInvoices || []).map((inv: any) => inv.dispatch_id).filter(Boolean)),
+    [orderInvoices]
+  )
+
+  const invoiceEligibleDispatches = useMemo(() => {
+    return (dispatches || []).filter((dispatch: any) => dispatch.dispatch_type !== "return")
+  }, [dispatches])
+
+  const fullDispatchOptions = useMemo(
+    () => invoiceEligibleDispatches.filter((dispatch: any) => dispatch.dispatch_type === "full" && !invoiceDispatchIds.has(dispatch.id)),
+    [invoiceEligibleDispatches, invoiceDispatchIds]
+  )
+
+  const batchDispatchOptions = useMemo(
+    () => invoiceEligibleDispatches.filter((dispatch: any) => dispatch.dispatch_type !== "full" && !invoiceDispatchIds.has(dispatch.id)),
+    [invoiceEligibleDispatches, invoiceDispatchIds]
+  )
+
+  const hasExistingFullDispatchInvoice = useMemo(() => {
+    return (orderInvoices || []).some((invoice: any) => {
+      const dispatch = (invoice as any).dispatches
+      return dispatch?.dispatch_type === "full"
+    })
+  }, [orderInvoices])
+
+  const resolveProductionNumber = useCallback((dispatch: any) => {
+    const production = Array.isArray(dispatch?.production_records)
+      ? dispatch.production_records[0]
+      : dispatch?.production_records
+    return production?.production_number || null
+  }, [])
+
+  const formatDispatchOptionLabel = useCallback((dispatch: any) => {
+    const dateText = dispatch?.dispatch_date
+      ? new Date(dispatch.dispatch_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+      : "—"
+    const productionNumber = resolveProductionNumber(dispatch)
+    if (dispatch?.dispatch_type === "full") {
+      return `Full Dispatch • ${dateText}`
+    }
+    if (productionNumber) {
+      return `${productionNumber} • ${dateText}`
+    }
+    return `Partial Dispatch • ${dateText}`
+  }, [resolveProductionNumber])
+
+  const getInvoiceDispatchContextLabel = useCallback((invoice: any) => {
+    const dispatch = invoice?.dispatches
+    if (!dispatch) return "Manual / Not linked"
+    const productionNumber = resolveProductionNumber(dispatch)
+    if (dispatch.dispatch_type === "full") return "Full Dispatch"
+    if (productionNumber) return `Batch ${productionNumber}`
+    return "Batch Dispatch"
+  }, [resolveProductionNumber])
 
   // Derived payment status from actual amounts. Only show Paid when there was an amount to pay and it's fully covered.
   const derivedPaymentStatus = useMemo((): "complete" | "partial" | "pending" => {
@@ -302,7 +361,7 @@ export default function OrderDetailsPage() {
     try {
       const result = await getOrderDetailPageData(orderId, {
         includeProductionLists: false,
-        includeInvoiceAttachments: false,
+        includeInvoiceAttachments: true,
         includePaymentFollowups: false,
       })
       if (result.success && result.data) {
@@ -389,13 +448,7 @@ export default function OrderDetailsPage() {
 
   useEffect(() => {
     if (!order) return
-    if (order.zoho_billing_details) {
-      setZohoBillingDetails(typeof order.zoho_billing_details === "string"
-        ? order.zoho_billing_details
-        : JSON.stringify(order.zoho_billing_details, null, 2))
-    } else {
-      setZohoBillingDetails("")
-    }
+
     if (order.cash_discount) {
       loadPaymentFollowups()
     }
@@ -410,7 +463,9 @@ export default function OrderDetailsPage() {
       setInvoiceDraftDate(new Date().toISOString().split("T")[0])
       setInvoiceDraftAmount("")
       setInvoiceDraftDispatchId("")
+      setInvoiceDraftLinkMode("manual")
       setInvoiceDraftNotes("")
+      setShowCreateInvoiceForm(true)
       return
     }
     const current = selectedInvoiceId
@@ -423,8 +478,20 @@ export default function OrderDetailsPage() {
     setInvoiceDraftDate((current.invoice_date ?? "").split("T")[0] || new Date().toISOString().split("T")[0])
     setInvoiceDraftAmount(String(current.invoice_amount ?? ""))
     setInvoiceDraftDispatchId(current.dispatch_id ?? "")
+    const dispatchType = (current as any)?.dispatches?.dispatch_type
+    if (!current.dispatch_id) setInvoiceDraftLinkMode("manual")
+    else if (dispatchType === "full") setInvoiceDraftLinkMode("full")
+    else setInvoiceDraftLinkMode("batch")
     setInvoiceDraftNotes(current.notes ?? "")
-  }, [orderInvoices, selectedInvoiceId])
+    if (!showCreateInvoiceForm) setShowCreateInvoiceForm(false)
+  }, [orderInvoices, selectedInvoiceId, showCreateInvoiceForm])
+
+  useEffect(() => {
+    if (!showCreateInvoiceForm) return
+    const linkable = invoiceEligibleDispatches.filter((d: any) => !invoiceDispatchIds.has(d.id))
+    const stillValid = linkable.some((d: any) => d.id === invoiceDraftDispatchId)
+    if (invoiceDraftDispatchId && !stillValid) setInvoiceDraftDispatchId("")
+  }, [showCreateInvoiceForm, invoiceEligibleDispatches, invoiceDispatchIds, invoiceDraftDispatchId])
 
   // When Payment or Followup tab is active and order has amount due, ensure single 14-day followup exists and reload followups
   useEffect(() => {
@@ -507,7 +574,7 @@ export default function OrderDetailsPage() {
     }
     if (activeTab === "payment" && !loadedTabsRef.current.payment) {
       loadedTabsRef.current.payment = true
-      void loadOrderPayments()
+      void Promise.all([loadOrderPayments(), loadInvoiceAttachments()])
       return
     }
     if (activeTab === "followup" && !loadedTabsRef.current.followup) {
@@ -525,6 +592,12 @@ export default function OrderDetailsPage() {
     loadProductionRecords,
     loadCourierCompanies,
   ])
+
+  useEffect(() => {
+    if (activeTab !== "payment") return
+    if (!selectedInvoiceId) return
+    void loadInvoiceAttachments()
+  }, [activeTab, selectedInvoiceId, loadInvoiceAttachments])
 
   const handleAddItem = async () => {
     if (!selectedItem || quantity <= 0) {
@@ -1070,32 +1143,6 @@ export default function OrderDetailsPage() {
     }
   }
 
-  const handleSaveZohoBilling = async () => {
-    setError(null)
-    try {
-      let zohoDetails = null
-      if (zohoBillingDetails.trim()) {
-        try {
-          zohoDetails = JSON.parse(zohoBillingDetails)
-        } catch {
-          // If not valid JSON, store as string in a JSON object
-          zohoDetails = { details: zohoBillingDetails }
-        }
-      }
-
-      const result = await updateOrderPayment(orderId, undefined, zohoDetails)
-
-      if (result.success) {
-        setSuccess("Billing details saved!")
-        await loadOrderDetails()
-        setTimeout(() => setSuccess(null), 3000)
-      } else {
-        setError(result.error || "Failed to save billing details")
-      }
-    } catch (err: any) {
-      setError(err.message || "An error occurred")
-    }
-  }
 
   const handleAddPaymentRecord = async () => {
     setError(null)
@@ -1112,7 +1159,8 @@ export default function OrderDetailsPage() {
     }
 
     const inv = orderInvoices.find((i: any) => i.id === selectedInvoiceId)
-    const invoiceDue = Math.max(0, Number(inv?.amount_due ?? inv?.invoice_amount ?? 0) - Number(inv?.total_paid ?? 0))
+    // amount_due from server already equals invoice_amount − total_paid; do not subtract again
+    const invoiceDue = Number(inv?.amount_due ?? Math.max(0, Number(inv?.invoice_amount ?? 0) - Number(inv?.total_paid ?? 0)))
     if (amount > invoiceDue) {
       setError(`Amount cannot exceed invoice balance due (₹${invoiceDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}).`)
       return
@@ -1214,11 +1262,22 @@ export default function OrderDetailsPage() {
     }
   }
 
-  const handleInvoiceAttachmentUpload = async (file: File) => {
+  const handleInvoiceAttachmentUpload = async (
+    file: File,
+    invoiceIdOverride?: string | null,
+    silent = false
+  ): Promise<{ success: boolean; error?: string }> => {
     setUploadingInvoiceAttachment(true)
     setError(null)
 
     try {
+      const targetInvoiceId = invoiceIdOverride ?? selectedInvoiceId
+      if (!targetInvoiceId) {
+        const message = "Please save/select an invoice before uploading attachments."
+        if (!silent) setError(message)
+        return { success: false, error: message }
+      }
+
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
         reader.onloadend = () => {
@@ -1232,7 +1291,7 @@ export default function OrderDetailsPage() {
 
       const result = await uploadInvoiceAttachment(
         orderId,
-        selectedInvoiceId,
+        targetInvoiceId,
         base64,
         file.name,
         file.type,
@@ -1240,18 +1299,56 @@ export default function OrderDetailsPage() {
       )
 
       if (result.success) {
-        setSuccess("Invoice attachment uploaded successfully!")
-        await loadInvoiceAttachments()
-        setTimeout(() => setSuccess(null), 3000)
+        if ((result as any).data?.id) {
+          const created = (result as any).data
+          setInvoiceAttachments((prev) => {
+            const next = Array.isArray(prev) ? prev.filter((row: any) => row.id !== created.id) : []
+            return [created, ...next]
+          })
+        }
+        if (!silent) setSuccess("Invoice attachment uploaded successfully!")
+        await Promise.all([
+          loadInvoiceAttachments(),
+          (async () => {
+            const invRes = await getOrderInvoices(orderId)
+            if (invRes.success) setOrderInvoices(invRes.data)
+          })(),
+        ])
+        if (!silent) setTimeout(() => setSuccess(null), 3000)
+        return { success: true }
       } else {
-        setError(result.error || "Failed to upload invoice attachment")
+        const message = result.error || "Failed to upload invoice attachment"
+        if (!silent) setError(message)
+        return { success: false, error: message }
       }
     } catch (err: any) {
-      setError(err.message || "Failed to upload invoice attachment")
+      const message = err.message || "Failed to upload invoice attachment"
+      if (!silent) setError(message)
+      return { success: false, error: message }
     } finally {
       setUploadingInvoiceAttachment(false)
     }
   }
+
+  const startCreateInvoiceDraft = useCallback(() => {
+    setSelectedInvoiceId(null)
+    setInvoiceDraftId(null)
+    setInvoiceDraftDispatchId("")
+    setInvoiceDraftNumber(`INV-${order?.internal_order_number || orderId.slice(0, 8)}-${(orderInvoices.length || 0) + 1}`)
+    setInvoiceDraftDate(new Date().toISOString().split("T")[0])
+    setInvoiceDraftAmount("")
+    setInvoiceDraftNotes("")
+    setInvoiceDraftAttachment(null)
+    const firstDispatch = invoiceEligibleDispatches.find((d: any) => !invoiceDispatchIds.has(d.id))
+    setInvoiceDraftDispatchId(firstDispatch?.id ?? "")
+    setShowCreateInvoiceForm(true)
+  }, [
+    order?.internal_order_number,
+    orderId,
+    orderInvoices.length,
+    invoiceEligibleDispatches,
+    invoiceDispatchIds,
+  ])
 
   const handleUpdateQuantity = async (itemId: string, newQuantity: number) => {
     if (newQuantity <= 0) {
@@ -2764,668 +2861,875 @@ export default function OrderDetailsPage() {
           ) : null}
         </TabsContent>
 
-        {/* Payment Tab — Accordion layout */}
+        {/* Payment Tab */}
         <TabsContent value="payment" className="mt-6">
-          <div className="mx-auto max-w-[860px] space-y-5 px-6">
+          <div className="mx-auto max-w-4xl px-4">
+            <div className="space-y-4">
 
             {/* ── KPI Summary ── */}
-            <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-400">Total Invoiced</p>
-                <p className="text-2xl font-semibold text-slate-900">
-                  ₹{paymentSummary.totalInvoiced.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-400">Total Received</p>
-                <p className="text-2xl font-semibold text-green-600">
-                  ₹{paymentSummary.totalPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-400">Balance Due</p>
-                <p className={`text-2xl font-semibold ${paymentSummary.amountDue > 0 ? "text-red-600" : "text-slate-900"}`}>
-                  ₹{paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-400">Status</p>
-                <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-                  derivedPaymentStatus === "complete" ? "bg-green-100 text-green-800" :
-                  derivedPaymentStatus === "partial"  ? "bg-yellow-100 text-yellow-800" :
-                  "bg-amber-100 text-amber-800"
-                }`}>
-                  {derivedPaymentStatus === "complete" ? "Paid" : derivedPaymentStatus === "partial" ? "Partial" : "Pending"}
-                </span>
-              </div>
-            </div>
+            {(() => {
+              const paidPct = paymentSummary.totalInvoiced > 0
+                ? Math.min(100, (paymentSummary.totalPaid / paymentSummary.totalInvoiced) * 100)
+                : 0
+              const statusMeta = derivedPaymentStatus === "complete"
+                ? { label: "Fully Paid", dot: "bg-emerald-500", badge: "bg-emerald-50 text-emerald-700 border-emerald-200", accent: "border-l-emerald-500", bar: "bg-emerald-500" }
+                : derivedPaymentStatus === "partial"
+                ? { label: "Partial Payment", dot: "bg-amber-500", badge: "bg-amber-50 text-amber-700 border-amber-200", accent: "border-l-amber-400", bar: "bg-amber-400" }
+                : { label: "Payment Pending", dot: "bg-slate-400", badge: "bg-slate-100 text-slate-500 border-slate-200", accent: "border-l-slate-300", bar: "bg-slate-200" }
+
+              return (
+                <div className={`overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm border-l-4 ${statusMeta.accent}`}>
+                  {/* ── Metrics row ── */}
+                  <div className="grid grid-cols-2 divide-slate-100 sm:grid-cols-4 sm:divide-x sm:divide-y-0 divide-y">
+
+                    {/* Total Invoiced */}
+                    <div className="px-5 py-4">
+                      <div className="mb-1.5 flex items-center gap-1.5">
+                        <div className="flex h-5 w-5 items-center justify-center rounded bg-indigo-50">
+                          <FileText className="h-3 w-3 text-indigo-500" />
+                        </div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Total Invoiced</p>
+                      </div>
+                      <p className="text-xl font-bold tracking-tight text-slate-800">
+                        ₹{paymentSummary.totalInvoiced.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </p>
+                      {paymentSummary.totalInvoiced === 0 && (
+                        <p className="mt-0.5 text-[10px] text-slate-400">No invoices raised</p>
+                      )}
+                    </div>
+
+                    {/* Total Received */}
+                    <div className="px-5 py-4">
+                      <div className="mb-1.5 flex items-center gap-1.5">
+                        <div className="flex h-5 w-5 items-center justify-center rounded bg-emerald-50">
+                          <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                        </div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Received</p>
+                      </div>
+                      <p className="text-xl font-bold tracking-tight text-emerald-600">
+                        ₹{paymentSummary.totalPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </p>
+                      {paymentSummary.totalPaid === 0 && paymentSummary.totalInvoiced > 0 && (
+                        <p className="mt-0.5 text-[10px] text-amber-500">Awaiting payment</p>
+                      )}
+                    </div>
+
+                    {/* Balance Due */}
+                    <div className={`px-5 py-4 ${paymentSummary.amountDue > 0 ? "bg-red-50/40" : ""}`}>
+                      <div className="mb-1.5 flex items-center gap-1.5">
+                        <div className={`flex h-5 w-5 items-center justify-center rounded ${paymentSummary.amountDue > 0 ? "bg-red-100" : "bg-slate-100"}`}>
+                          <AlertCircle className={`h-3 w-3 ${paymentSummary.amountDue > 0 ? "text-red-500" : "text-slate-300"}`} />
+                        </div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Balance Due</p>
+                      </div>
+                      <p className={`text-xl font-bold tracking-tight ${paymentSummary.amountDue > 0 ? "text-red-600" : "text-slate-400"}`}>
+                        ₹{paymentSummary.amountDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </p>
+                      {paymentSummary.amountDue > 0 && (
+                        <p className="mt-0.5 text-[10px] font-medium text-red-400">Outstanding balance</p>
+                      )}
+                    </div>
+
+                    {/* Status */}
+                    <div className="flex flex-col justify-center px-5 py-4">
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Status</p>
+                      <span className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold ${statusMeta.badge}`}>
+                        <span className={`h-2 w-2 rounded-full ${statusMeta.dot}`} />
+                        {statusMeta.label}
+                      </span>
+                      {derivedPaymentStatus === "complete" && (
+                        <p className="mt-1.5 text-[10px] text-emerald-600">All invoices cleared</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ── Progress bar ── */}
+                  <div className="border-t border-slate-100 bg-slate-50/50 px-5 py-3">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <p className="text-[10px] text-slate-400">Collection progress</p>
+                      <p className={`text-[10px] font-bold ${paidPct >= 100 ? "text-emerald-600" : paidPct > 0 ? "text-amber-600" : "text-slate-400"}`}>
+                        {paidPct.toFixed(0)}%
+                      </p>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className={`h-full rounded-full transition-all duration-700 ${statusMeta.bar}`}
+                        style={{ width: `${paidPct}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* ── Alerts ── */}
             {(!canRecordPayment || order.cash_discount) && (
               <div className="space-y-2">
                 {!canRecordPayment && (
-                  <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                    <p className="text-sm text-slate-600">
-                      Payment recording requires at least one dispatch. Go to the <strong>Shipment</strong> tab first.
-                    </p>
+                  <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3.5">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800">Dispatch required before recording payment</p>
+                      <p className="mt-0.5 text-xs text-amber-700">
+                        Create at least one dispatch in the <strong>Shipment</strong> tab before you can record payments or save invoices.
+                      </p>
+                    </div>
                   </div>
                 )}
                 {order.cash_discount && (
-                  <div className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
-                    <CreditCard className="h-4 w-4 shrink-0 text-blue-400" />
-                    <p className="text-sm text-blue-800">
-                      Cash discount applied — a payment follow-up reminder is auto-created 14 days after dispatch.
-                    </p>
+                  <div className="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3.5">
+                    <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />
+                    <div>
+                      <p className="text-sm font-semibold text-indigo-800">Cash Discount Active</p>
+                      <p className="mt-0.5 text-xs text-indigo-700">
+                        A payment follow-up reminder will be auto-created 14 days after the first dispatch.
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
-            {/* ── Dispatches missing invoices — orange callout ── */}
-            {dispatches?.filter((d: any) => d.dispatch_type !== "return").some((d: any) => !orderInvoices.some((i: any) => i.dispatch_id === d.id)) && (
-              <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 shrink-0 text-orange-500" />
-                  <p className="text-sm font-semibold text-orange-800">Dispatches missing an invoice</p>
-                </div>
-                <div className="space-y-2">
-                  {dispatches
-                    .filter((d: any) => d.dispatch_type !== "return")
-                    .filter((d: any) => !orderInvoices.some((i: any) => i.dispatch_id === d.id))
-                    .map((d: any) => {
-                      const dispDate = d.dispatch_date
-                        ? new Date(d.dispatch_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-                        : "—"
-                      return (
-                        <div key={d.id} className="flex items-center justify-between gap-2 rounded-xl border border-orange-200 bg-white px-4 py-3">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-800">
-                              {d.dispatch_type === "full" ? "Full" : "Partial"} Dispatch
-                            </p>
-                            <p className="text-xs text-slate-500">{dispDate}</p>
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="h-8 rounded-lg bg-orange-500 px-4 text-xs font-semibold text-white hover:bg-orange-600"
-                            onClick={() => {
-                              setSelectedInvoiceId(null)
-                              setInvoiceDraftId(null)
-                              setInvoiceDraftDispatchId(d.id)
-                              setInvoiceDraftNumber(`INV-${order.internal_order_number || order.id.slice(0, 8)}-${(orderInvoices.length || 0) + 1}`)
-                              setInvoiceDraftDate(new Date().toISOString().split("T")[0])
-                              setInvoiceDraftAmount("")
-                              setInvoiceDraftNotes("")
-                            }}
-                          >
-                            Create Invoice
-                          </Button>
-                        </div>
-                      )
-                    })}
-                </div>
-              </div>
-            )}
 
-            {/* ── Create Invoice form — visible when no invoice is selected and draft is empty ── */}
-            {invoiceDraftId === null && selectedInvoiceId === null && (
-              <div className="rounded-2xl border-2 border-dashed border-orange-300 bg-orange-50/30 p-5">
-                <div className="mb-4 flex items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-100">
-                    <FileText className="h-4 w-4 text-orange-500" />
+            <div className="flex items-center justify-end">
+              <Button
+                type="button"
+                size="sm"
+                onClick={startCreateInvoiceDraft}
+                className="h-8 rounded-md bg-indigo-600 px-4 text-xs font-semibold text-white hover:bg-indigo-700"
+              >
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                New Invoice
+              </Button>
+            </div>
+
+            {/* ── Create Invoice form ── */}
+            {showCreateInvoiceForm && (
+              <div className="overflow-hidden rounded-xl border border-indigo-200 bg-white shadow-sm">
+                <input
+                  id="create-invoice-attachment-input"
+                  type="file"
+                  accept="application/pdf,image/*"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null
+                    setInvoiceDraftAttachment(file)
+                    event.target.value = ""
+                  }}
+                />
+                {/* Form header */}
+                <div className="flex items-center gap-3 border-b border-indigo-100 bg-indigo-50 px-5 py-3.5">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600">
+                    <FileText className="h-4 w-4 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-900">New Invoice</h3>
-                    <p className="text-[11px] text-slate-500">Fill in the details and save to create the invoice</p>
+                    <h3 className="text-sm font-semibold text-indigo-900">New Invoice</h3>
+                    <p className="text-[11px] text-indigo-600">Fill in the details below and click Save Invoice</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Invoice Number</Label>
-                    <Input
-                      value={invoiceDraftNumber}
-                      onChange={(e) => setInvoiceDraftNumber(e.target.value)}
-                      className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                    />
-                  </div>
-                  <div>
-                    <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Invoice Date</Label>
-                    <Input
-                      type="date"
-                      value={invoiceDraftDate || new Date().toISOString().split("T")[0]}
-                      onChange={(e) => setInvoiceDraftDate(e.target.value)}
-                      className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                    />
-                  </div>
-                  <div>
-                    <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Invoice Amount (₹)</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={invoiceDraftAmount}
-                      onChange={(e) => setInvoiceDraftAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                    />
-                  </div>
-                  <div>
-                    <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Link to Dispatch (optional)</Label>
-                    <select
-                      value={invoiceDraftDispatchId}
-                      onChange={(e) => setInvoiceDraftDispatchId(e.target.value)}
-                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-orange-500 focus:outline-none focus:ring-[3px] focus:ring-orange-500/15"
-                    >
-                      <option value="">Manual / Not linked</option>
-                      {(dispatches || [])
-                        .filter((d: any) => d.dispatch_type !== "return")
-                        .map((d: any) => {
-                          const dispDate = d.dispatch_date
-                            ? new Date(d.dispatch_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-                            : "—"
-                          return (
-                            <option key={d.id} value={d.id}>
-                              {d.dispatch_type === "full" ? "Full" : "Partial"} • {dispDate}
+                {/* Form fields */}
+                <div className="p-5">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <Label className="mb-1.5 block text-xs font-medium text-slate-600">Invoice Number <span className="text-red-400">*</span></Label>
+                      <Input
+                        value={invoiceDraftNumber}
+                        onChange={(e) => setInvoiceDraftNumber(e.target.value)}
+                        className="h-9 border-slate-200 bg-white text-sm focus-visible:ring-indigo-400"
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-1.5 block text-xs font-medium text-slate-600">Invoice Date <span className="text-red-400">*</span></Label>
+                      <Input
+                        type="date"
+                        value={invoiceDraftDate || new Date().toISOString().split("T")[0]}
+                        onChange={(e) => setInvoiceDraftDate(e.target.value)}
+                        className="h-9 border-slate-200 bg-white text-sm focus-visible:ring-indigo-400"
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-1.5 block text-xs font-medium text-slate-600">Invoice Amount (₹) <span className="text-red-400">*</span></Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={invoiceDraftAmount}
+                        onChange={(e) => setInvoiceDraftAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="h-9 border-slate-200 bg-white text-sm focus-visible:ring-indigo-400"
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-1.5 block text-xs font-medium text-slate-600">Link to Dispatch</Label>
+                      <select
+                        value={invoiceDraftDispatchId}
+                        onChange={(e) => setInvoiceDraftDispatchId(e.target.value)}
+                        className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      >
+                        <option value="">Not linked to a dispatch</option>
+                        {invoiceEligibleDispatches
+                          .filter((d: any) => !invoiceDispatchIds.has(d.id))
+                          .map((dispatch: any) => (
+                            <option key={dispatch.id} value={dispatch.id}>
+                              {formatDispatchOptionLabel(dispatch)}
                             </option>
-                          )
-                        })}
-                    </select>
+                          ))}
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label className="mb-1.5 block text-xs font-medium text-slate-600">Notes (optional)</Label>
+                      <Input
+                        value={invoiceDraftNotes}
+                        onChange={(e) => setInvoiceDraftNotes(e.target.value)}
+                        placeholder="Any additional notes about this invoice..."
+                        className="h-9 border-slate-200 bg-white text-sm focus-visible:ring-indigo-400"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label className="mb-1.5 block text-xs font-medium text-slate-600">Attachment (optional)</Label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50"
+                          onClick={() => (document.getElementById("create-invoice-attachment-input") as HTMLInputElement | null)?.click()}
+                        >
+                          <Upload className="mr-1 h-3.5 w-3.5" />
+                          {invoiceDraftAttachment ? "Change file" : "Upload PDF / Image"}
+                        </Button>
+                        {invoiceDraftAttachment ? (
+                          <>
+                            <span className="rounded-md bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-700">
+                              {invoiceDraftAttachment.name} ({(invoiceDraftAttachment.size / 1024).toFixed(1)} KB)
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="h-7 px-2 text-[11px] text-red-500 hover:bg-red-50 hover:text-red-700"
+                              onClick={() => setInvoiceDraftAttachment(null)}
+                            >
+                              Remove
+                            </Button>
+                          </>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">PDF · JPG · PNG accepted</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="sm:col-span-2">
-                    <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Notes (optional)</Label>
-                    <Input
-                      value={invoiceDraftNotes}
-                      onChange={(e) => setInvoiceDraftNotes(e.target.value)}
-                      placeholder="Any additional notes..."
-                      className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                    />
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center justify-end gap-2">
-                  {orderInvoices.length > 0 && (
+                  <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
+                    {orderInvoices.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={savingInvoice}
+                        onClick={() => {
+                          const last = orderInvoices[orderInvoices.length - 1]
+                          setSelectedInvoiceId(last.id)
+                          setInvoiceDraftId(last.id)
+                          setInvoiceDraftNumber(last.invoice_number ?? "")
+                          setInvoiceDraftDate(String(last.invoice_date || "").split("T")[0] || new Date().toISOString().split("T")[0])
+                          setInvoiceDraftAmount(String(last.invoice_amount ?? ""))
+                          setInvoiceDraftDispatchId(last.dispatch_id ?? "")
+                          setInvoiceDraftNotes(last.notes ?? "")
+                          setInvoiceDraftAttachment(null)
+                          setShowCreateInvoiceForm(false)
+                        }}
+                        className="h-9 rounded-lg border-slate-200 px-4 text-xs text-slate-600 hover:bg-slate-50"
+                      >
+                        Cancel
+                      </Button>
+                    )}
                     <Button
                       type="button"
-                      variant="outline"
-                      disabled={savingInvoice}
-                      onClick={() => {
-                        const last = orderInvoices[orderInvoices.length - 1]
-                        setSelectedInvoiceId(last.id)
-                        setInvoiceDraftId(last.id)
-                        setInvoiceDraftNumber(last.invoice_number ?? "")
-                        setInvoiceDraftDate(String(last.invoice_date || "").split("T")[0] || new Date().toISOString().split("T")[0])
-                        setInvoiceDraftAmount(String(last.invoice_amount ?? ""))
-                        setInvoiceDraftDispatchId(last.dispatch_id ?? "")
-                        setInvoiceDraftNotes(last.notes ?? "")
-                      }}
-                      className="h-9 rounded-lg border-slate-200 px-4 text-xs text-slate-600 hover:bg-slate-50"
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    disabled={savingInvoice || !invoiceDraftNumber.trim() || invoiceDraftAmount.trim() === ""}
-                    onClick={async () => {
-                      setError(null)
-                      const amt = Number(invoiceDraftAmount)
-                      if (!Number.isFinite(amt) || amt < 0) {
-                        setError("Enter a valid invoice amount.")
-                        return
-                      }
-                      setSavingInvoice(true)
-                      try {
-                        const res = await createOrUpdateOrderInvoice({
-                          orderId,
-                          invoiceId: undefined,
-                          invoiceNumber: invoiceDraftNumber,
-                          invoiceDate: invoiceDraftDate || undefined,
-                          invoiceAmount: amt,
-                          notes: invoiceDraftNotes || undefined,
-                          dispatchId: invoiceDraftDispatchId || null,
-                        })
-                        if (!res.success) {
-                          setError(res.error || "Failed to save invoice")
+                      disabled={savingInvoice || !invoiceDraftNumber.trim() || invoiceDraftAmount.trim() === ""}
+                      onClick={async () => {
+                        setError(null)
+                        const amt = Number(invoiceDraftAmount)
+                        if (!Number.isFinite(amt) || amt < 0) {
+                          setError("Enter a valid invoice amount.")
                           return
                         }
-                        const invRes = await getOrderInvoices(orderId)
-                        if (invRes.success) setOrderInvoices(invRes.data)
-                        const savedId = (res as any).data?.id
-                        if (savedId) setSelectedInvoiceId(savedId)
-                        setSuccess("Invoice saved!")
-                        setTimeout(() => setSuccess(null), 2000)
-                      } finally {
-                        setSavingInvoice(false)
-                      }
-                    }}
-                    className="h-9 rounded-lg bg-orange-500 px-6 text-xs font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
-                  >
-                    {savingInvoice ? "Saving..." : "Save Invoice"}
-                  </Button>
+                        const dispatchIdForSave = invoiceDraftDispatchId || null
+                        const selectedDispatch = invoiceEligibleDispatches.find((d: any) => d.id === dispatchIdForSave)
+                        const autoLinkMode = !dispatchIdForSave ? "manual" : selectedDispatch?.dispatch_type === "full" ? "full" : "batch"
+                        setSavingInvoice(true)
+                        try {
+                          const res = await createOrUpdateOrderInvoice({
+                            orderId,
+                            invoiceId: undefined,
+                            invoiceNumber: invoiceDraftNumber,
+                            invoiceDate: invoiceDraftDate || undefined,
+                            invoiceAmount: amt,
+                            notes: invoiceDraftNotes || undefined,
+                            dispatchId: dispatchIdForSave,
+                            dispatchLinkMode: autoLinkMode,
+                          })
+                          if (!res.success) {
+                            setError(res.error || "Failed to save invoice")
+                            return
+                          }
+                          const invRes = await getOrderInvoices(orderId)
+                          if (invRes.success) setOrderInvoices(invRes.data)
+                          const savedId = (res as any).data?.id
+                          if (savedId) setSelectedInvoiceId(savedId)
+                          let attachmentUploaded = false
+                          if (savedId && invoiceDraftAttachment) {
+                            const attachmentResult = await handleInvoiceAttachmentUpload(invoiceDraftAttachment, savedId, true)
+                            if (!attachmentResult.success) {
+                              setError(attachmentResult.error || "Invoice saved but attachment upload failed.")
+                            } else {
+                              attachmentUploaded = true
+                              setInvoiceDraftAttachment(null)
+                            }
+                          }
+                          setSuccess(attachmentUploaded ? "Invoice and attachment saved!" : "Invoice saved successfully!")
+                          setShowCreateInvoiceForm(false)
+                          setTimeout(() => setSuccess(null), 2000)
+                        } finally {
+                          setSavingInvoice(false)
+                        }
+                      }}
+                      className="h-9 rounded-lg bg-indigo-600 px-6 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {savingInvoice ? "Saving..." : "Save Invoice"}
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* ── Invoices accordion list ── */}
+            {/* ── Invoices list ── */}
             <div className="space-y-3">
               {/* Section header */}
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-slate-400" />
+                  <Receipt className="h-4 w-4 text-indigo-400" />
                   <h3 className="text-sm font-semibold text-slate-900">
-                    Invoices{orderInvoices.length > 0 ? ` (${orderInvoices.length})` : ""}
+                    Invoices
                   </h3>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={async () => {
-                      const res = await getOrderInvoices(orderId)
-                      if (res.success) setOrderInvoices(res.data)
-                      await loadOrderPayments()
-                    }}
-                    disabled={loadingPayments}
-                    className="h-8 w-8 rounded-full p-0 text-slate-400 hover:bg-orange-50 hover:text-orange-500"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${loadingPayments ? "animate-spin" : ""}`} />
-                  </Button>
-                  {(invoiceDraftId !== null || selectedInvoiceId !== null) && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedInvoiceId(null)
-                        setInvoiceDraftId(null)
-                        setInvoiceDraftDispatchId("")
-                        setInvoiceDraftNumber(`INV-${order.internal_order_number || order.id.slice(0, 8)}-${(orderInvoices.length || 0) + 1}`)
-                        setInvoiceDraftDate(new Date().toISOString().split("T")[0])
-                        setInvoiceDraftAmount("")
-                        setInvoiceDraftNotes("")
-                      }}
-                      className="h-8 rounded-lg border-slate-200 text-xs text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
-                    >
-                      <Plus className="mr-1.5 h-3.5 w-3.5" />
-                      New Invoice
-                    </Button>
+                  {orderInvoices.length > 0 && (
+                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">
+                      {orderInvoices.length}
+                    </span>
                   )}
                 </div>
+                {orderInvoices.length > 1 && (
+                  <div className="flex items-center gap-2">
+                    <Label className="text-[11px] text-slate-500">Viewing</Label>
+                    <select
+                      value={selectedInvoiceId ?? orderInvoices[0]?.id ?? ""}
+                      onChange={(e) => {
+                        const selected = orderInvoices.find((invoice: any) => invoice.id === e.target.value)
+                        if (!selected) return
+                        setSelectedInvoiceId(selected.id)
+                        setInvoiceDraftId(selected.id)
+                        setInvoiceDraftNumber(selected.invoice_number ?? "")
+                        setInvoiceDraftDate(String(selected.invoice_date || "").split("T")[0] || new Date().toISOString().split("T")[0])
+                        setInvoiceDraftAmount(String(selected.invoice_amount ?? ""))
+                        setInvoiceDraftDispatchId(selected.dispatch_id ?? "")
+                        setInvoiceDraftNotes(selected.notes ?? "")
+                        setShowCreateInvoiceForm(false)
+                      }}
+                      className="h-8 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    >
+                      {orderInvoices.map((invoice: any) => (
+                        <option key={invoice.id} value={invoice.id}>
+                          {invoice.invoice_number} — {getInvoiceDispatchContextLabel(invoice)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Empty state */}
-              {orderInvoices.length === 0 && (invoiceDraftId !== null || selectedInvoiceId !== null) && (
-                <div className="flex min-h-[110px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50">
-                  <FileText className="h-7 w-7 text-slate-200" />
-                  <p className="mt-2 text-[12px] text-slate-400">No invoices yet — create one above</p>
+              {orderInvoices.length === 0 && !showCreateInvoiceForm && (
+                <div className="flex min-h-[120px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50">
+                  <FileText className="h-8 w-8 text-slate-200" />
+                  <p className="mt-2 text-sm font-medium text-slate-400">No invoices yet</p>
+                  <p className="text-[11px] text-slate-400">Click &quot;New Invoice&quot; above to create one</p>
                 </div>
               )}
 
-              {/* Invoice accordion cards */}
-              {orderInvoices.map((inv: any) => {
-                const isOpen = selectedInvoiceId === inv.id
-                const isInvoiceLocked = !!invoiceDraftId
-                const invPayments = orderPayments.filter((p: any) => p.invoice_id === inv.id)
+              {/* Invoice cards */}
+              {(selectedInvoiceId
+                ? orderInvoices.filter((invoice: any) => invoice.id === selectedInvoiceId)
+                : orderInvoices.slice(0, 1)
+              ).map((inv: any) => {
+                const invPayments    = orderPayments.filter((p: any) => p.invoice_id === inv.id)
                 const invAttachments = invoiceAttachments.filter((a: any) => a.invoice_id === inv.id)
-                const invPaid    = Number(inv.total_paid || 0)
-                const invAmount  = Number(inv.invoice_amount || 0)
-                const invDue     = Number(inv.amount_due || 0)
-                const paidPct    = invAmount > 0 ? Math.min(100, (invPaid / invAmount) * 100) : 0
-                const borderCls  = inv.status === "paid"    ? "border-l-green-400"
-                                 : inv.status === "partial" ? "border-l-amber-400"
-                                 : "border-l-slate-300"
-                const badgeCls   = inv.status === "paid"    ? "bg-green-100 text-green-700 border-green-200"
-                                 : inv.status === "partial" ? "bg-amber-100 text-amber-700 border-amber-200"
-                                 : "bg-slate-100 text-slate-600 border-slate-200"
+                const invPaid        = Number(inv.total_paid || 0)
+                const invDue         = Number(inv.amount_due || 0)
+                const invAmt         = Number(inv.invoice_amount || 0)
+                const isFullyPaid    = invDue === 0 && invAmt > 0
+                const invStatusMeta  = isFullyPaid
+                  ? { label: "Paid", cls: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" }
+                  : invPaid > 0
+                  ? { label: "Partial", cls: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" }
+                  : { label: "Pending", cls: "bg-slate-100 text-slate-500 border-slate-200", dot: "bg-slate-400" }
 
                 return (
-                  <div key={inv.id} className={`overflow-hidden rounded-2xl border border-l-4 bg-white shadow-sm ${borderCls}`}>
+                  <div key={inv.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
 
-                    {/* ── Card header — click to expand/collapse ── */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (isOpen) {
-                          setSelectedInvoiceId(null)
-                        } else {
-                          setSelectedInvoiceId(inv.id)
-                          setInvoiceDraftId(inv.id)
-                          setInvoiceDraftNumber(inv.invoice_number ?? "")
-                          setInvoiceDraftDate(String(inv.invoice_date || "").split("T")[0] || new Date().toISOString().split("T")[0])
-                          setInvoiceDraftAmount(String(inv.invoice_amount ?? ""))
-                          setInvoiceDraftDispatchId(inv.dispatch_id ?? "")
-                          setInvoiceDraftNotes(inv.notes ?? "")
-                          void loadInvoiceAttachments()
-                        }
-                      }}
-                      className="w-full px-5 py-4 text-left transition-colors hover:bg-slate-50/60"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          {/* Invoice number + type badge */}
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-semibold text-slate-900">{inv.invoice_number}</p>
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                              {inv.dispatch_id ? "Dispatch" : "Manual"}
-                            </span>
-                            {inv.invoice_date && (
-                              <span className="text-[11px] text-slate-400">
-                                {new Date(inv.invoice_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-                              </span>
-                            )}
-                          </div>
-                          {/* Amount stats */}
-                          <div className="mt-2.5 grid grid-cols-3 gap-3">
-                            <div>
-                              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Amount</p>
-                              <p className="text-xs font-semibold text-slate-800">₹{invAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
-                            </div>
-                            <div>
-                              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Paid</p>
-                              <p className="text-xs font-semibold text-green-600">₹{invPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
-                            </div>
-                            <div>
-                              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Due</p>
-                              <p className={`text-xs font-semibold ${invDue > 0 ? "text-red-600" : "text-slate-800"}`}>
-                                ₹{invDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                              </p>
-                            </div>
-                          </div>
-                          {/* Progress bar */}
-                          <div className="mt-2.5">
-                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                              <div
-                                className={`h-full rounded-full transition-all ${
-                                  inv.status === "paid" ? "bg-green-400" : "bg-amber-400"
-                                }`}
-                                style={{ width: `${paidPct}%` }}
-                              />
-                            </div>
-                          </div>
+                    {/* Card header strip */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600">
+                          <FileText className="h-4 w-4 text-white" />
                         </div>
-                        {/* Status + chevron */}
-                        <div className="flex shrink-0 flex-col items-end gap-2">
-                          <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${badgeCls}`}>
-                            {inv.status === "paid" ? "Paid" : inv.status === "partial" ? "Partial" : "Pending"}
-                          </span>
-                          <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                        <div>
+                          <p className="text-sm font-bold text-slate-800">{inv.invoice_number}</p>
+                          <p className="text-[10px] text-slate-400">{getInvoiceDispatchContextLabel(inv)}</p>
                         </div>
                       </div>
-                    </button>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <p className="text-[10px] text-slate-400">Invoice Amount</p>
+                          <p className="text-sm font-bold text-slate-800">₹{invAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+                        </div>
+                        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${invStatusMeta.cls}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${invStatusMeta.dot}`} />
+                          {invStatusMeta.label}
+                        </span>
+                      </div>
+                    </div>
 
-                    {/* ── Expanded section ── */}
-                    {isOpen && (
-                      <div className="border-t border-slate-100 bg-slate-50/40">
+                    {/* Hidden file input */}
+                    <input
+                      id={`invoice-attachment-input-${inv.id}`}
+                      type="file"
+                      accept="application/pdf,image/*"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0]
+                        if (file) handleInvoiceAttachmentUpload(file, inv.id)
+                        event.target.value = ""
+                      }}
+                    />
 
-                        {/* Attachment upload input (hidden) */}
-                        <input
-                          id="invoice-attachment-input"
-                          type="file"
-                          accept="application/pdf,image/*"
-                          className="hidden"
-                          onChange={(event) => {
-                            const file = event.target.files?.[0]
-                            if (file) handleInvoiceAttachmentUpload(file)
-                            event.target.value = ""
-                          }}
-                        />
+                    <div className="grid grid-cols-1 divide-y divide-slate-100 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
 
-                        {/* ── Record Payment ── */}
-                        <div className="p-5">
-                          <div className="mb-3 flex items-center gap-2">
-                            <Receipt className="h-4 w-4 text-slate-400" />
-                            <h4 className="text-sm font-semibold text-slate-800">Record a Payment</h4>
+                      {/* ── LEFT: Invoice Details + Attachments ── */}
+                      <div className="space-y-5 p-4">
+
+                        {/* Invoice detail fields */}
+                        <div>
+                          <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-indigo-400">Invoice Details</p>
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <Label className="mb-1.5 block text-xs font-medium text-slate-500">Invoice No.</Label>
+                                <Input value={invoiceDraftNumber} onChange={(e) => setInvoiceDraftNumber(e.target.value)}
+                                  className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-indigo-400" disabled={savingInvoice} />
+                              </div>
+                              <div>
+                                <Label className="mb-1.5 block text-xs font-medium text-slate-500">Date</Label>
+                                <Input type="date" value={invoiceDraftDate || new Date().toISOString().split("T")[0]}
+                                  onChange={(e) => setInvoiceDraftDate(e.target.value)}
+                                  className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-indigo-400" disabled={savingInvoice} />
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="mb-1.5 block text-xs font-medium text-slate-500">Amount (₹)</Label>
+                              <Input type="number" min={0} step="0.01" value={invoiceDraftAmount} placeholder="0.00"
+                                onChange={(e) => setInvoiceDraftAmount(e.target.value)}
+                                className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-indigo-400" disabled={savingInvoice} />
+                            </div>
+                            <div>
+                              <Label className="mb-1.5 block text-xs font-medium text-slate-500">Link to Dispatch</Label>
+                              <select value={invoiceDraftDispatchId} onChange={(e) => setInvoiceDraftDispatchId(e.target.value)}
+                                disabled={savingInvoice}
+                                className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50">
+                                <option value="">Not linked to a dispatch</option>
+                                {(dispatches || []).filter((d: any) => d.dispatch_type !== "return").map((d: any) => {
+                                  const dispDate = d.dispatch_date
+                                    ? new Date(d.dispatch_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                                    : "—"
+                                  return (
+                                    <option key={d.id} value={d.id}>
+                                      {d.dispatch_type === "full" ? "Full Dispatch" : "Partial Dispatch"} — {dispDate}
+                                    </option>
+                                  )
+                                })}
+                              </select>
+                            </div>
+                            <div>
+                              <Label className="mb-1.5 block text-xs font-medium text-slate-500">Notes</Label>
+                              <Input value={invoiceDraftNotes} placeholder="Optional notes..." onChange={(e) => setInvoiceDraftNotes(e.target.value)}
+                                className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-indigo-400" disabled={savingInvoice} />
+                            </div>
+
+                            {/* Paid / Balance summary */}
+                            <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-100">
+                              <div className="bg-emerald-50 px-3 py-2.5">
+                                <p className="text-[10px] font-medium text-emerald-600">Paid</p>
+                                <p className="text-sm font-bold text-emerald-700">₹{invPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+                              </div>
+                              <div className={`px-3 py-2.5 ${invDue > 0 ? "bg-red-50" : "bg-slate-50"}`}>
+                                <p className={`text-[10px] font-medium ${invDue > 0 ? "text-red-500" : "text-slate-400"}`}>Balance Due</p>
+                                <p className={`text-sm font-bold ${invDue > 0 ? "text-red-600" : "text-slate-400"}`}>
+                                  ₹{invDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                </p>
+                              </div>
+                            </div>
                           </div>
-
-                          {!canRecordPayment ? (
-                            <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
-                              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                              <p className="text-xs text-slate-500">Create a dispatch first to enable payment recording.</p>
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              <div className="grid grid-cols-3 gap-3">
-                                <div>
-                                  <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Amount (₹)</Label>
-                                  <Input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={paymentAmount}
-                                    onChange={(e) => setPaymentAmount(e.target.value)}
-                                    className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                                    disabled={addingPayment}
-                                  />
-                                </div>
-                                <div>
-                                  <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Date</Label>
-                                  <Input
-                                    type="date"
-                                    value={paymentDate || new Date().toISOString().split("T")[0]}
-                                    onChange={(e) => setPaymentDate(e.target.value)}
-                                    className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                                    disabled={addingPayment}
-                                  />
-                                </div>
-                                <div>
-                                  <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Method</Label>
-                                  <Select value={paymentMethod || "cash"} onValueChange={setPaymentMethod} disabled={addingPayment}>
-                                    <SelectTrigger className="h-10 rounded-lg border-slate-200 bg-white focus:ring-[3px] focus:ring-orange-500/15 focus:ring-offset-0">
-                                      <SelectValue placeholder="Method" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="cash">Cash</SelectItem>
-                                      <SelectItem value="upi">UPI</SelectItem>
-                                      <SelectItem value="neft">NEFT</SelectItem>
-                                      <SelectItem value="cheque">Cheque</SelectItem>
-                                      <SelectItem value="rtgs">RTGS</SelectItem>
-                                      <SelectItem value="card">Card</SelectItem>
-                                      <SelectItem value="other">Other</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                              <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                  <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Reference / UTR</Label>
-                                  <Input
-                                    value={paymentReference}
-                                    onChange={(e) => setPaymentReference(e.target.value)}
-                                    className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                                    disabled={addingPayment}
-                                  />
-                                </div>
-                                <div>
-                                  <Label className="mb-1.5 block text-xs font-semibold text-slate-600">Notes</Label>
-                                  <Input
-                                    value={paymentNotes}
-                                    onChange={(e) => setPaymentNotes(e.target.value)}
-                                    className="h-10 rounded-lg border-slate-200 bg-white focus-visible:border-orange-500 focus-visible:ring-[3px] focus-visible:ring-orange-500/15"
-                                    disabled={addingPayment}
-                                  />
-                                </div>
-                              </div>
-                              <Button
-                                type="button"
-                                onClick={handleAddPaymentRecord}
-                                disabled={addingPayment || !paymentAmount}
-                                className="h-10 w-full rounded-lg bg-orange-500 text-[13px] font-medium text-white hover:bg-orange-600 disabled:opacity-50"
-                              >
-                                {addingPayment ? "Saving..." : "Save Payment"}
-                              </Button>
-                            </div>
-                          )}
                         </div>
 
-                        {/* ── Payment History ── */}
-                        {invPayments.length > 0 && (
-                          <div className="border-t border-slate-100 px-5 pb-5 pt-4">
-                            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Payment History</p>
-                            <div className="space-y-1">
-                              {invPayments.map((p: any, idx: number) => (
-                                <div key={p.id} className="group flex items-start gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-white">
-                                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-green-100 text-[10px] font-bold text-green-700">
-                                    {idx + 1}
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-1.5">
-                                      <span className="text-sm font-semibold text-green-600">
-                                        ₹{Number(p.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                                      </span>
-                                      {p.payment_method && (
-                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-                                          {p.payment_method}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div className="mt-0.5 text-[11px] text-slate-400">
-                                      {p.payment_date
-                                        ? new Date(p.payment_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
-                                        : "—"}
-                                      {p.reference && <span> · Ref: {p.reference}</span>}
-                                    </div>
-                                    {p.notes && <p className="mt-0.5 text-[11px] text-slate-500">{p.notes}</p>}
-                                  </div>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={async () => {
-                                      if (confirm("Delete this payment record?")) {
-                                        const result = await deleteOrderPayment(p.id)
-                                        if (result.success) {
-                                          await loadOrderPayments()
-                                          const invRes = await getOrderInvoices(orderId)
-                                          if (invRes.success) setOrderInvoices(invRes.data)
-                                          setSuccess("Payment deleted!")
-                                          setTimeout(() => setSuccess(null), 2000)
-                                        } else {
-                                          setError(result.error || "Failed to delete payment")
-                                        }
-                                      }
-                                    }}
-                                    className="h-7 w-7 rounded-full p-0 text-slate-300 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-red-50 hover:text-red-500"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </Button>
-                                </div>
-                              ))}
-                            </div>
+                        {/* Attachments */}
+                        <div>
+                          <div className="mb-2.5 flex items-center justify-between">
+                            <p className="text-[10px] font-semibold uppercase tracking-widest text-indigo-400">
+                              Attachments{invAttachments.length > 0 ? ` (${invAttachments.length})` : ""}
+                            </p>
+                            <span className="text-[10px] text-slate-400">PDF · JPG · PNG</span>
                           </div>
-                        )}
-
-                        {/* ── Attachments ── */}
-                        <div className="border-t border-slate-100 px-5 pb-5 pt-4">
-                          <div className="mb-3 flex items-center justify-between gap-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Attachments</p>
-                            <span className="text-[10px] text-slate-400">PDF, JPG, PNG</span>
-                          </div>
-
                           {invAttachments.length === 0 ? (
-                            <div
-                              onClick={() => {
-                                if (isInvoiceLocked) return
-                                ;(document.getElementById("invoice-attachment-input") as HTMLInputElement | null)?.click()
-                              }}
-                              className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 py-6 text-center transition-colors ${
-                                !isInvoiceLocked ? "cursor-pointer hover:border-orange-300 hover:bg-orange-50" : "opacity-50"
-                              }`}
-                            >
+                            <div onClick={() => (document.getElementById(`invoice-attachment-input-${inv.id}`) as HTMLInputElement | null)?.click()}
+                              className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-200 py-6 transition-colors hover:border-indigo-300 hover:bg-indigo-50/30">
                               <Upload className="h-5 w-5 text-slate-300" />
-                              <p className="text-[12px] font-medium text-slate-500">
-                                {uploadingInvoiceAttachment
-                                  ? "Uploading..."
-                                  : isInvoiceLocked
-                                    ? "Attachments locked after save"
-                                    : "Click to upload a file"}
+                              <p className="text-[11px] font-medium text-slate-400">
+                                {uploadingInvoiceAttachment ? "Uploading..." : "Click to upload attachment"}
                               </p>
+                              <p className="text-[10px] text-slate-300">PDF, JPG or PNG</p>
                             </div>
                           ) : (
-                            <div className="space-y-2">
+                            <div className="space-y-1.5">
                               {invAttachments.map((attachment: any) => (
-                                <div key={attachment.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3">
-                                  <div className="rounded-lg bg-slate-50 p-2">
-                                    <File className="h-4 w-4 text-slate-400" />
-                                  </div>
+                                <div key={attachment.id} className="flex items-center gap-2.5 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                  <File className="h-3.5 w-3.5 shrink-0 text-indigo-400" />
                                   <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-medium text-slate-800">{attachment.file_name}</p>
-                                    <p className="text-[11px] text-slate-400">
+                                    <p className="truncate text-xs font-medium text-slate-700">{attachment.file_name}</p>
+                                    <p className="text-[10px] text-slate-400">
                                       {attachment.file_size ? `${(attachment.file_size / 1024).toFixed(1)} KB` : ""}
-                                      {attachment.created_at ? ` · ${new Date(attachment.created_at).toLocaleDateString()}` : ""}
+                                      {attachment.created_at ? ` · ${new Date(attachment.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}` : ""}
                                     </p>
                                   </div>
-                                  <div className="flex items-center gap-1.5">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => window.open(attachment.file_url, "_blank")}
-                                      className="h-8 rounded-lg border-slate-200 px-2.5 text-xs text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
-                                    >
+                                  <div className="flex items-center gap-1">
+                                    <Button variant="ghost" size="sm" onClick={() => window.open(attachment.file_url, "_blank")}
+                                      className="h-7 w-7 rounded-md p-0 text-indigo-400 hover:bg-indigo-50 hover:text-indigo-600">
                                       <Download className="h-3.5 w-3.5" />
                                     </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      disabled={isInvoiceLocked}
+                                    <Button variant="ghost" size="sm"
                                       onClick={async () => {
                                         if (confirm("Delete this attachment?")) {
                                           const result = await deleteInvoiceAttachment(attachment.id)
-                                          if (result.success) {
-                                            await loadInvoiceAttachments()
-                                            setSuccess("Attachment deleted!")
-                                            setTimeout(() => setSuccess(null), 2000)
-                                          } else {
-                                            setError(result.error || "Failed to delete attachment")
-                                          }
+                                          if (result.success) { await loadInvoiceAttachments(); setSuccess("Attachment deleted!"); setTimeout(() => setSuccess(null), 2000) }
+                                          else setError(result.error || "Failed to delete attachment")
                                         }
                                       }}
-                                      className="h-8 w-8 rounded-full p-0 text-red-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-                                    >
+                                      className="h-7 w-7 rounded-md p-0 text-slate-400 hover:bg-red-50 hover:text-red-500">
                                       <Trash2 className="h-3.5 w-3.5" />
                                     </Button>
                                   </div>
                                 </div>
                               ))}
-                              {!isInvoiceLocked && (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={uploadingInvoiceAttachment}
-                                  onClick={() => (document.getElementById("invoice-attachment-input") as HTMLInputElement | null)?.click()}
-                                  className="mt-1 h-8 w-full rounded-lg border-dashed border-slate-200 text-xs text-slate-500 hover:border-orange-300 hover:text-orange-600 disabled:opacity-50"
-                                >
-                                  <Plus className="mr-1.5 h-3.5 w-3.5" />
-                                  {uploadingInvoiceAttachment ? "Uploading..." : "Add attachment"}
-                                </Button>
+                              <Button type="button" variant="outline" size="sm" disabled={uploadingInvoiceAttachment}
+                                onClick={() => (document.getElementById(`invoice-attachment-input-${inv.id}`) as HTMLInputElement | null)?.click()}
+                                className="h-7 w-full rounded-lg border-dashed border-slate-200 text-[11px] text-slate-500 hover:border-indigo-300 hover:bg-indigo-50/30 hover:text-indigo-600 disabled:opacity-50">
+                                <Plus className="mr-1 h-3 w-3" />
+                                {uploadingInvoiceAttachment ? "Uploading..." : "Add another file"}
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+
+                        <Button
+                          type="button"
+                          disabled={savingInvoice || !invoiceDraftNumber.trim() || invoiceDraftAmount.trim() === ""}
+                          onClick={async () => {
+                            const amt = Number(invoiceDraftAmount)
+                            if (!Number.isFinite(amt) || amt < 0) { setError("Enter a valid invoice amount."); return }
+                            setSavingInvoice(true)
+                            try {
+                              const res = await createOrUpdateOrderInvoice({
+                                orderId, invoiceId: inv.id,
+                                invoiceNumber: invoiceDraftNumber,
+                                invoiceDate: invoiceDraftDate || undefined,
+                                invoiceAmount: amt,
+                                notes: invoiceDraftNotes || undefined,
+                                dispatchId: invoiceDraftDispatchId || null,
+                              })
+                              if (!res.success) { setError(res.error || "Failed to update invoice"); return }
+                              const invRes = await getOrderInvoices(orderId)
+                              if (invRes.success) setOrderInvoices(invRes.data)
+                              setSuccess("Invoice updated successfully!")
+                              setTimeout(() => setSuccess(null), 2000)
+                            } finally { setSavingInvoice(false) }
+                          }}
+                          className="h-9 w-full rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
+                        >
+                          {savingInvoice ? "Saving..." : "Update Invoice"}
+                        </Button>
+                      </div>
+
+                      {/* ── RIGHT: Record Payment + History ── */}
+                      <div className="space-y-5 p-4">
+
+                        {/* Record Payment */}
+                        <div>
+                          <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-emerald-600">Record Payment</p>
+
+                          {isFullyPaid ? (
+                            <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3.5">
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                              <div>
+                                <p className="text-sm font-semibold text-emerald-800">Invoice Fully Paid</p>
+                                <p className="mt-0.5 text-xs text-emerald-700">
+                                  ₹{invAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })} received in full. No further payment needed.
+                                </p>
+                              </div>
+                            </div>
+                          ) : !canRecordPayment ? (
+                            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3.5">
+                              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                              <div>
+                                <p className="text-sm font-semibold text-amber-800">Dispatch Required</p>
+                                <p className="mt-0.5 text-xs text-amber-700">
+                                  Create a dispatch in the <strong>Shipment</strong> tab before recording payments.
+                                </p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {invDue > 0 && (
+                                <div className="flex items-center justify-between rounded-lg border border-red-100 bg-red-50 px-3 py-2">
+                                  <p className="text-xs text-red-600">Balance remaining on this invoice</p>
+                                  <p className="text-sm font-bold text-red-700">₹{invDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+                                </div>
                               )}
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <Label className="mb-1.5 block text-xs font-medium text-slate-500">Amount (₹) <span className="text-red-400">*</span></Label>
+                                  <Input type="number" step="0.01" min="0" value={paymentAmount}
+                                    onChange={(e) => setPaymentAmount(e.target.value)}
+                                    placeholder={`Max ₹${invDue.toLocaleString("en-IN")}`}
+                                    className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-emerald-400" disabled={addingPayment} />
+                                </div>
+                                <div>
+                                  <Label className="mb-1.5 block text-xs font-medium text-slate-500">Date</Label>
+                                  <Input type="date" value={paymentDate || new Date().toISOString().split("T")[0]}
+                                    onChange={(e) => setPaymentDate(e.target.value)}
+                                    className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-emerald-400" disabled={addingPayment} />
+                                </div>
+                              </div>
+                              <div>
+                                <Label className="mb-1.5 block text-xs font-medium text-slate-500">Payment Method</Label>
+                                <Select value={paymentMethod || "cash"} onValueChange={setPaymentMethod} disabled={addingPayment}>
+                                  <SelectTrigger className="h-8 rounded-md border-slate-200 bg-white text-xs focus:ring-emerald-400">
+                                    <SelectValue placeholder="Select method" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="cash">Cash</SelectItem>
+                                    <SelectItem value="upi">UPI</SelectItem>
+                                    <SelectItem value="neft">NEFT</SelectItem>
+                                    <SelectItem value="cheque">Cheque</SelectItem>
+                                    <SelectItem value="rtgs">RTGS</SelectItem>
+                                    <SelectItem value="card">Card</SelectItem>
+                                    <SelectItem value="other">Other</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <Label className="mb-1.5 block text-xs font-medium text-slate-500">Reference / UTR</Label>
+                                  <Input value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)}
+                                    placeholder="e.g. UTR12345"
+                                    className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-emerald-400" disabled={addingPayment} />
+                                </div>
+                                <div>
+                                  <Label className="mb-1.5 block text-xs font-medium text-slate-500">Notes</Label>
+                                  <Input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)}
+                                    placeholder="Optional"
+                                    className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-emerald-400" disabled={addingPayment} />
+                                </div>
+                              </div>
+                              <Button type="button" onClick={handleAddPaymentRecord}
+                                disabled={addingPayment || !paymentAmount}
+                                className="h-9 w-full rounded-lg bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">
+                                {addingPayment ? "Recording..." : "Record Payment"}
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Payment history */}
+                        <div>
+                          <div className="mb-3 flex items-center gap-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-600">
+                              Payment History
+                            </p>
+                            {invPayments.length > 0 && (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">
+                                {invPayments.length}
+                              </span>
+                            )}
+                          </div>
+                          {invPayments.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 py-6 text-center">
+                              <CreditCard className="h-6 w-6 text-slate-200" />
+                              <p className="mt-2 text-[11px] font-medium text-slate-400">No payments recorded yet</p>
+                              <p className="text-[10px] text-slate-300">Payments will appear here once added</p>
+                            </div>
+                          ) : (
+                            <div className="overflow-hidden rounded-xl border border-slate-100">
+                              <table className="min-w-full border-collapse text-[11px]">
+                                <thead>
+                                  <tr className="bg-slate-50">
+                                    <th className="border-b border-slate-100 px-3 py-2 text-left font-semibold text-slate-500">#</th>
+                                    <th className="border-b border-slate-100 px-3 py-2 text-left font-semibold text-slate-500">Date</th>
+                                    <th className="border-b border-slate-100 px-3 py-2 text-left font-semibold text-slate-500">Method</th>
+                                    <th className="border-b border-slate-100 px-3 py-2 text-left font-semibold text-slate-500">Ref.</th>
+                                    <th className="border-b border-slate-100 px-3 py-2 text-right font-semibold text-slate-500">Amount</th>
+                                    <th className="border-b border-slate-100 px-2 py-2 text-center font-semibold text-slate-500"></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {invPayments.map((p: any, idx: number) => (
+                                    <tr key={p.id} className={`${idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"} hover:bg-emerald-50/30`}>
+                                      <td className="border-b border-slate-100 px-3 py-2 text-slate-400">{idx + 1}</td>
+                                      <td className="border-b border-slate-100 px-3 py-2 text-slate-600">
+                                        {p.payment_date
+                                          ? new Date(p.payment_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                                          : "—"}
+                                      </td>
+                                      <td className="border-b border-slate-100 px-3 py-2">
+                                        <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-slate-600">
+                                          {p.payment_method || "—"}
+                                        </span>
+                                      </td>
+                                      <td className="max-w-[100px] truncate border-b border-slate-100 px-3 py-2 text-slate-500">{p.reference || "—"}</td>
+                                      <td className="border-b border-slate-100 px-3 py-2 text-right font-bold text-emerald-600">
+                                        ₹{Number(p.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="border-b border-slate-100 px-2 py-2 text-center">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={async () => {
+                                            if (confirm("Delete this payment record? This cannot be undone.")) {
+                                              const result = await deleteOrderPayment(p.id)
+                                              if (result.success) {
+                                                await loadOrderPayments()
+                                                const invRes = await getOrderInvoices(orderId)
+                                                if (invRes.success) setOrderInvoices(invRes.data)
+                                                setSuccess("Payment record deleted.")
+                                                setTimeout(() => setSuccess(null), 2000)
+                                              } else {
+                                                setError(result.error || "Failed to delete payment")
+                                              }
+                                            }
+                                          }}
+                                          className="h-6 w-6 rounded-md p-0 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot>
+                                  <tr className="bg-emerald-50">
+                                    <td colSpan={4} className="px-3 py-2 text-xs font-semibold text-emerald-700">Total Received</td>
+                                    <td className="px-3 py-2 text-right text-xs font-bold text-emerald-700">
+                                      ₹{invPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                    </td>
+                                    <td />
+                                  </tr>
+                                </tfoot>
+                              </table>
                             </div>
                           )}
                         </div>
                       </div>
-                    )}
+
+                    </div>
                   </div>
                 )
               })}
             </div>
 
-            {/* ── Zoho Billing ── */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-slate-900">Billing Details (Zoho)</h3>
-                <Button type="button" onClick={handleSaveZohoBilling} className="h-8 rounded-lg bg-slate-900 px-3 text-xs text-white hover:bg-slate-800">
-                  Save
-                </Button>
-              </div>
-              <textarea
-                value={zohoBillingDetails}
-                onChange={(e) => setZohoBillingDetails(e.target.value)}
-                rows={5}
-                placeholder="Paste Zoho JSON or notes"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-700 focus:border-orange-500 focus:outline-none focus:ring-[3px] focus:ring-orange-500/15"
-              />
-            </div>
+            {/* ── Payment Timeline (inline, only when there are events) ── */}
+            {(orderInvoices.length + orderPayments.length) > 0 && (() => {
+              const tlEvents = [
+                ...orderInvoices.map((inv: any) => ({
+                  id:        `inv-${inv.id}`,
+                  isPayment: false,
+                  date:      inv.invoice_date || inv.created_at || "",
+                  title:     `Invoice ${inv.invoice_number}`,
+                  subtitle:  inv.dispatch_id ? "Dispatch Invoice" : "Manual Invoice",
+                  amount:    Number(inv.invoice_amount || 0),
+                  badge:     null as string | null,
+                })),
+                ...orderPayments.map((p: any) => ({
+                  id:        `pay-${p.id}`,
+                  isPayment: true,
+                  date:      p.payment_date || p.created_at || "",
+                  title:     "Payment Received",
+                  subtitle:  [p.payment_method, p.reference].filter(Boolean).join(" · ") || (p.notes || ""),
+                  amount:    Number(p.amount || 0),
+                  badge:     p.payment_method || null,
+                })),
+              ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
+              return (
+                <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentTimelineOpen((v) => !v)}
+                    className="flex w-full items-center justify-between px-4 py-3 transition-colors hover:bg-slate-50"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-6 w-6 items-center justify-center rounded-md bg-indigo-100">
+                        <Receipt className="h-3.5 w-3.5 text-indigo-600" />
+                      </div>
+                      <h3 className="text-sm font-semibold text-slate-800">Payment Timeline</h3>
+                      <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">
+                        {tlEvents.length}
+                      </span>
+                    </div>
+                    <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${paymentTimelineOpen ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {paymentTimelineOpen && (
+                    <div className="border-t border-slate-100 px-4 pb-4 pt-4">
+                      <div className="grid grid-cols-1 gap-0 sm:grid-cols-2 lg:grid-cols-3">
+                        {tlEvents.map((ev) => (
+                          <div key={ev.id} className="flex items-start gap-3 rounded-lg px-3 py-2.5 hover:bg-slate-50">
+                            <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+                              ev.isPayment ? "bg-emerald-100" : "bg-indigo-100"
+                            }`}>
+                              {ev.isPayment
+                                ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                                : <FileText className="h-3.5 w-3.5 text-indigo-600" />
+                              }
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="truncate text-xs font-semibold text-slate-700">{ev.title}</p>
+                                <span className="shrink-0 text-[10px] text-slate-400">
+                                  {ev.date ? new Date(ev.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}
+                                </span>
+                              </div>
+                              {ev.subtitle && (
+                                <p className="truncate text-[10px] text-slate-400">{ev.subtitle}</p>
+                              )}
+                              {ev.amount > 0 && (
+                                <p className={`mt-0.5 text-xs font-bold ${ev.isPayment ? "text-emerald-600" : "text-indigo-600"}`}>
+                                  ₹{ev.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
+            </div>
           </div>
         </TabsContent>
 

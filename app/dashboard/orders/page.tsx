@@ -47,6 +47,9 @@ interface Order {
   updated_at: string
   item_count: number
   line_items?: OrderLineItemSummary[]
+  total_invoiced?: number | null
+  total_paid?: number | null
+  amount_due?: number | null
   customers: {
     id: string
     name: string
@@ -128,41 +131,83 @@ export default function OrdersPage() {
 
       // ── Color palette ──────────────────────────────────────────────
       const C = {
-        brandDark: "3D1F05",   // deep espresso (title bg)
-        brandMid:  "7C4A1E",   // warm walnut   (header bg)
-        brandTint: "FFF8F2",   // ivory tint    (alt row bg)
-        white:     "FFFFFF",
-        lightGray: "F1EDE9",
-        borderCol: "D6C4B0",   // warm sand border
-        textDark:  "1A1007",
-        textMuted: "6B5744",
+        // Brand
+        brandDark:  "1E3A5F",   // deep navy (title bg)
+        brandMid:   "2E5F8A",   // steel blue (section group headers)
+        brandLight: "E8F0F8",   // very light blue (alt row)
+        white:      "FFFFFF",
+        lightGray:  "F4F6F9",
+        borderCol:  "C5D3E0",
+        textDark:   "0D1B2A",
+        textMuted:  "4A6080",
+        // Section header accents
+        secOrder:   "1E5799",   // ORDER INFO — navy
+        secCustomer:"276749",   // CUSTOMER — forest green
+        secItems:   "7B3F00",   // ITEMS — warm brown
+        secFinance: "6B2D8B",   // FINANCIAL — purple
+        secDispatch:"8B3A1E",   // DISPATCH — rust
+        // Finance value colours
+        green:      "166534",
+        red:        "991B1B",
+        amber:      "92400E",
       }
 
-      // ── Column definitions ─────────────────────────────────────────
+      // ── Column definitions (grouped) ───────────────────────────────
+      // Groups: ORDER INFO | CUSTOMER | ITEMS | FINANCIAL / PAYMENT | DISPATCH & SHIPPING
       const COLS = [
-        { label: "SR #",               width: 6  },
-        { label: "Internal Order #",   width: 17 },
-        { label: "Sales Order #",      width: 16 },
-        { label: "Order Date",         width: 14 },
-        { label: "Customer Name",      width: 24 },
-        { label: "Phone",              width: 14 },
-        { label: "Email",              width: 28 },
-        { label: "Items Ordered",      width: 42 },
-        { label: "Order Status",       width: 19 },
-        { label: "Payment Status",     width: 16 },
-        { label: "Cash Discount",      width: 14 },
-        { label: "Amount (₹)",         width: 15 },
-        { label: "Invoice #",          width: 14 },
-        { label: "Dispatch Date",      width: 14 },
-        { label: "Courier",            width: 20 },
-        { label: "Tracking / Docket #", width: 24 },
-        { label: "Ship-to Address",    width: 32 },
+        // ── ORDER INFO (0–3)
+        { label: "SR #",               width: 6,  group: "order"    },
+        { label: "Internal Order #",   width: 18, group: "order"    },
+        { label: "Sales Order #",      width: 17, group: "order"    },
+        { label: "Order Date",         width: 14, group: "order"    },
+        { label: "Order Status",       width: 16, group: "order"    },
+        // ── CUSTOMER (5–7)
+        { label: "Customer Name",      width: 24, group: "customer" },
+        { label: "Phone",              width: 14, group: "customer" },
+        { label: "Email",              width: 28, group: "customer" },
+        // ── ITEMS (8)
+        { label: "Items Ordered",      width: 42, group: "items"    },
+        // ── FINANCIAL (9–14)
+        { label: "Order Value (₹)",    width: 16, group: "finance"  },
+        { label: "Cash Discount",      width: 13, group: "finance"  },
+        { label: "Invoice #",          width: 16, group: "finance"  },
+        { label: "Total Invoiced (₹)", width: 17, group: "finance"  },
+        { label: "Total Received (₹)", width: 17, group: "finance"  },
+        { label: "Balance Due (₹)",    width: 16, group: "finance"  },
+        { label: "Payment Status",     width: 16, group: "finance"  },
+        // ── DISPATCH (16–19)
+        { label: "Dispatch Date",      width: 14, group: "dispatch" },
+        { label: "Courier",            width: 20, group: "dispatch" },
+        { label: "Tracking / Docket #", width: 24, group: "dispatch" },
+        { label: "Ship-to Address",    width: 34, group: "dispatch" },
       ]
       const numCols = COLS.length
-      // Column letter helper (A..Z for up to 26 cols)
-      const colLetter = (i: number) => String.fromCharCode(65 + i)
 
-      // ── Shared styles ──────────────────────────────────────────────
+      // Column letter helper — handles > 26 cols (AA, AB…)
+      const colLetter = (i: number): string => {
+        if (i < 26) return String.fromCharCode(65 + i)
+        return String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26))
+      }
+
+      // Section group → header bg colour
+      const groupColor: Record<string, string> = {
+        order:    C.secOrder,
+        customer: C.secCustomer,
+        items:    C.secItems,
+        finance:  C.secFinance,
+        dispatch: C.secDispatch,
+      }
+
+      // Section group → label row (row 4) text
+      const groupLabel: Record<string, string> = {
+        order:    "ORDER INFORMATION",
+        customer: "CUSTOMER",
+        items:    "ITEMS",
+        finance:  "FINANCIAL / PAYMENT",
+        dispatch: "DISPATCH & SHIPPING",
+      }
+
+      // ── Shared border ──────────────────────────────────────────────
       const border = {
         top:    { style: "thin", color: { rgb: C.borderCol } },
         bottom: { style: "thin", color: { rgb: C.borderCol } },
@@ -170,121 +215,202 @@ export default function OrdersPage() {
         right:  { style: "thin", color: { rgb: C.borderCol } },
       }
 
-      const sTitle = {
-        font: { bold: true, sz: 15, color: { rgb: C.white }, name: "Calibri" },
-        fill: { patternType: "solid", fgColor: { rgb: C.brandDark } },
-        alignment: { horizontal: "center", vertical: "center" },
-      }
-      const sMeta = {
-        font: { sz: 10, color: { rgb: C.textMuted }, name: "Calibri" },
-        fill: { patternType: "solid", fgColor: { rgb: C.lightGray } },
-        alignment: { horizontal: "center", vertical: "center" },
-      }
-      const sHeader = {
-        font: { bold: true, sz: 10, color: { rgb: C.white }, name: "Calibri" },
-        fill: { patternType: "solid", fgColor: { rgb: C.brandMid } },
-        alignment: { horizontal: "center", vertical: "center", wrapText: true },
-        border,
-      }
-
       // ── Build worksheet ────────────────────────────────────────────
       const ws: Record<string, unknown> = {}
 
-      // Row 1 — Title
-      ws["A1"] = { v: "SUNKOOL MANAGEMENT — Orders Export Report", t: "s", s: sTitle }
-
-      // Row 2 — Meta
-      const totalValue = ids.reduce((sum, id) => {
-        const o = orderLookup.get(id)
-        return sum + (o ? getOrderDisplayTotal(o) : 0)
-      }, 0)
-      ws["A2"] = {
-        v: `Generated: ${new Date().toLocaleString("en-IN")}   |   Orders Exported: ${res.data.length}   |   Total Value: ₹${totalValue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
+      // Row 1 — Title banner
+      ws["A1"] = {
+        v: "SUNKOOL MANAGEMENT  —  Orders Export Report",
         t: "s",
-        s: sMeta,
+        s: {
+          font: { bold: true, sz: 16, color: { rgb: C.white }, name: "Calibri" },
+          fill: { patternType: "solid", fgColor: { rgb: C.brandDark } },
+          alignment: { horizontal: "center", vertical: "center" },
+        },
       }
 
-      // Row 3 — blank spacer (styled with title bg for a clean bar)
-      ws["A3"] = { v: "", t: "s", s: { fill: { patternType: "solid", fgColor: { rgb: C.brandDark } } } }
+      // Row 2 — Meta summary bar
+      const totalInvoiced = ids.reduce((sum, id) => sum + (orderLookup.get(id)?.total_invoiced ?? 0), 0)
+      const totalPaid     = ids.reduce((sum, id) => sum + (orderLookup.get(id)?.total_paid     ?? 0), 0)
+      const totalDue      = ids.reduce((sum, id) => sum + (orderLookup.get(id)?.amount_due     ?? 0), 0)
+      const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
+      ws["A2"] = {
+        v: [
+          `Generated: ${new Date().toLocaleString("en-IN")}`,
+          `Orders: ${res.data.length}`,
+          `Total Invoiced: ${fmt(totalInvoiced)}`,
+          `Total Received: ${fmt(totalPaid)}`,
+          `Balance Due: ${fmt(totalDue)}`,
+        ].join("     |     "),
+        t: "s",
+        s: {
+          font: { sz: 10, color: { rgb: C.textMuted }, name: "Calibri" },
+          fill: { patternType: "solid", fgColor: { rgb: C.lightGray } },
+          alignment: { horizontal: "center", vertical: "center" },
+        },
+      }
+
+      // Row 3 — Section group label band
+      // Compute first column index for each group
+      const groupFirstCol: Record<string, number> = {}
+      const groupLastCol:  Record<string, number> = {}
+      COLS.forEach((col, i) => {
+        if (groupFirstCol[col.group] === undefined) groupFirstCol[col.group] = i
+        groupLastCol[col.group] = i
+      })
+      COLS.forEach((col, i) => {
+        const isFirst = groupFirstCol[col.group] === i
+        ws[`${colLetter(i)}3`] = {
+          v: isFirst ? groupLabel[col.group] : "",
+          t: "s",
+          s: {
+            font: { bold: true, sz: 9, color: { rgb: C.white }, name: "Calibri" },
+            fill: { patternType: "solid", fgColor: { rgb: groupColor[col.group] } },
+            alignment: { horizontal: "center", vertical: "center" },
+            border,
+          },
+        }
+      })
 
       // Row 4 — Column headers
       COLS.forEach((col, i) => {
-        ws[`${colLetter(i)}4`] = { v: col.label, t: "s", s: sHeader }
+        ws[`${colLetter(i)}4`] = {
+          v: col.label,
+          t: "s",
+          s: {
+            font: { bold: true, sz: 10, color: { rgb: C.white }, name: "Calibri" },
+            fill: { patternType: "solid", fgColor: { rgb: groupColor[col.group] } },
+            alignment: { horizontal: "center", vertical: "center", wrapText: true },
+            border,
+          },
+        }
       })
 
-      // Rows 5+ — Data
+      // Rows 5+ — Data rows
       res.data.forEach((row, idx) => {
         const order = orderLookup.get(row.orderId)
         const r = idx + 5
         const isAlt = idx % 2 === 1
-        const fillBg = isAlt ? C.brandTint : C.white
+        const fillBg = isAlt ? C.brandLight : C.white
 
-        const sData = {
+        const base = {
           font: { sz: 10, name: "Calibri", color: { rgb: C.textDark } },
           fill: { patternType: "solid", fgColor: { rgb: fillBg } },
           alignment: { vertical: "center", wrapText: true },
           border,
         }
-        const sCenter = { ...sData, alignment: { ...sData.alignment, horizontal: "center" } }
-        const sBold   = { ...sData, font: { ...sData.font, bold: true } }
-        const sAmount = {
-          ...sData,
-          font: { ...sData.font, bold: true },
-          alignment: { ...sData.alignment, horizontal: "right" },
-          numFmt: "#,##0.00",
+        const sCenter = { ...base, alignment: { ...base.alignment, horizontal: "center" } }
+        const sBold   = { ...base, font: { ...base.font, bold: true } }
+        const sRight  = { ...base, alignment: { ...base.alignment, horizontal: "right" } }
+        const sAmtBold = {
+          ...base,
+          font: { ...base.font, bold: true },
+          alignment: { ...base.alignment, horizontal: "right" },
         }
+        const sGreen = { ...sAmtBold, font: { ...sAmtBold.font, color: { rgb: C.green } } }
+        const sRed   = { ...sAmtBold, font: { ...sAmtBold.font, color: { rgb: C.red   } } }
+        const sAmber = { ...sAmtBold, font: { ...sAmtBold.font, color: { rgb: C.amber } } }
+
+        const invoiced  = order?.total_invoiced ?? 0
+        const paid      = order?.total_paid     ?? 0
+        const due       = order?.amount_due     ?? 0
+        const orderVal  = order ? getOrderDisplayTotal(order) : 0
+
+        // Payment status badge text cleanup
+        const payStatus = (order?.payment_status ?? "—")
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (c) => c.toUpperCase())
 
         const cells = [
-          { v: idx + 1,                                    t: "n", s: sCenter },
-          { v: row.internal_order_number || "—",           t: "s", s: sBold   },
-          { v: row.sales_order_number    || "—",           t: "s", s: sData   },
-          { v: row.created_at            || "—",           t: "s", s: sCenter },
-          { v: row.customer_name         || "—",           t: "s", s: sBold   },
-          { v: order?.customers?.phone   || "—",           t: "s", s: sData   },
-          { v: order?.customers?.email   || "—",           t: "s", s: sData   },
-          { v: row.item_details          || "—",           t: "s", s: sData   },
-          { v: row.order_status          || "—",           t: "s", s: sCenter },
-          { v: order?.payment_status     || "—",           t: "s", s: sCenter },
-          { v: order?.cash_discount ? "Yes" : "No",        t: "s", s: sCenter },
-          { v: order ? getOrderDisplayTotal(order) : 0,    t: "n", s: sAmount },
-          { v: row.invoice_number        || "—",           t: "s", s: sCenter },
-          { v: row.dispatch_date         || "—",           t: "s", s: sCenter },
-          { v: row.courier_name          || "—",           t: "s", s: sData   },
-          { v: row.tracking_id           || "—",           t: "s", s: sData   },
-          { v: row.ship_to               || "—",           t: "s", s: sData   },
+          // ORDER INFO
+          { v: idx + 1,                                    t: "n", s: sCenter                     },
+          { v: row.internal_order_number || "—",           t: "s", s: sBold                       },
+          { v: row.sales_order_number    || "—",           t: "s", s: base                        },
+          { v: row.created_at            || "—",           t: "s", s: sCenter                     },
+          { v: (row.order_status || "—").replace(/_/g," ").replace(/\b\w/g,(c)=>c.toUpperCase()),
+                                                           t: "s", s: sCenter                     },
+          // CUSTOMER
+          { v: row.customer_name         || "—",           t: "s", s: sBold                       },
+          { v: order?.customers?.phone   || "—",           t: "s", s: base                        },
+          { v: order?.customers?.email   || "—",           t: "s", s: base                        },
+          // ITEMS
+          { v: row.item_details          || "—",           t: "s", s: base                        },
+          // FINANCIAL
+          { v: orderVal,                                   t: "n", s: sAmtBold                    },
+          { v: order?.cash_discount ? "Yes" : "No",        t: "s", s: sCenter                     },
+          { v: row.invoice_number        || "—",           t: "s", s: sCenter                     },
+          { v: invoiced > 0 ? invoiced : "—",              t: invoiced > 0 ? "n" : "s", s: invoiced > 0 ? sGreen : sRight },
+          { v: paid     > 0 ? paid     : "—",              t: paid     > 0 ? "n" : "s", s: paid     > 0 ? sGreen : sRight },
+          { v: due      > 0 ? due      : "—",              t: due      > 0 ? "n" : "s", s: due      > 0 ? sRed   : sRight },
+          { v: payStatus,                                  t: "s", s: sCenter                     },
+          // DISPATCH
+          { v: row.dispatch_date         || "—",           t: "s", s: sCenter                     },
+          { v: row.courier_name          || "—",           t: "s", s: base                        },
+          { v: row.tracking_id           || "—",           t: "s", s: base                        },
+          { v: row.ship_to               || "—",           t: "s", s: base                        },
         ]
         cells.forEach((cell, ci) => {
           ws[`${colLetter(ci)}${r}`] = cell
         })
       })
 
-      // Worksheet range
-      const lastRow = res.data.length + 4
+      // ── Totals footer row ──────────────────────────────────────────
+      const footerRow = res.data.length + 5
+      const footerBase = {
+        font: { bold: true, sz: 10, name: "Calibri", color: { rgb: C.textDark } },
+        fill: { patternType: "solid", fgColor: { rgb: C.lightGray } },
+        alignment: { vertical: "center", horizontal: "center" },
+        border,
+      }
+      const footerAmt = { ...footerBase, alignment: { ...footerBase.alignment, horizontal: "right" } }
+      const footerGreen = { ...footerAmt, font: { ...footerAmt.font, color: { rgb: C.green } } }
+      const footerRed   = { ...footerAmt, font: { ...footerAmt.font, color: { rgb: C.red   } } }
+      COLS.forEach((_, i) => {
+        const col = colLetter(i)
+        // Col index map: 9=Order Value, 12=Total Invoiced, 13=Total Received, 14=Balance Due
+        if (i === 0)  ws[`${col}${footerRow}`] = { v: "TOTALS", t: "s", s: footerBase }
+        else if (i === 9)  ws[`${col}${footerRow}`] = { v: ids.reduce((s,id)=>s+(orderLookup.get(id)?getOrderDisplayTotal(orderLookup.get(id)!):0),0), t:"n", s: footerAmt  }
+        else if (i === 12) ws[`${col}${footerRow}`] = { v: totalInvoiced, t:"n", s: footerGreen }
+        else if (i === 13) ws[`${col}${footerRow}`] = { v: totalPaid,     t:"n", s: footerGreen }
+        else if (i === 14) ws[`${col}${footerRow}`] = { v: totalDue,      t:"n", s: footerRed   }
+        else               ws[`${col}${footerRow}`] = { v: "",            t:"s", s: footerBase  }
+      })
+
+      // ── Worksheet range ────────────────────────────────────────────
+      const lastRow = footerRow
       const lastCol = colLetter(numCols - 1)
       ws["!ref"] = `A1:${lastCol}${lastRow}`
 
-      // Merge title, meta, and spacer across all columns
-      ws["!merges"] = [
+      // ── Merges ────────────────────────────────────────────────────
+      const merges: Array<{ s: { r: number; c: number }; e: { r: number; c: number } }> = [
+        // Title & meta span all columns (rows 0, 1)
         { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } },
         { s: { r: 1, c: 0 }, e: { r: 1, c: numCols - 1 } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: numCols - 1 } },
+        // Section group label merges (row 2)
+        ...Object.keys(groupFirstCol).map((g) => ({
+          s: { r: 2, c: groupFirstCol[g] },
+          e: { r: 2, c: groupLastCol[g]  },
+        })),
+        // Footer "TOTALS" label merges cols 0–8
+        { s: { r: footerRow - 1, c: 0 }, e: { r: footerRow - 1, c: 8 } },
       ]
+      ws["!merges"] = merges
 
-      // Column widths
+      // ── Column widths ─────────────────────────────────────────────
       ws["!cols"] = COLS.map((c) => ({ wch: c.width }))
 
-      // Row heights
+      // ── Row heights ───────────────────────────────────────────────
       ws["!rows"] = [
-        { hpt: 38 }, // title
+        { hpt: 40 }, // title
         { hpt: 22 }, // meta
-        { hpt: 6  }, // spacer
-        { hpt: 34 }, // header
+        { hpt: 20 }, // section labels
+        { hpt: 36 }, // column headers
       ]
 
-      // Freeze top 4 rows + first 2 columns
+      // ── Freeze panes (top 4 rows + first 2 cols) ──────────────────
       ws["!freeze"] = { xSplit: 2, ySplit: 4 }
 
-      // Auto-filter on header row
+      // ── Auto-filter on header row ──────────────────────────────────
       ws["!autofilter"] = { ref: `A4:${lastCol}4` }
 
       const wb = XLSX.utils.book_new()
