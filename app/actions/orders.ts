@@ -507,6 +507,7 @@ export async function getCompletedOrderIds(): Promise<{
     { data: productionRecords },
     { data: dispatches },
     { data: payments },
+    { data: invoices },
   ] = await Promise.all([
     supabase.from("order_items").select("id, order_id, quantity").in("order_id", orderIds),
     supabase
@@ -516,6 +517,7 @@ export async function getCompletedOrderIds(): Promise<{
       .eq("status", "completed"),
     supabase.from("dispatches").select("id, order_id, shipment_status, dispatch_type").in("order_id", orderIds),
     supabase.from("order_payments").select("order_id, amount").in("order_id", orderIds),
+    supabase.from("order_invoices").select("order_id, invoice_amount").in("order_id", orderIds),
   ])
 
   if (!orderItems || !productionRecords || !dispatches || !payments) {
@@ -536,6 +538,12 @@ export async function getCompletedOrderIds(): Promise<{
   ;(payments || []).forEach((p: { order_id: string; amount: number }) => {
     const id = p.order_id
     totalPaidByOrder[id] = (totalPaidByOrder[id] || 0) + Number(p.amount || 0)
+  })
+
+  const totalInvoicedByOrder: Record<string, number> = {}
+  ;(invoices || []).forEach((inv: { order_id: string; invoice_amount: number }) => {
+    const id = inv.order_id
+    totalInvoicedByOrder[id] = (totalInvoicedByOrder[id] || 0) + Number(inv.invoice_amount || 0)
   })
 
   const dispatchById = new Map((dispatches || []).map((d) => [d.id, d]))
@@ -576,11 +584,17 @@ export async function getCompletedOrderIds(): Promise<{
 
   const completedIds: string[] = []
   for (const order of orders) {
-    const requested =
-      order.requested_payment_amount != null ? Number(order.requested_payment_amount) : (order.total_price ?? 0)
+    const totalInvoiced = totalInvoicedByOrder[order.id] || 0
     const totalPaid = totalPaidByOrder[order.id] || 0
-    const amountDue = Math.max(0, requested - totalPaid)
-    const fullPaid = amountDue === 0 && (requested > 0 || totalPaid > 0)
+    // Use invoice total as basis (same logic as getAllOrders) so the completion
+    // check stays consistent with the payment status shown in the orders list.
+    const basis = totalInvoiced > 0
+      ? totalInvoiced
+      : order.requested_payment_amount != null
+        ? Number(order.requested_payment_amount)
+        : (order.total_price ?? 0)
+    const amountDue = Math.max(0, basis - totalPaid)
+    const fullPaid = amountDue === 0 && (basis > 0 || totalPaid > 0)
 
     const items = orderItemsByOrderId[order.id] || []
     const allProduced = items.length === 0 || items.every((i) => (producedByOrderItem[i.id] || 0) >= i.quantity)

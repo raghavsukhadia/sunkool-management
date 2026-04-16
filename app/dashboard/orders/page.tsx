@@ -106,6 +106,24 @@ export default function OrdersPage() {
     loadOrders()
   }, [])
 
+  // When returning from an order detail page, this client component may keep its
+  // previous state (browser back/forward). Refresh on focus/visibility so statuses
+  // like Paid/Delivered show up immediately without manual refresh.
+  useEffect(() => {
+    const onFocus = () => {
+      void loadOrders()
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void loadOrders()
+    }
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleExport = async () => {
     const exportOrders =
       selectedOrderIds.size > 0
@@ -497,11 +515,9 @@ export default function OrdersPage() {
       filtered = filtered.filter(({ order }) => order.customers?.id === customerFilter)
     }
 
-    // Completed filter: default "All Orders" excludes completed; clicking "Completed" shows only completed
+    // Completed filter: "Completed only" shows only completed; otherwise show all orders (including completed)
     if (completedOnly) {
       filtered = filtered.filter(({ order }) => completedOrderIdsSet.has(order.id))
-    } else {
-      filtered = filtered.filter(({ order }) => !completedOrderIdsSet.has(order.id))
     }
 
     // Sort
@@ -1078,6 +1094,8 @@ export default function OrdersPage() {
                       className={`cursor-pointer border-b border-sk-border transition-colors hover:bg-sk-page-bg ${
                         selectedOrderIds.has(order.id)
                           ? "bg-amber-50/60"
+                          : completedOrderIdsSet.has(order.id)
+                            ? "bg-emerald-50/30"
                           : index % 2 === 0
                             ? "bg-white"
                             : "bg-slate-50/40"
@@ -1103,6 +1121,11 @@ export default function OrdersPage() {
                           )}
                           {order.cash_discount && (
                             <span className="mt-0.5 inline-flex w-fit items-center rounded border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">CD</span>
+                          )}
+                          {completedOrderIdsSet.has(order.id) && (
+                            <span className="mt-1 inline-flex w-fit items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-px text-[10px] font-medium text-emerald-800">
+                              Completed
+                            </span>
                           )}
                         </div>
                       </td>

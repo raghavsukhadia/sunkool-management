@@ -355,6 +355,17 @@ export default function OrderDetailsPage() {
     }
   }, [order?.items, productionRecords, dispatches, paymentSummary.amountDue])
 
+  // An order is locked (read-only) once every item is produced, every dispatch is
+  // delivered, and the invoice is fully paid. No mutations are allowed after this point.
+  const isOrderLocked = useMemo(() => {
+    if (!order || (order.items?.length ?? 0) === 0) return false
+    if (dispatches.length === 0) return false
+    const { productionRemaining, shipmentRemaining } = tabRemainingCounts
+    const { amountDue, totalInvoiced, totalPaid } = paymentSummary
+    const isFullyPaid = amountDue === 0 && (totalInvoiced > 0 || totalPaid > 0)
+    return productionRemaining === 0 && shipmentRemaining === 0 && isFullyPaid
+  }, [order, dispatches.length, tabRemainingCounts, paymentSummary])
+
   const fetchAllOrderData = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -1504,22 +1515,26 @@ export default function OrderDetailsPage() {
             <span className="hidden sm:inline">Slip</span>
           </button>
 
-          <button
-            onClick={() => setShowEditModal(true)}
-            title="Edit Order"
-            className="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:text-orange-700 hover:border-orange-300 hover:bg-orange-50 transition-colors text-xs font-medium"
-          >
-            <Edit2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Edit</span>
-          </button>
+          {!isOrderLocked && (
+            <button
+              onClick={() => setShowEditModal(true)}
+              title="Edit Order"
+              className="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:text-orange-700 hover:border-orange-300 hover:bg-orange-50 transition-colors text-xs font-medium"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Edit</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            title="Delete Order"
-            className="flex items-center justify-center h-8 w-8 rounded-md border border-slate-200 bg-white text-slate-400 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          {!isOrderLocked && (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              title="Delete Order"
+              className="flex items-center justify-center h-8 w-8 rounded-md border border-slate-200 bg-white text-slate-400 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -1544,6 +1559,19 @@ export default function OrderDetailsPage() {
           <button onClick={() => setSuccess(null)} className="text-green-600 hover:text-green-800 transition-colors">
             <X className="w-4 h-4" />
           </button>
+        </div>
+      )}
+
+      {/* Completed / Locked Banner */}
+      {isOrderLocked && (
+        <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 shadow-sm">
+          <CheckCircle2 className="h-5 w-5 flex-shrink-0 text-green-600" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-green-800">Order Completed — Read Only</p>
+            <p className="text-xs text-green-700 mt-0.5">
+              All items have been produced, dispatched, delivered, and fully paid. This order is locked and cannot be modified.
+            </p>
+          </div>
         </div>
       )}
 
@@ -1748,7 +1776,7 @@ export default function OrderDetailsPage() {
         <TabsContent value="items" className="space-y-4 mt-5">
 
           {/* ── Add Item — compact bar ─────────────────────────────────── */}
-          <div className="bg-white border border-slate-200 rounded-lg">
+          {!isOrderLocked && <div className="bg-white border border-slate-200 rounded-lg">
             <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex items-center gap-2 rounded-t-lg">
               <Plus className="w-3.5 h-3.5 text-orange-500" />
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Add Item to Order</span>
@@ -1887,7 +1915,7 @@ export default function OrderDetailsPage() {
                 </Button>
               </div>
             </div>
-          </div>
+          </div>}
 
           {/* ── Order Items list ───────────────────────────────────────── */}
           <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -1963,28 +1991,34 @@ export default function OrderDetailsPage() {
                             {/* Quantity stepper */}
                             <td className="px-4 py-3">
                               <div className="flex items-center justify-center gap-1.5">
-                                <button
-                                  onClick={() => handleUpdateQuantity(item.id, Math.max(1, item.quantity - 1))}
-                                  className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center font-bold text-base leading-none"
-                                  title="Decrease"
-                                >−</button>
+                                {!isOrderLocked && (
+                                  <button
+                                    onClick={() => handleUpdateQuantity(item.id, Math.max(1, item.quantity - 1))}
+                                    className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center font-bold text-base leading-none"
+                                    title="Decrease"
+                                  >−</button>
+                                )}
                                 <span className="w-8 text-center text-sm font-bold text-slate-800 tabular-nums">{item.quantity}</span>
-                                <button
-                                  onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
-                                  className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center font-bold text-base leading-none"
-                                  title="Increase"
-                                >+</button>
+                                {!isOrderLocked && (
+                                  <button
+                                    onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
+                                    className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center font-bold text-base leading-none"
+                                    title="Increase"
+                                  >+</button>
+                                )}
                               </div>
                             </td>
                             {/* Remove */}
                             <td className="px-4 py-3 text-right">
-                              <button
-                                onClick={() => handleRemoveItem(item.id)}
-                                className="w-7 h-7 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100"
-                                title="Remove item"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {!isOrderLocked && (
+                                <button
+                                  onClick={() => handleRemoveItem(item.id)}
+                                  className="w-7 h-7 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100"
+                                  title="Remove item"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </td>
                           </tr>
                         )
@@ -2191,7 +2225,7 @@ export default function OrderDetailsPage() {
                 </p>
               )}
 
-              <Button
+              {!isOrderLocked && <Button
                 onClick={handleCreateProductionRecord}
                 disabled={
                   !order?.items ||
@@ -2214,7 +2248,7 @@ export default function OrderDetailsPage() {
                     Create Production Record
                   </>
                 )}
-              </Button>
+              </Button>}
             </div>
           </div>
 
@@ -2280,45 +2314,47 @@ export default function OrderDetailsPage() {
                     )}
 
                     {/* Actions */}
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {(record.status === "in_production" || record.status === "pending") && (
-                        <Button
-                          size="sm"
-                          onClick={async () => {
-                            const result = await updateProductionRecordStatus(record.id, "completed")
-                            if (result.success) {
-                              await loadProductionRecords()
-                              setSuccess("Marked as completed!")
-                              setTimeout(() => setSuccess(null), 2000)
-                            } else {
-                              setError(result.error || "Failed")
-                            }
-                          }}
-                          className="h-7 text-xs font-semibold bg-green-500 hover:bg-green-600 text-white rounded-lg px-3"
-                        >
-                          <Check className="w-3 h-3 mr-1" />Done
-                        </Button>
-                      )}
-                      {(record.status === "pending" || record.status === "in_production") && (
-                        <button
-                          onClick={async () => {
-                            if (confirm("Delete this record?")) {
-                              const result = await deleteProductionRecord(record.id)
+                    {!isOrderLocked && (
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {(record.status === "in_production" || record.status === "pending") && (
+                          <Button
+                            size="sm"
+                            onClick={async () => {
+                              const result = await updateProductionRecordStatus(record.id, "completed")
                               if (result.success) {
                                 await loadProductionRecords()
-                                setSuccess("Record deleted.")
+                                setSuccess("Marked as completed!")
                                 setTimeout(() => setSuccess(null), 2000)
                               } else {
                                 setError(result.error || "Failed")
                               }
-                            }
-                          }}
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
+                            }}
+                            className="h-7 text-xs font-semibold bg-green-500 hover:bg-green-600 text-white rounded-lg px-3"
+                          >
+                            <Check className="w-3 h-3 mr-1" />Done
+                          </Button>
+                        )}
+                        {(record.status === "pending" || record.status === "in_production") && (
+                          <button
+                            onClick={async () => {
+                              if (confirm("Delete this record?")) {
+                                const result = await deleteProductionRecord(record.id)
+                                if (result.success) {
+                                  await loadProductionRecords()
+                                  setSuccess("Record deleted.")
+                                  setTimeout(() => setSuccess(null), 2000)
+                                } else {
+                                  setError(result.error || "Failed")
+                                }
+                              }
+                            }}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2331,7 +2367,7 @@ export default function OrderDetailsPage() {
         <TabsContent value="shipment" className="space-y-4 mt-6">
 
           {/* ── Create Dispatch Form ──────────────────────────────────── */}
-          {showDispatchForm && selectedProductionRecord && (
+          {!isOrderLocked && showDispatchForm && selectedProductionRecord && (
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm ring-2 ring-orange-300 ring-offset-1">
               <div className="px-6 py-4 bg-gradient-to-r from-orange-50 to-white border-b border-slate-100 flex items-center justify-between">
                 <div>
@@ -2534,7 +2570,7 @@ export default function OrderDetailsPage() {
           )}
 
           {/* ── Ready to Dispatch Banner ──────────────────────────────── */}
-          {!showDispatchForm && (() => {
+          {!isOrderLocked && !showDispatchForm && (() => {
             const readyRecords = productionRecords.filter(r =>
               r.status === "completed" && !dispatches.some(d => d.production_records?.id === r.id)
             )
@@ -2638,7 +2674,7 @@ export default function OrderDetailsPage() {
                         <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${meta.badgeCls}`}>
                           {meta.label}
                         </span>
-                        {(shipmentStatus === 'ready' || shipmentStatus === 'picked_up') && editingDispatchId !== dispatch.id && (
+                        {!isOrderLocked && (shipmentStatus === 'ready' || shipmentStatus === 'picked_up') && editingDispatchId !== dispatch.id && (
                           <button
                             onClick={() => {
                               setEditingDispatchId(dispatch.id)
@@ -2660,7 +2696,7 @@ export default function OrderDetailsPage() {
                       {/* ── Shipment Progress Stepper ── */}
                       <div>
                         <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-3">
-                          Shipment Progress <span className="normal-case font-normal">· click a step to update</span>
+                          Shipment Progress{!isOrderLocked && <span className="normal-case font-normal"> · click a step to update</span>}
                         </p>
                         <div className="flex items-center">
                           {statusSteps.map((step, idx) => {
@@ -2671,7 +2707,7 @@ export default function OrderDetailsPage() {
                               <div key={step.value} className={`flex items-center ${idx < statusSteps.length - 1 ? "flex-1" : ""}`}>
                                 <button
                                   onClick={async () => {
-                                    if (step.value === shipmentStatus) return
+                                    if (isOrderLocked || step.value === shipmentStatus) return
                                     const newStatus = step.value as 'ready' | 'picked_up' | 'delivered'
                                     const result = await updateDispatchStatus(dispatch.id, newStatus)
                                     if (result.success) {
@@ -2682,8 +2718,9 @@ export default function OrderDetailsPage() {
                                       setError(result.error || "Failed to update status")
                                     }
                                   }}
-                                  className="flex flex-col items-center gap-1.5 group flex-shrink-0"
-                                  title={`Set to ${step.label}`}
+                                  disabled={isOrderLocked}
+                                  className="flex flex-col items-center gap-1.5 group flex-shrink-0 disabled:cursor-not-allowed"
+                                  title={isOrderLocked ? "Order is locked" : `Set to ${step.label}`}
                                 >
                                   <div className={`w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all ${
                                     isActive
@@ -2991,20 +3028,22 @@ export default function OrderDetailsPage() {
             )}
 
 
-            <div className="flex items-center justify-end">
-              <Button
-                type="button"
-                size="sm"
-                onClick={startCreateInvoiceDraft}
-                className="h-8 rounded-md bg-indigo-600 px-4 text-xs font-semibold text-white hover:bg-indigo-700"
-              >
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                New Invoice
-              </Button>
-            </div>
+            {!isOrderLocked && (
+              <div className="flex items-center justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={startCreateInvoiceDraft}
+                  className="h-8 rounded-md bg-indigo-600 px-4 text-xs font-semibold text-white hover:bg-indigo-700"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  New Invoice
+                </Button>
+              </div>
+            )}
 
             {/* ── Create Invoice form ── */}
-            {showCreateInvoiceForm && (
+            {!isOrderLocked && showCreateInvoiceForm && (
               <div className="overflow-hidden rounded-xl border border-indigo-200 bg-white shadow-sm">
                 <input
                   id="create-invoice-attachment-input"
@@ -3321,13 +3360,13 @@ export default function OrderDetailsPage() {
                               <div>
                                 <Label className="mb-1.5 block text-xs font-medium text-slate-500">Invoice No.</Label>
                                 <Input value={invoiceDraftNumber} onChange={(e) => setInvoiceDraftNumber(e.target.value)}
-                                  className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-indigo-400" disabled={savingInvoice} />
+                                  className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-indigo-400" disabled={savingInvoice || isOrderLocked} readOnly={isOrderLocked} />
                               </div>
                               <div>
                                 <Label className="mb-1.5 block text-xs font-medium text-slate-500">Date</Label>
                                 <Input type="date" value={invoiceDraftDate || new Date().toISOString().split("T")[0]}
                                   onChange={(e) => setInvoiceDraftDate(e.target.value)}
-                                  className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-indigo-400" disabled={savingInvoice} />
+                                  className="h-8 rounded-md border-slate-200 bg-white text-xs focus-visible:ring-indigo-400" disabled={savingInvoice || isOrderLocked} readOnly={isOrderLocked} />
                               </div>
                             </div>
                             <div>
@@ -3385,14 +3424,18 @@ export default function OrderDetailsPage() {
                             <span className="text-[10px] text-slate-400">PDF · JPG · PNG</span>
                           </div>
                           {invAttachments.length === 0 ? (
-                            <div onClick={() => (document.getElementById(`invoice-attachment-input-${inv.id}`) as HTMLInputElement | null)?.click()}
-                              className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-200 py-6 transition-colors hover:border-indigo-300 hover:bg-indigo-50/30">
-                              <Upload className="h-5 w-5 text-slate-300" />
-                              <p className="text-[11px] font-medium text-slate-400">
-                                {uploadingInvoiceAttachment ? "Uploading..." : "Click to upload attachment"}
-                              </p>
-                              <p className="text-[10px] text-slate-300">PDF, JPG or PNG</p>
-                            </div>
+                            !isOrderLocked ? (
+                              <div onClick={() => (document.getElementById(`invoice-attachment-input-${inv.id}`) as HTMLInputElement | null)?.click()}
+                                className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-200 py-6 transition-colors hover:border-indigo-300 hover:bg-indigo-50/30">
+                                <Upload className="h-5 w-5 text-slate-300" />
+                                <p className="text-[11px] font-medium text-slate-400">
+                                  {uploadingInvoiceAttachment ? "Uploading..." : "Click to upload attachment"}
+                                </p>
+                                <p className="text-[10px] text-slate-300">PDF, JPG or PNG</p>
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-slate-400 text-center py-4">No attachments</p>
+                            )
                           ) : (
                             <div className="space-y-1.5">
                               {invAttachments.map((attachment: any) => (
@@ -3410,64 +3453,70 @@ export default function OrderDetailsPage() {
                                       className="h-7 w-7 rounded-md p-0 text-indigo-400 hover:bg-indigo-50 hover:text-indigo-600">
                                       <Download className="h-3.5 w-3.5" />
                                     </Button>
-                                    <Button variant="ghost" size="sm"
-                                      onClick={async () => {
-                                        if (confirm("Delete this attachment?")) {
-                                          const result = await deleteInvoiceAttachment(attachment.id)
-                                          if (result.success) { await loadInvoiceAttachments(); setSuccess("Attachment deleted!"); setTimeout(() => setSuccess(null), 2000) }
-                                          else setError(result.error || "Failed to delete attachment")
-                                        }
-                                      }}
-                                      className="h-7 w-7 rounded-md p-0 text-slate-400 hover:bg-red-50 hover:text-red-500">
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </Button>
+                                    {!isOrderLocked && (
+                                      <Button variant="ghost" size="sm"
+                                        onClick={async () => {
+                                          if (confirm("Delete this attachment?")) {
+                                            const result = await deleteInvoiceAttachment(attachment.id)
+                                            if (result.success) { await loadInvoiceAttachments(); setSuccess("Attachment deleted!"); setTimeout(() => setSuccess(null), 2000) }
+                                            else setError(result.error || "Failed to delete attachment")
+                                          }
+                                        }}
+                                        className="h-7 w-7 rounded-md p-0 text-slate-400 hover:bg-red-50 hover:text-red-500">
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    )}
                                   </div>
                                 </div>
                               ))}
-                              <Button type="button" variant="outline" size="sm" disabled={uploadingInvoiceAttachment}
-                                onClick={() => (document.getElementById(`invoice-attachment-input-${inv.id}`) as HTMLInputElement | null)?.click()}
-                                className="h-7 w-full rounded-lg border-dashed border-slate-200 text-[11px] text-slate-500 hover:border-indigo-300 hover:bg-indigo-50/30 hover:text-indigo-600 disabled:opacity-50">
-                                <Plus className="mr-1 h-3 w-3" />
-                                {uploadingInvoiceAttachment ? "Uploading..." : "Add another file"}
-                              </Button>
+                              {!isOrderLocked && (
+                                <Button type="button" variant="outline" size="sm" disabled={uploadingInvoiceAttachment}
+                                  onClick={() => (document.getElementById(`invoice-attachment-input-${inv.id}`) as HTMLInputElement | null)?.click()}
+                                  className="h-7 w-full rounded-lg border-dashed border-slate-200 text-[11px] text-slate-500 hover:border-indigo-300 hover:bg-indigo-50/30 hover:text-indigo-600 disabled:opacity-50">
+                                  <Plus className="mr-1 h-3 w-3" />
+                                  {uploadingInvoiceAttachment ? "Uploading..." : "Add another file"}
+                                </Button>
+                              )}
                             </div>
                           )}
                         </div>
 
-                        <Button
-                          type="button"
-                          disabled={savingInvoice || !invoiceDraftNumber.trim() || invoiceDraftAmount.trim() === ""}
-                          onClick={async () => {
-                            const amt = Number(invoiceDraftAmount)
-                            if (!Number.isFinite(amt) || amt < 0) { setError("Enter a valid invoice amount."); return }
-                            setSavingInvoice(true)
-                            try {
-                              const res = await createOrUpdateOrderInvoice({
-                                orderId, invoiceId: inv.id,
-                                invoiceNumber: invoiceDraftNumber,
-                                invoiceDate: invoiceDraftDate || undefined,
-                                invoiceAmount: amt,
-                                notes: invoiceDraftNotes || undefined,
-                                dispatchId: invoiceDraftDispatchId || null,
-                              })
-                              if (!res.success) { setError(res.error || "Failed to update invoice"); return }
-                              const invRes = await getOrderInvoices(orderId)
-                              if (invRes.success) setOrderInvoices(invRes.data)
-                              setSuccess("Invoice updated successfully!")
-                              setTimeout(() => setSuccess(null), 2000)
-                            } finally { setSavingInvoice(false) }
-                          }}
-                          className="h-9 w-full rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
-                        >
-                          {savingInvoice ? "Saving..." : "Update Invoice"}
-                        </Button>
+                        {!isOrderLocked && (
+                          <Button
+                            type="button"
+                            disabled={savingInvoice || !invoiceDraftNumber.trim() || invoiceDraftAmount.trim() === ""}
+                            onClick={async () => {
+                              const amt = Number(invoiceDraftAmount)
+                              if (!Number.isFinite(amt) || amt < 0) { setError("Enter a valid invoice amount."); return }
+                              setSavingInvoice(true)
+                              try {
+                                const res = await createOrUpdateOrderInvoice({
+                                  orderId, invoiceId: inv.id,
+                                  invoiceNumber: invoiceDraftNumber,
+                                  invoiceDate: invoiceDraftDate || undefined,
+                                  invoiceAmount: amt,
+                                  notes: invoiceDraftNotes || undefined,
+                                  dispatchId: invoiceDraftDispatchId || null,
+                                })
+                                if (!res.success) { setError(res.error || "Failed to update invoice"); return }
+                                const invRes = await getOrderInvoices(orderId)
+                                if (invRes.success) setOrderInvoices(invRes.data)
+                                setSuccess("Invoice updated successfully!")
+                                setTimeout(() => setSuccess(null), 2000)
+                              } finally { setSavingInvoice(false) }
+                            }}
+                            className="h-9 w-full rounded-lg bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
+                          >
+                            {savingInvoice ? "Saving..." : "Update Invoice"}
+                          </Button>
+                        )}
                       </div>
 
                       {/* ── RIGHT: Record Payment + History ── */}
                       <div className="space-y-5 p-4">
 
                         {/* Record Payment */}
-                        <div>
+                        {!isOrderLocked && <div>
                           <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-emerald-600">Record Payment</p>
 
                           {isFullyPaid ? (
@@ -3551,7 +3600,7 @@ export default function OrderDetailsPage() {
                               </Button>
                             </div>
                           )}
-                        </div>
+                        </div>}
 
                         {/* Payment history */}
                         <div>
@@ -3603,27 +3652,29 @@ export default function OrderDetailsPage() {
                                         ₹{Number(p.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                                       </td>
                                       <td className="border-b border-slate-100 px-2 py-2 text-center">
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={async () => {
-                                            if (confirm("Delete this payment record? This cannot be undone.")) {
-                                              const result = await deleteOrderPayment(p.id)
-                                              if (result.success) {
-                                                await loadOrderPayments()
-                                                const invRes = await getOrderInvoices(orderId)
-                                                if (invRes.success) setOrderInvoices(invRes.data)
-                                                setSuccess("Payment record deleted.")
-                                                setTimeout(() => setSuccess(null), 2000)
-                                              } else {
-                                                setError(result.error || "Failed to delete payment")
+                                        {!isOrderLocked && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={async () => {
+                                              if (confirm("Delete this payment record? This cannot be undone.")) {
+                                                const result = await deleteOrderPayment(p.id)
+                                                if (result.success) {
+                                                  await loadOrderPayments()
+                                                  const invRes = await getOrderInvoices(orderId)
+                                                  if (invRes.success) setOrderInvoices(invRes.data)
+                                                  setSuccess("Payment record deleted.")
+                                                  setTimeout(() => setSuccess(null), 2000)
+                                                } else {
+                                                  setError(result.error || "Failed to delete payment")
+                                                }
                                               }
-                                            }
-                                          }}
-                                          className="h-6 w-6 rounded-md p-0 text-slate-300 hover:bg-red-50 hover:text-red-500"
-                                        >
-                                          <Trash2 className="h-3 w-3" />
-                                        </Button>
+                                            }}
+                                            className="h-6 w-6 rounded-md p-0 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                                          >
+                                            <Trash2 className="h-3 w-3" />
+                                          </Button>
+                                        )}
                                       </td>
                                     </tr>
                                   ))}
