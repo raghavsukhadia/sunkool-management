@@ -2218,8 +2218,8 @@ export default function ProductionPage() {
                   </thead>
                   <tbody>
                     {filteredSortedNfpList.map((row, i) => {
-                      const ipPct  = row.sum > 0 ? (row.inProductionQty / row.sum) * 100 : 0
-                      const remPct = row.sum > 0 ? (row.remainingQty    / row.sum) * 100 : 0
+                      const ipPct  = row.remainingQty > 0 ? (row.inProductionQty / row.remainingQty) * 100 : 0
+                      const remPct = 100 - ipPct
                       const isInProdOnly  = row.inProductionQty > 0 && row.remainingQty === 0
                       const isRemOnly     = row.remainingQty > 0 && row.inProductionQty === 0
                       const isMixed       = row.inProductionQty > 0 && row.remainingQty > 0
