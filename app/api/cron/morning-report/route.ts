@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     }
 
     // --- Generate PDF ---
-    const { blob, filename } = generateMorningReportPDF(pendingRows, logoDataUrl)
+    const { blob, filename } = generateMorningReportPDF(pendingRows, logoDataUrl, queueResult.data.kpiData)
 
     // --- Upload PDF to Supabase storage ---
     const pdfBuffer = await blob.arrayBuffer()

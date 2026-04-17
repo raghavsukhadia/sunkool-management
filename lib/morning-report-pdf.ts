@@ -10,7 +10,7 @@
  *             Remaining = row.remainingUntilDone   (= getRemainingUntilDone)
  */
 import jsPDF from 'jspdf'
-import type { ProductionQueueRow } from '@/app/actions/production'
+import type { ProductionKpiData, ProductionQueueRow } from '@/app/actions/production'
 
 // ─── Palette — matches Excel export (xlsx-js-style colours in production page) ──
 const BRAND_DARK:  [number,number,number] = [ 30,  41,  59]   // #1E293B slate-900
@@ -60,7 +60,8 @@ function trunc(s: string, max: number): string {
 // ─── PDF generator ────────────────────────────────────────────────────────────
 export function generateMorningReportPDF(
   rows: ProductionQueueRow[],
-  logoDataUrl?: string
+  logoDataUrl?: string,
+  kpiData?: ProductionKpiData
 ): { blob: Blob; filename: string } {
   const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' })
   const PW  = doc.internal.pageSize.getWidth()   // 210 mm
@@ -76,20 +77,18 @@ export function generateMorningReportPDF(
     hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata', hour12: true,
   })
 
-  // ── Sort: In Progress first, then Pending; within each group by orderNumber ─
-  const sorted = [...rows].sort((a, b) => {
-    const sa = queueStatus(a) === 'In Progress' ? 0 : 1
-    const sb = queueStatus(b) === 'In Progress' ? 0 : 1
-    if (sa !== sb) return sa - sb
-    return a.orderNumber.localeCompare(b.orderNumber, undefined, { numeric: true, sensitivity: 'base' })
-  })
+  // ── Sort: oldest / smallest order number first ────────────────────────────
+  const sorted = [...rows].sort((a, b) =>
+    a.orderNumber.localeCompare(b.orderNumber, undefined, { numeric: true, sensitivity: 'base' })
+  )
 
   // ── Totals ────────────────────────────────────────────────────────────────
-  const totalOrdered   = sorted.reduce((s, r) => s + r.ordered, 0)
-  const totalRemaining = sorted.reduce((s, r) => s + r.remainingUntilDone, 0)
-  const inProgressCnt  = sorted.filter(r => queueStatus(r) === 'In Progress').length
-  const pendingCnt     = sorted.filter(r => queueStatus(r) === 'Pending').length
-  const orderCount     = new Set(sorted.map(r => r.orderId)).size
+  const totalOrdered    = sorted.reduce((s, r) => s + r.ordered, 0)
+  const totalRemaining  = sorted.reduce((s, r) => s + r.remainingUntilDone, 0)
+  const orderCount      = new Set(sorted.map(r => r.orderId)).size
+  const pendingUnits    = kpiData?.pendingItemsCount    ?? sorted.filter(r => !r.hasInProductionRecord && r.remainingUntilDone > 0).reduce((s, r) => s + r.remainingUntilDone, 0)
+  const inProdUnits     = kpiData?.inProductionItemsCount ?? sorted.filter(r => r.hasInProductionRecord).reduce((s, r) => s + r.remainingUntilDone, 0)
+  const delayedCount    = kpiData?.productionDelayedCount ?? 0
 
   // ── Drawing helpers ───────────────────────────────────────────────────────
   let y    = 0
@@ -201,13 +200,13 @@ export function generateMorningReportPDF(
   doc.rect(M, y, CW, 14, 'S')
 
   const metaCols: [string, string][] = [
-    ['Date',          dateStr],
-    ['Total Orders',  String(orderCount)],
-    ['Total Items',   String(sorted.length)],
-    ['In Progress',   String(inProgressCnt)],
-    ['Pending',       String(pendingCnt)],
-    ['Total Ordered', String(totalOrdered)],
-    ['Total Rem.',    String(totalRemaining)],
+    ['Date',           dateStr],
+    ['Total Orders',   String(orderCount)],
+    ['Total Items',    String(sorted.length)],
+    ['Pending Units',  String(pendingUnits)],
+    ['In Production',  String(inProdUnits)],
+    ['Delayed',        String(delayedCount)],
+    ['Total Rem.',     String(totalRemaining)],
   ]
   const mw = CW / metaCols.length
   metaCols.forEach(([lbl, val], i) => {

@@ -132,15 +132,10 @@ export async function getProductionQueue(options?: {
   const supabase = options?.supabase ?? (await createClient())
 
   const EMPTY_KPI: ProductionKpiData = {
-    pendingOrdersCount: 0,
-    totalUnitsToProduce: 0,
+    pendingItemsCount: 0,
+    inProductionItemsCount: 0,
     productionDelayedCount: 0,
-    completedThisMonthCount: 0,
-    noProductionOrdersCount: 0,
-    pendingOrderIds: [],
     delayedOrderIds: [],
-    completedThisMonthOrderIds: [],
-    noProductionOrderIds: [],
   }
 
   // Fetch production records + all open orders in parallel (step 1).
@@ -160,12 +155,14 @@ export async function getProductionQueue(options?: {
     supabase
       .from("production_records")
       .select("order_id, production_type, selected_quantities, status, updated_at, created_at, production_number")
-      .in("status", [...QUEUE_VISIBLE_PRODUCTION_STATUSES]),
+      .in("status", [...QUEUE_VISIBLE_PRODUCTION_STATUSES])
+      .range(0, 9999),
     supabase
       .from("orders")
       .select(`id, internal_order_number, sales_order_number, created_at, customers:customer_id ( name )`)
       .in("order_status", [...OPEN_ORDER_STATUSES])
-      .order("internal_order_number", { ascending: true }),
+      .order("internal_order_number", { ascending: true })
+      .range(0, 9999),
   ])
 
   if (productionRecordsResult.error) return { success: false, error: productionRecordsResult.error.message }
@@ -182,6 +179,7 @@ export async function getProductionQueue(options?: {
     .select("order_id, updated_at, created_at")
     .in("status", ["completed", "Completed"])
     .gte("updated_at", monthStart.toISOString())
+    .range(0, 9999)
 
   if (completedMonthError) return { success: false, error: completedMonthError.message }
 
@@ -200,7 +198,8 @@ export async function getProductionQueue(options?: {
           .from("orders")
           .select(`id, internal_order_number, sales_order_number, created_at, customers:customer_id ( name )`)
           .in("id", orderIds)
-          .order("internal_order_number", { ascending: true }),
+          .order("internal_order_number", { ascending: true })
+          .range(0, 9999),
         supabase
           .from("order_items")
           .select("id, order_id, quantity, inventory_item_id, product_id")
@@ -227,6 +226,7 @@ export async function getProductionQueue(options?: {
         .from("production_records")
         .select("order_id, production_type, selected_quantities, status, updated_at, created_at, production_number")
         .in("order_id", noProductionOrderIds_raw)
+        .range(0, 9999)
     : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null })
 
   const fetchTotalsForQueueOrders =
@@ -236,6 +236,7 @@ export async function getProductionQueue(options?: {
           .select("order_id, production_type, selected_quantities, status, updated_at, created_at, production_number")
           .in("order_id", orderIds)
           .in("status", [...QUEUE_VISIBLE_PRODUCTION_STATUSES, "completed", "Completed"])
+          .range(0, 9999)
       : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null })
 
   const [[ordersResult, itemsResult], noProductionItemsResult, totalsResult, noProductionRecordsResult] = await Promise.all([
@@ -583,16 +584,17 @@ export async function getProductionQueue(options?: {
   })
 
   const delayedOrderIds = [...delayedInProductionIds, ...delayedNoProductionIds]
+  const delayedOrderIdsSet = new Set(delayedOrderIds)
+
+  const pendingItemsCount = rows.filter(r => !r.hasInProductionRecord && r.remainingUntilDone > 0).reduce((s, r) => s + r.remainingUntilDone, 0)
+  const inProductionItemsCount = rows.filter(r => r.hasInProductionRecord).reduce((s, r) => s + r.remainingUntilDone, 0)
+  const productionDelayedCount = rows.filter(r => delayedOrderIdsSet.has(r.orderId) && r.remainingUntilDone > 0).length
+
   const kpiData: ProductionKpiData = {
-    pendingOrdersCount: pendingOrderIds.length,
-    totalUnitsToProduce: totalUnitsRemaining,
-    productionDelayedCount: delayedOrderIds.length,
-    completedThisMonthCount: completedThisMonthOrderIdSet.size,
-    noProductionOrdersCount: trulyNotStartedOrderIds.length,
-    pendingOrderIds,
+    pendingItemsCount,
+    inProductionItemsCount,
+    productionDelayedCount,
     delayedOrderIds,
-    completedThisMonthOrderIds: Array.from(completedThisMonthOrderIdSet),
-    noProductionOrderIds: trulyNotStartedOrderIds,
   }
 
   return {
@@ -813,15 +815,10 @@ export type ProductionSnapshot = {
 }
 
 export type ProductionKpiData = {
-  pendingOrdersCount: number
-  totalUnitsToProduce: number
+  pendingItemsCount: number
+  inProductionItemsCount: number
   productionDelayedCount: number
-  completedThisMonthCount: number
-  noProductionOrdersCount: number
-  pendingOrderIds: string[]
   delayedOrderIds: string[]
-  completedThisMonthOrderIds: string[]
-  noProductionOrderIds: string[]
 }
 
 export async function getProductionKpis(
@@ -837,15 +834,10 @@ export async function getProductionKpis(
     return {
       success: true,
       data: {
-        pendingOrdersCount: 0,
-        totalUnitsToProduce: 0,
+        pendingItemsCount: 0,
+        inProductionItemsCount: 0,
         productionDelayedCount: 0,
-        completedThisMonthCount: 0,
-        noProductionOrdersCount: 0,
-        pendingOrderIds: [],
         delayedOrderIds: [],
-        completedThisMonthOrderIds: [],
-        noProductionOrderIds: [],
       },
     }
   }
@@ -911,15 +903,10 @@ export async function getProductionKpis(
   return {
     success: true,
     data: {
-      pendingOrdersCount: pendingOrderIds.length,
-      totalUnitsToProduce,
+      pendingItemsCount: 0,
+      inProductionItemsCount: 0,
       productionDelayedCount: delayedOrderIds.length,
-      completedThisMonthCount: completedThisMonthOrderIds.length,
-      noProductionOrdersCount: 0,
-      pendingOrderIds,
       delayedOrderIds,
-      completedThisMonthOrderIds,
-      noProductionOrderIds: [],
     },
   }
 }

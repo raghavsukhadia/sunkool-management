@@ -112,10 +112,10 @@ interface ProductionRecord {
   }[]
 }
 
-type QueueStatusFilter = "All" | "Pending" | "In Progress" | "Completed"
+type QueueStatusFilter = "All" | "Pending" | "In Progress"
 type QueueSortKey = "orderNumber" | "customerName" | "itemName" | "ordered" | "produced" | "remaining"
 type QueueSortDirection = "asc" | "desc"
-type KpiFilter = "none" | "pending" | "units" | "delayed" | "completedMonth" | "noProduction"
+type KpiFilter = "none" | "pendingItems" | "inProduction" | "delayed"
 
 export default function ProductionPage() {
   const [productionRecords, setProductionRecords] = useState<ProductionRecord[]>([])
@@ -138,13 +138,15 @@ export default function ProductionPage() {
   /** When false, hide line items with 0 remaining until DONE (fully allocated on an open batch awaiting closure). */
   const [showLinesAwaitingClosure, setShowLinesAwaitingClosure] = useState(true)
   const [nfpSearch, setNfpSearch] = useState("")
-  const [nfpSortKey, setNfpSortKey] = useState<"itemName" | "inProductionQty" | "remainingQty" | "sum">("sum")
+  const [nfpSortKey, setNfpSortKey] = useState<"itemName" | "inProductionQty" | "remainingQty" | "nfp">("nfp")
   const [nfpSortDir, setNfpSortDir] = useState<"asc" | "desc">("desc")
   const [nfpStatusFilter, setNfpStatusFilter] = useState<"all" | "in-production-only" | "remaining-only" | "both">("all")
   const [selectedRow, setSelectedRow] = useState<ProductionQueueRow | null>(null)
   const [journeyOpen, setJourneyOpen] = useState(false)
   const neededFullscreenRef = useRef<HTMLDivElement>(null)
   const [checkedItemIds, setCheckedItemIds] = useState<Set<string>>(new Set())
+  const [queuePage, setQueuePage] = useState(0)
+  const QUEUE_PAGE_SIZE = 100
 
   const loadProductionData = useCallback(async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true)
@@ -185,13 +187,34 @@ export default function ProductionPage() {
     [productionRecords]
   )
 
+  const getQueueRowStatus = (row: ProductionQueueRow): QueueStatusFilter => {
+    if (row.hasInProductionRecord || row.produced > 0) return "In Progress"
+    return "Pending"
+  }
+
+  const deferredQueueSearch = useDeferredValue(queueSearch)
+  const normalizedQueueSearch = useMemo(() => deferredQueueSearch.trim().toLowerCase(), [deferredQueueSearch])
+  const delayedOrderIdsSet = useMemo(() => new Set(kpiData?.delayedOrderIds ?? []), [kpiData?.delayedOrderIds])
+
+  // Base rows for dropdown options: respect KPI filter so options are contextual,
+  // but don't apply customer/item filter (avoids options disappearing while user is filtering).
+  const kpiFilteredRowsForOptions = useMemo(() => {
+    return (queueData?.rows ?? []).filter((row) => {
+      if (getRemainingUntilDone(row) === 0 && !row.needsBatchClosure) return false
+      if (kpiFilter === "pendingItems") return !row.hasInProductionRecord && row.remainingUntilDone > 0
+      if (kpiFilter === "inProduction") return row.hasInProductionRecord
+      if (kpiFilter === "delayed") return delayedOrderIdsSet.has(row.orderId)
+      return true
+    })
+  }, [kpiFilter, queueData?.rows, delayedOrderIdsSet])
+
   const uniqueQueueCustomers = useMemo(
-    () => Array.from(new Set((queueData?.rows ?? []).map((row) => row.customerName))).sort((a, b) => a.localeCompare(b)),
-    [queueData?.rows]
+    () => Array.from(new Set(kpiFilteredRowsForOptions.map((row) => row.customerName))).sort((a, b) => a.localeCompare(b)),
+    [kpiFilteredRowsForOptions]
   )
   const uniqueQueueItems = useMemo(
-    () => Array.from(new Set((queueData?.rows ?? []).map((row) => row.itemName))).sort((a, b) => a.localeCompare(b)),
-    [queueData?.rows]
+    () => Array.from(new Set(kpiFilteredRowsForOptions.map((row) => row.itemName))).sort((a, b) => a.localeCompare(b)),
+    [kpiFilteredRowsForOptions]
   )
 
   const filteredCustomerOptions = useMemo(() => {
@@ -206,30 +229,17 @@ export default function ProductionPage() {
     return uniqueQueueItems.filter((i) => i.toLowerCase().includes(s))
   }, [queueItemSearch, uniqueQueueItems])
 
-  const getQueueRowStatus = (row: ProductionQueueRow): QueueStatusFilter => {
-    if (getRemainingUntilDone(row) === 0 && !row.needsBatchClosure) return "Completed"
-    if (row.hasInProductionRecord || row.produced > 0) return "In Progress"
-    return "Pending"
-  }
-
-  const deferredQueueSearch = useDeferredValue(queueSearch)
-  const normalizedQueueSearch = useMemo(() => deferredQueueSearch.trim().toLowerCase(), [deferredQueueSearch])
-  const pendingOrderIdsSet = useMemo(() => new Set(kpiData?.pendingOrderIds ?? []), [kpiData?.pendingOrderIds])
-  const delayedOrderIdsSet = useMemo(() => new Set(kpiData?.delayedOrderIds ?? []), [kpiData?.delayedOrderIds])
-  const completedMonthOrderIdsSet = useMemo(
-    () => new Set(kpiData?.completedThisMonthOrderIds ?? []),
-    [kpiData?.completedThisMonthOrderIds]
-  )
-  const noProductionOrderIdsSet = useMemo(() => new Set(kpiData?.noProductionOrderIds ?? []), [kpiData?.noProductionOrderIds])
-
 
   const filteredQueueRows = useMemo(
     () =>
       (queueData?.rows ?? []).filter((row) => {
-        const isNoProductionRow = noProductionOrderIdsSet.has(row.orderId)
+        // Always hide fully-completed rows (nothing left to produce, no open batch)
+        if (getRemainingUntilDone(row) === 0 && !row.needsBatchClosure) return false
 
-        // When "Not Started" KPI is active, show only those rows; otherwise show everything.
-        if (kpiFilter === "noProduction" && !isNoProductionRow) return false
+        // KPI filters
+        if (kpiFilter === "pendingItems" && (row.hasInProductionRecord || row.remainingUntilDone <= 0)) return false
+        if (kpiFilter === "inProduction" && !row.hasInProductionRecord) return false
+        if (kpiFilter === "delayed" && !delayedOrderIdsSet.has(row.orderId)) return false
 
         if (normalizedQueueSearch) {
           const displayLabel = getQueueOrderDisplayLabel(row)
@@ -245,38 +255,17 @@ export default function ProductionPage() {
         if (queueCustomerFilter && row.customerName !== queueCustomerFilter) return false
         if (queueItemFilter && row.itemName !== queueItemFilter) return false
 
-        if (kpiFilter !== "noProduction") {
-          // Hide awaiting-closure rows (remainingUntilDone === 0 but batch still open) when checkbox is off
-          if (!showLinesAwaitingClosure && row.remainingUntilDone === 0 && !isNoProductionRow) {
-            return false
-          }
-          const rowStatus = getQueueRowStatus(row)
-          if (queueStatusFilter !== "All" && rowStatus !== queueStatusFilter) {
-            return false
-          }
-        }
+        if (!showLinesAwaitingClosure && row.remainingUntilDone === 0) return false
 
-        if (kpiFilter !== "none" && kpiFilter !== "noProduction") {
-          if (
-            kpiFilter === "pending" &&
-            (!pendingOrderIdsSet.has(row.orderId) || (getRemainingUntilDone(row) <= 0 && !row.needsBatchClosure))
-          ) {
-            return false
-          }
-          if (kpiFilter === "units" && getRemainingUntilDone(row) <= 0) return false
-          if (kpiFilter === "delayed" && !delayedOrderIdsSet.has(row.orderId)) return false
-          if (kpiFilter === "completedMonth" && !completedMonthOrderIdsSet.has(row.orderId)) return false
-        }
+        const rowStatus = getQueueRowStatus(row)
+        if (queueStatusFilter !== "All" && rowStatus !== queueStatusFilter) return false
 
         return true
       }),
     [
-      completedMonthOrderIdsSet,
       delayedOrderIdsSet,
       kpiFilter,
-      noProductionOrderIdsSet,
       normalizedQueueSearch,
-      pendingOrderIdsSet,
       queueCustomerFilter,
       queueData?.rows,
       queueItemFilter,
@@ -320,7 +309,11 @@ export default function ProductionPage() {
     return rows
   }, [filteredQueueRows, queueSortDirection, queueSortKey])
 
+  const queueTotalPages = Math.ceil(sortedQueueRows.length / QUEUE_PAGE_SIZE)
+  const paginatedQueueRows = sortedQueueRows.slice(queuePage * QUEUE_PAGE_SIZE, (queuePage + 1) * QUEUE_PAGE_SIZE)
+
   const handleSort = (key: QueueSortKey) => {
+    setQueuePage(0)
     if (queueSortKey === key) {
       setQueueSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))
       return
@@ -328,6 +321,12 @@ export default function ProductionPage() {
     setQueueSortKey(key)
     setQueueSortDirection("asc")
   }
+
+  // Reset to first page whenever filters change
+  useEffect(() => { setQueuePage(0) }, [
+    queueSearch, queueStatusFilter, queueCustomerFilter,
+    queueItemFilter, kpiFilter, showLinesAwaitingClosure,
+  ])
 
   const hasActiveQueueFilters =
     queueSearch.trim().length > 0 ||
@@ -399,7 +398,7 @@ export default function ProductionPage() {
     [underProductionList]
   )
 
-  // NFP: per-item breakdown of In Production + Remaining = Total Need.
+  // NFP: Remaining − In Production = NFP (net units still needed per item).
   // Computed directly from queue rows for accuracy (no double-counting).
   const nfpList = useMemo(() => {
     if (!queueData?.rows?.length) return []
@@ -424,7 +423,7 @@ export default function ProductionPage() {
       itemName,
       inProductionQty: v.inProductionQty,
       remainingQty:    v.remainingQty,
-      sum:             v.inProductionQty + v.remainingQty,
+      nfp:             Math.max(0, v.remainingQty - v.inProductionQty),
       batches:         Array.from(v.batches).sort(),
       orderLines:      v.orderLines,
     }))
@@ -444,7 +443,7 @@ export default function ProductionPage() {
       if (nfpSortKey === "itemName")        cmp = a.itemName.localeCompare(b.itemName, undefined, { sensitivity: "base" })
       else if (nfpSortKey === "inProductionQty") cmp = a.inProductionQty - b.inProductionQty
       else if (nfpSortKey === "remainingQty")    cmp = a.remainingQty - b.remainingQty
-      else                                       cmp = a.sum - b.sum
+      else                                       cmp = a.nfp - b.nfp
       return nfpSortDir === "asc" ? cmp : -cmp
     })
     return rows
@@ -453,7 +452,7 @@ export default function ProductionPage() {
   const nfpTotals = useMemo(() => ({
     inProduction: filteredSortedNfpList.reduce((s, r) => s + r.inProductionQty, 0),
     remaining:    filteredSortedNfpList.reduce((s, r) => s + r.remainingQty, 0),
-    sum:          filteredSortedNfpList.reduce((s, r) => s + r.sum, 0),
+    nfp:          filteredSortedNfpList.reduce((s, r) => s + r.nfp, 0),
   }), [filteredSortedNfpList])
 
   const handleNfpSort = (key: typeof nfpSortKey) => {
@@ -822,13 +821,13 @@ export default function ProductionPage() {
     const rows  = filteredSortedNfpList
     const totalIP  = rows.reduce((s, r) => s + r.inProductionQty, 0)
     const totalRem = rows.reduce((s, r) => s + r.remainingQty, 0)
-    const totalSum = rows.reduce((s, r) => s + r.sum, 0)
+    const totalNfp = rows.reduce((s, r) => s + r.nfp, 0)
     const now = new Date()
     const dateStr = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
 
     const tableRows = rows.map((r, i) => {
-      const ipPct  = r.sum > 0 ? Math.round((r.inProductionQty / r.sum) * 100) : 0
+      const ipPct  = r.remainingQty > 0 ? Math.round((r.inProductionQty / r.remainingQty) * 100) : 0
       const remPct = 100 - ipPct
       const statusLabel = r.inProductionQty > 0 && r.remainingQty > 0
         ? "Mixed" : r.inProductionQty > 0 ? "In Prod." : "Pending"
@@ -845,7 +844,7 @@ export default function ProductionPage() {
         </td>
         <td class="ip">${r.inProductionQty > 0 ? r.inProductionQty.toLocaleString() : "—"}</td>
         <td class="rem">${r.remainingQty > 0 ? r.remainingQty.toLocaleString() : "—"}</td>
-        <td class="sum">${r.sum.toLocaleString()}</td>
+        <td class="sum">${r.nfp.toLocaleString()}</td>
         <td class="batch">${escapeHtml(r.batches.join(", ") || "—")}</td>
         <td class="status" style="color:${statusColor}">${statusLabel}</td>
       </tr>`
@@ -902,7 +901,7 @@ export default function ProductionPage() {
     <div>${logoHtml}<div class="brand-sub">Production Management System</div></div>
     <div class="doc-title">
       <h2>NFP — Need for Production</h2>
-      <p>In Production + Remaining = Total need per item across all open orders</p>
+      <p>Remaining − In Production = NFP per item across all open orders</p>
     </div>
   </div>
   <div class="meta">
@@ -911,12 +910,12 @@ export default function ProductionPage() {
     <div class="meta-cell"><div class="ml">Items</div><div class="mv">${rows.length}</div></div>
     <div class="meta-cell"><div class="ml">In Production</div><div class="mv ip">${totalIP.toLocaleString()}</div></div>
     <div class="meta-cell"><div class="ml">Remaining</div><div class="mv rem">${totalRem.toLocaleString()}</div></div>
-    <div class="meta-cell"><div class="ml">Total NFP</div><div class="mv sum">${totalSum.toLocaleString()}</div></div>
+    <div class="meta-cell"><div class="ml">NFP</div><div class="mv sum">${totalNfp.toLocaleString()}</div></div>
   </div>
   <div class="legend">
     <span><span class="dot" style="background:#16a34a"></span>In Production</span>
     <span><span class="dot" style="background:#dc2626"></span>Remaining (not yet started)</span>
-    <span><span class="dot" style="background:#7c3aed"></span>NFP Total</span>
+    <span><span class="dot" style="background:#7c3aed"></span>NFP</span>
     <span style="color:#94a3b8;margin-left:4px">· Mini bar = production progress split per item</span>
   </div>
   <table>
@@ -926,7 +925,7 @@ export default function ProductionPage() {
         <th class="item">Item Name</th>
         <th class="ip">In Prod.</th>
         <th class="rem">Remaining</th>
-        <th class="sum">NFP Total</th>
+        <th class="sum">NFP</th>
         <th class="batch">Active Batch</th>
         <th class="status">Status</th>
       </tr>
@@ -937,7 +936,7 @@ export default function ProductionPage() {
         <td></td><td style="text-align:right;font-size:8.5px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Totals</td>
         <td class="ip">${totalIP.toLocaleString()}</td>
         <td class="rem">${totalRem.toLocaleString()}</td>
-        <td class="sum">${totalSum.toLocaleString()}</td>
+        <td class="sum">${totalNfp.toLocaleString()}</td>
         <td></td><td></td>
       </tr>
     </tbody>
@@ -961,19 +960,28 @@ export default function ProductionPage() {
     setQueueSearch("")
     setQueueStatusFilter("All")
     setQueueCustomerFilter("")
+    setQueueCustomerSearch("")
     setQueueItemFilter("")
+    setQueueItemSearch("")
     setKpiFilter("none")
     setShowLinesAwaitingClosure(true)
   }
 
   const applyKpiFilter = (next: KpiFilter) => {
+    // Toggle off if already active
+    if (kpiFilter === next) {
+      handleClearQueueFilters()
+      return
+    }
     setKpiFilter(next)
     setQueueSearch("")
     setQueueCustomerFilter("")
+    setQueueCustomerSearch("")
     setQueueItemFilter("")
+    setQueueItemSearch("")
+    setQueueStatusFilter("All")
     setShowLinesAwaitingClosure(true)
-    if (next === "completedMonth") setQueueStatusFilter("Completed")
-    else setQueueStatusFilter("All")
+    setFilter("pending")
   }
 
   const isAllChecked = sortedQueueRows.length > 0 && sortedQueueRows.every((r) => checkedItemIds.has(r.itemId))
@@ -1196,36 +1204,53 @@ export default function ProductionPage() {
       {/* Header */}
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <button
           type="button"
-          onClick={() => applyKpiFilter("noProduction")}
+          onClick={handleClearQueueFilters}
           className={cn(
             "overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition-all hover:shadow-md",
-            kpiFilter === "noProduction" ? "border-red-400 ring-2 ring-red-200" : "border-slate-200 hover:border-red-200"
+            kpiFilter === "none" ? "border-slate-400 ring-2 ring-slate-200" : "border-slate-200 hover:border-slate-300"
           )}
         >
-          <div className="h-[3px] w-full bg-red-500"></div>
+          <div className="h-[3px] w-full bg-slate-500"></div>
           <div className="px-5 py-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Not Started</p>
-            <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">{kpiData?.noProductionOrdersCount ?? 0}</div>
-            <p className="mt-2 text-xs text-slate-500">New orders awaiting production</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Total Items</p>
+            <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">
+              {(queueData?.rows ?? []).reduce((sum, r) => sum + getRemainingUntilDone(r), 0).toLocaleString()}
+            </div>
+            <p className="mt-2 text-xs text-slate-500">Total units remaining across all items</p>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => applyKpiFilter("pendingItems")}
+          className={cn(
+            "overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition-all hover:shadow-md",
+            kpiFilter === "pendingItems" ? "border-orange-400 ring-2 ring-orange-200" : "border-slate-200 hover:border-orange-200"
+          )}
+        >
+          <div className="h-[3px] w-full bg-orange-500"></div>
+          <div className="px-5 py-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Pending Items</p>
+            <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">{(kpiData?.pendingItemsCount ?? 0).toLocaleString()}</div>
+            <p className="mt-2 text-xs text-slate-500">Units awaiting production checklist</p>
           </div>
         </button>
 
         <button
           type="button"
-          onClick={() => applyKpiFilter("pending")}
+          onClick={() => applyKpiFilter("inProduction")}
           className={cn(
             "overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition-all hover:shadow-md",
-            kpiFilter === "pending" ? "border-orange-400 ring-2 ring-orange-200" : "border-slate-200 hover:border-orange-200"
+            kpiFilter === "inProduction" ? "border-blue-400 ring-2 ring-blue-200" : "border-slate-200 hover:border-blue-200"
           )}
         >
-          <div className="h-[3px] w-full bg-orange-500"></div>
+          <div className="h-[3px] w-full bg-blue-500"></div>
           <div className="px-5 py-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Pending</p>
-            <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">{kpiData?.pendingOrdersCount ?? 0}</div>
-            <p className="mt-2 text-xs text-slate-500">Orders currently in production</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">In Production Items</p>
+            <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">{(kpiData?.inProductionItemsCount ?? 0).toLocaleString()}</div>
+            <p className="mt-2 text-xs text-slate-500">Units with an active production batch</p>
           </div>
         </button>
 
@@ -1234,46 +1259,14 @@ export default function ProductionPage() {
           onClick={() => applyKpiFilter("delayed")}
           className={cn(
             "overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition-all hover:shadow-md",
-            kpiFilter === "delayed" ? "border-violet-400 ring-2 ring-violet-200" : "border-slate-200 hover:border-violet-200"
+            kpiFilter === "delayed" ? "border-red-400 ring-2 ring-red-200" : "border-slate-200 hover:border-red-200"
           )}
         >
-          <div className="h-[3px] w-full bg-violet-500"></div>
+          <div className="h-[3px] w-full bg-red-500"></div>
           <div className="px-5 py-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Production Delayed</p>
             <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">{kpiData?.productionDelayedCount ?? 0}</div>
-            <p className="mt-2 text-xs text-slate-500">No production action for 5 days</p>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => applyKpiFilter("completedMonth")}
-          className={cn(
-            "overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition-all hover:shadow-md",
-            kpiFilter === "completedMonth" ? "border-green-400 ring-2 ring-green-200" : "border-slate-200 hover:border-green-200"
-          )}
-        >
-          <div className="h-[3px] w-full bg-green-600"></div>
-          <div className="px-5 py-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Completed</p>
-            <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">{kpiData?.completedThisMonthCount ?? 0}</div>
-            <p className="mt-2 text-xs text-slate-500">Production completed this month</p>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => applyKpiFilter("units")}
-          className={cn(
-            "overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition-all hover:shadow-md",
-            kpiFilter === "units" ? "border-cyan-400 ring-2 ring-cyan-200" : "border-slate-200 hover:border-cyan-200"
-          )}
-        >
-          <div className="h-[3px] w-full bg-cyan-600"></div>
-          <div className="px-5 py-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Total Units to Produce</p>
-            <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">{kpiData?.totalUnitsToProduce ?? 0}</div>
-            <p className="mt-2 text-xs text-slate-500">Remaining across all items</p>
+            <p className="mt-2 text-xs text-slate-500">Items with no production action for 5 days</p>
           </div>
         </button>
       </div>
@@ -1302,7 +1295,7 @@ export default function ProductionPage() {
               icon: Layers,
               label: "NFP",
               count: nfpList.length,
-              tabTitle: "Need for Production — In Production + Remaining per item" as string | undefined,
+              tabTitle: "Need for Production — Remaining − In Production per item" as string | undefined,
             },
           ].map(({ key, icon: Icon, label, count, tabTitle }) => (
             <button
@@ -1377,7 +1370,6 @@ export default function ProductionPage() {
                   <option value="All">All</option>
                   <option value="Pending">Pending</option>
                   <option value="In Progress">In Progress</option>
-                  <option value="Completed">Completed</option>
                 </select>
 
                 <div className="flex flex-col gap-1.5 lg:w-[190px]">
@@ -1512,7 +1504,7 @@ export default function ProductionPage() {
               <>
                 {/* Mobile: card list */}
                 <div className="space-y-3 p-4 lg:hidden">
-                  {sortedQueueRows.map((row) => {
+                  {paginatedQueueRows.map((row) => {
                     return (
                     <button
                       key={row.itemId}
@@ -1559,6 +1551,27 @@ export default function ProductionPage() {
                       </div>
                     </button>
                   )})}
+                  {queueTotalPages > 1 && (
+                    <div className="flex items-center justify-center gap-2 border-t border-slate-100 py-3">
+                      <button
+                        type="button"
+                        disabled={queuePage === 0}
+                        onClick={() => setQueuePage((p) => p - 1)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 transition-colors hover:border-orange-300 hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <ChevronUp className="h-4 w-4 -rotate-90" />
+                      </button>
+                      <span className="text-xs text-slate-500">Page {queuePage + 1} / {queueTotalPages}</span>
+                      <button
+                        type="button"
+                        disabled={queuePage >= queueTotalPages - 1}
+                        onClick={() => setQueuePage((p) => p + 1)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 transition-colors hover:border-orange-300 hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <ChevronDown className="h-4 w-4 -rotate-90" />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Desktop: table */}
@@ -1665,8 +1678,9 @@ export default function ProductionPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedQueueRows.map((row, index) => {
-                        const isFirstInGroup = index === 0 || sortedQueueRows[index - 1].orderId !== row.orderId
+                      {paginatedQueueRows.map((row, index) => {
+                        const globalIndex = queuePage * QUEUE_PAGE_SIZE + index
+                        const isFirstInGroup = globalIndex === 0 || sortedQueueRows[globalIndex - 1].orderId !== row.orderId
 
                         return (
                           <tr
@@ -1674,7 +1688,7 @@ export default function ProductionPage() {
                             onClick={() => handleRowClick(row)}
                             className={cn(
                               "h-12 cursor-pointer border-b border-slate-100 text-[13px] text-slate-900 transition-colors hover:bg-orange-50/70",
-                              checkedItemIds.has(row.itemId) ? "bg-orange-50/60" : index % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"
+                              checkedItemIds.has(row.itemId) ? "bg-orange-50/60" : globalIndex % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"
                             )}
                           >
                             <td className="px-3 py-0 text-center" onClick={(e) => e.stopPropagation()}>
@@ -1747,19 +1761,45 @@ export default function ProductionPage() {
                     </tbody>
                   </table>
 
-                  <div className="flex items-center justify-between border-t-2 border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t-2 border-slate-200 bg-slate-50 px-4 py-3">
                     <p className="text-xs text-slate-400">
-                      Showing {sortedQueueRows.length} of {queueData?.rows.length ?? 0} items
+                      Showing {queuePage * QUEUE_PAGE_SIZE + 1}–{Math.min((queuePage + 1) * QUEUE_PAGE_SIZE, sortedQueueRows.length)} of {sortedQueueRows.length} filtered
+                      {queueData?.rows.length !== sortedQueueRows.length && <span> ({queueData?.rows.length ?? 0} total)</span>}
                       {checkedItemIds.size > 0 && <span className="ml-2 font-medium text-orange-500">· {checkedItemIds.size} selected</span>}
                     </p>
-                    <button
-                      type="button"
-                      onClick={handleExportExcel}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:border-green-300 hover:bg-green-50 hover:text-green-700"
-                    >
-                      <FileDown className="h-3.5 w-3.5" />
-                      {checkedItemIds.size > 0 ? `Export ${checkedItemIds.size} rows` : "Export all"}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {queueTotalPages > 1 && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={queuePage === 0}
+                            onClick={() => setQueuePage((p) => p - 1)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 transition-colors hover:border-orange-300 hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <ChevronUp className="h-3.5 w-3.5 -rotate-90" />
+                          </button>
+                          <span className="min-w-[4rem] text-center text-xs text-slate-500">
+                            Page {queuePage + 1} / {queueTotalPages}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={queuePage >= queueTotalPages - 1}
+                            onClick={() => setQueuePage((p) => p + 1)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 transition-colors hover:border-orange-300 hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleExportExcel}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:border-green-300 hover:bg-green-50 hover:text-green-700"
+                      >
+                        <FileDown className="h-3.5 w-3.5" />
+                        {checkedItemIds.size > 0 ? `Export ${checkedItemIds.size} rows` : "Export all"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </>
@@ -2061,8 +2101,8 @@ export default function ProductionPage() {
               <p className="mt-1 text-[11px] text-slate-400">units not yet started</p>
             </div>
             <div className="rounded-2xl border border-violet-200 bg-white px-5 py-4 shadow-sm">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">NFP Total</p>
-              <p className="mt-1.5 text-3xl font-bold text-violet-600">{nfpTotals.sum.toLocaleString()}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">NFP</p>
+              <p className="mt-1.5 text-3xl font-bold text-violet-600">{nfpTotals.nfp.toLocaleString()}</p>
               <p className="mt-1 text-[11px] text-slate-400">total units needed across {filteredSortedNfpList.length} items</p>
             </div>
           </div>
@@ -2085,7 +2125,7 @@ export default function ProductionPage() {
                   {" "}+{" "}
                   <span className="font-semibold text-red-500">{nfpTotals.remaining.toLocaleString()} remaining</span>
                   {" "}={" "}
-                  <span className="font-semibold text-violet-600">{nfpTotals.sum.toLocaleString()} NFP total</span>
+                  <span className="font-semibold text-violet-600">{nfpTotals.nfp.toLocaleString()} NFP total</span>
                   {neededLastUpdated && <span className="ml-2 text-slate-300">· {neededLastUpdated.toLocaleTimeString()}</span>}
                 </p>
               </div>
@@ -2169,8 +2209,8 @@ export default function ProductionPage() {
                         </button>
                       </th>
                       <th className="w-36 px-4 py-3">
-                        <button type="button" onClick={() => handleNfpSort("sum")} className="inline-flex w-full items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-widest text-violet-500 hover:text-violet-700">
-                          NFP Total {nfpSortKey === "sum" ? (nfpSortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+                        <button type="button" onClick={() => handleNfpSort("nfp")} className="inline-flex w-full items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-widest text-violet-500 hover:text-violet-700">
+                          NFP {nfpSortKey === "nfp" ? (nfpSortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
                         </button>
                       </th>
                       <th className="w-36 px-4 py-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Active Batch</th>
@@ -2234,10 +2274,10 @@ export default function ProductionPage() {
                               <span className="text-[12px] text-slate-300">—</span>
                             )}
                           </td>
-                          {/* NFP Total */}
+                          {/* NFP */}
                           <td className="px-4 py-3 text-right">
                             <span className="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-[14px] font-extrabold text-violet-700">
-                              {row.sum.toLocaleString()}
+                              {row.nfp.toLocaleString()}
                             </span>
                           </td>
                           {/* Active Batch */}
@@ -2269,7 +2309,7 @@ export default function ProductionPage() {
                         <span className="text-[13px] font-bold text-red-600">{nfpTotals.remaining.toLocaleString()}</span>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span className="text-[14px] font-extrabold text-violet-700">{nfpTotals.sum.toLocaleString()}</span>
+                        <span className="text-[14px] font-extrabold text-violet-700">{nfpTotals.nfp.toLocaleString()}</span>
                       </td>
                       <td />
                     </tr>
@@ -2291,7 +2331,7 @@ export default function ProductionPage() {
                   </span>
                 </p>
                 <p className="text-xs font-semibold text-violet-600">
-                  NFP = {nfpTotals.sum.toLocaleString()} units total
+                  NFP = {nfpTotals.nfp.toLocaleString()} units total
                 </p>
               </div>
             )}

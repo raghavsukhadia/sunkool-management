@@ -148,7 +148,7 @@ export function applyFilters(
       if (!found) return false
     }
 
-    if (status !== "all" && !row.statusTags.includes(status)) return false
+    if (status !== "all" && row.status !== status) return false
 
     return matchesAdvancedFilters(row, advanced)
   })
