@@ -309,6 +309,8 @@ export default function ProductionPage() {
     return rows
   }, [filteredQueueRows, queueSortDirection, queueSortKey])
 
+  const totalProduced = useMemo(() => sortedQueueRows.reduce((s, r) => s + getProducedForDisplay(r), 0), [sortedQueueRows])
+
   const queueTotalPages = Math.ceil(sortedQueueRows.length / QUEUE_PAGE_SIZE)
   const paginatedQueueRows = sortedQueueRows.slice(queuePage * QUEUE_PAGE_SIZE, (queuePage + 1) * QUEUE_PAGE_SIZE)
 
@@ -1041,7 +1043,7 @@ export default function ProductionPage() {
       { label: "Active Batch",   width: 14 },
       { label: "Ordered",        width: 10 },
       { label: "Produced",       width: 10 },
-      { label: "RP",             width: 8  },
+      { label: "IP",             width: 8  },
       { label: "Remaining",      width: 11 },
       { label: "Status",         width: 13 },
     ]
@@ -1254,21 +1256,16 @@ export default function ProductionPage() {
           </div>
         </button>
 
-        <button
-          type="button"
-          onClick={() => applyKpiFilter("delayed")}
-          className={cn(
-            "overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition-all hover:shadow-md",
-            kpiFilter === "delayed" ? "border-red-400 ring-2 ring-red-200" : "border-slate-200 hover:border-red-200"
-          )}
+        <div
+          className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
         >
-          <div className="h-[3px] w-full bg-red-500"></div>
+          <div className="h-[3px] w-full bg-green-500"></div>
           <div className="px-5 py-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Production Delayed</p>
-            <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">{kpiData?.productionDelayedCount ?? 0}</div>
-            <p className="mt-2 text-xs text-slate-500">Items with no production action for 5 days</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Produced</p>
+            <div className="mt-2 text-4xl font-semibold leading-none text-slate-900">{totalProduced.toLocaleString()}</div>
+            <p className="mt-2 text-xs text-slate-500">Total units produced (completed batches)</p>
           </div>
-        </button>
+        </div>
       </div>
 
       {/* Tab Navigation */}

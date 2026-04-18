@@ -20,6 +20,7 @@ import {
   ChevronRight,
   Plus,
   Layers,
+  BarChart3,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MobileBottomNav } from "@/components/dashboard/MobileBottomNav"
@@ -43,6 +44,7 @@ const NAV = [
       { href: "/dashboard/tracking",   label: "Tracking",   icon: Truck        },
       { href: "/dashboard/customers",  label: "Customers",  icon: Users        },
       { href: "/dashboard/items",      label: "Items",      icon: Layers       },
+      { href: "/dashboard/reports",    label: "Reports",    icon: BarChart3    },
     ],
   },
   {
@@ -64,6 +66,7 @@ function resolveTitle(pathname: string) {
   if (pathname.startsWith("/dashboard/notifications")) return "Notifications"
   if (pathname.startsWith("/dashboard/management"))    return "Management"
   if (pathname.startsWith("/dashboard/items"))         return "Items"
+  if (pathname.startsWith("/dashboard/reports"))       return "Reports"
   return "Order Management"
 }
 

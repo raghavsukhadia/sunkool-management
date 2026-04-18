@@ -85,10 +85,10 @@ export function generateMorningReportPDF(
   // ── Totals ────────────────────────────────────────────────────────────────
   const totalOrdered    = sorted.reduce((s, r) => s + r.ordered, 0)
   const totalRemaining  = sorted.reduce((s, r) => s + r.remainingUntilDone, 0)
+  const totalProduced   = sorted.reduce((s, r) => s + r.producedCompleted, 0)
   const orderCount      = new Set(sorted.map(r => r.orderId)).size
   const pendingUnits    = kpiData?.pendingItemsCount    ?? sorted.filter(r => !r.hasInProductionRecord && r.remainingUntilDone > 0).reduce((s, r) => s + r.remainingUntilDone, 0)
   const inProdUnits     = kpiData?.inProductionItemsCount ?? sorted.filter(r => r.hasInProductionRecord).reduce((s, r) => s + r.remainingUntilDone, 0)
-  const delayedCount    = kpiData?.productionDelayedCount ?? 0
 
   // ── Drawing helpers ───────────────────────────────────────────────────────
   let y    = 0
@@ -176,7 +176,7 @@ export function generateMorningReportPDF(
       ['batch', 'Active Batch', 'c'],
       ['oqty',  'Ordered',      'c'],
       ['prod',  'Produced',     'c'],
-      ['rp',    'RP',           'c'],
+      ['rp',    'IP',           'c'],
       ['rem',   'Remaining',    'c'],
       ['stat',  'Status',       'c'],
     ]
@@ -205,7 +205,7 @@ export function generateMorningReportPDF(
     ['Total Items',    String(sorted.length)],
     ['Pending Units',  String(pendingUnits)],
     ['In Production',  String(inProdUnits)],
-    ['Delayed',        String(delayedCount)],
+    ['Produced',       String(totalProduced)],
     ['Total Rem.',     String(totalRemaining)],
   ]
   const mw = CW / metaCols.length
