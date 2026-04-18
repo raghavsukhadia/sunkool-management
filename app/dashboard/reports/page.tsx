@@ -352,20 +352,24 @@ function KpiCard({
 }
 
 function SortButton({
-  col, sortKey, sortDir, onSort, children,
+  col, sortKey, sortDir, onSort, children, align = "start",
 }: {
   col: SortKey
   sortKey: SortKey
   sortDir: SortDir
   onSort: (k: SortKey) => void
   children: React.ReactNode
+  align?: "start" | "end" | "center"
 }) {
   const active = sortKey === col
   return (
     <button
+      type="button"
       onClick={() => onSort(col)}
       className={cn(
         "flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide transition-colors",
+        align === "end" && "w-full justify-end text-right",
+        align === "center" && "w-full justify-center",
         active ? "text-orange-400" : "text-white/60 hover:text-white"
       )}
     >
@@ -786,8 +790,8 @@ export default function ReportsPage() {
             )}
           </div>
 
-          {/* Table */}
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          {/* Table — horizontal scroll only; thead sticks to viewport below dashboard header (layout: sticky top bar z-30) */}
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
             {loading ? (
               <div className="flex flex-col items-center justify-center gap-3 py-24">
                 <RefreshCw className="h-8 w-8 animate-spin text-orange-400" />
@@ -813,25 +817,39 @@ export default function ReportsPage() {
                 )}
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[900px] border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-[#1e293b]">
-                      <th className="w-10 py-3.5 pl-4 text-center text-[10px] font-semibold uppercase tracking-widest text-white/40">#</th>
-                      <th className="py-3.5 pl-3 pr-2 text-left"><SortButton col="orderNumber"  sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Order #</SortButton></th>
-                      <th className="py-3.5 px-2 text-left">       <SortButton col="orderDate"    sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Date</SortButton></th>
-                      <th className="py-3.5 px-2 text-left">       <SortButton col="customerName" sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Customer</SortButton></th>
-                      <th className="py-3.5 px-2 text-left">       <SortButton col="itemName"     sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Item</SortButton></th>
-                      <th className="py-3.5 px-2 text-center text-[11px] font-semibold uppercase tracking-wide text-white/60">Batch</th>
-                      <th className="py-3.5 px-2 text-right">      <SortButton col="ordered"      sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Ordered</SortButton></th>
-                      <th className="py-3.5 px-2 text-right">      <SortButton col="produced"     sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Produced</SortButton></th>
-                      <th className="py-3.5 px-2 text-right">      <SortButton col="ip"           sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>IP</SortButton></th>
-                      <th className="py-3.5 px-2 text-right">      <SortButton col="remaining"    sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Remaining</SortButton></th>
-                      <th className="py-3.5 px-4 text-center text-[11px] font-semibold uppercase tracking-wide text-white/60">Status</th>
+              <div className="min-w-0">
+                <table className="w-full min-w-[1050px] table-fixed border-separate border-spacing-0 text-sm">
+                  <colgroup>
+                    <col style={{ width: "40px"  }} /> {/* # */}
+                    <col style={{ width: "100px" }} /> {/* Order # */}
+                    <col style={{ width: "100px" }} /> {/* Date */}
+                    <col style={{ width: "150px" }} /> {/* Customer */}
+                    <col style={{ width: "180px" }} /> {/* Item */}
+                    <col style={{ width: "80px"  }} /> {/* Batch */}
+                    <col style={{ width: "80px"  }} /> {/* Ordered */}
+                    <col style={{ width: "90px"  }} /> {/* Completed */}
+                    <col style={{ width: "70px"  }} /> {/* IP */}
+                    <col style={{ width: "90px"  }} /> {/* Remaining */}
+                    <col style={{ width: "110px" }} /> {/* Status */}
+                  </colgroup>
+                  {/* border-separate (not collapse): required for sticky th in Chrome. Sticky on thead is poorly supported — use th. No overflow-x wrapper (breaks viewport sticky). */}
+                  <thead className="[&_th]:sticky [&_th]:top-16 [&_th]:z-[25] [&_th]:bg-[#1e293b] [&_th]:shadow-[0_1px_0_0_rgba(0,0,0,0.25)]">
+                    <tr>
+                      <th className="py-3.5 pl-4 pr-1 text-center text-[10px] font-semibold uppercase tracking-widest text-white/40">#</th>
+                      <th className="py-3.5 pl-3 pr-2 text-left align-middle"><SortButton col="orderNumber"  sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Order #</SortButton></th>
+                      <th className="py-3.5 px-2 text-left align-middle"><SortButton col="orderDate"    sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Date</SortButton></th>
+                      <th className="py-3.5 px-2 text-left align-middle"><SortButton col="customerName" sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Customer</SortButton></th>
+                      <th className="py-3.5 px-2 text-left align-middle"><SortButton col="itemName"     sortKey={sortKey} sortDir={sortDir} onSort={handleSort}>Item</SortButton></th>
+                      <th className="py-3.5 px-2 text-center align-middle text-[11px] font-semibold uppercase tracking-wide text-white/60">Batch</th>
+                      <th className="py-3.5 px-2 text-right align-middle"><SortButton col="ordered"   sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="end">Ordered</SortButton></th>
+                      <th className="py-3.5 px-2 text-right align-middle"><SortButton col="produced"  sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="end">Completed</SortButton></th>
+                      <th className="py-3.5 px-2 text-right align-middle"><SortButton col="ip"        sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="end">IP</SortButton></th>
+                      <th className="py-3.5 px-2 text-right align-middle"><SortButton col="remaining" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="end">Remaining</SortButton></th>
+                      <th className="py-3.5 px-4 text-center align-middle text-[11px] font-semibold uppercase tracking-wide text-white/60">Status</th>
                     </tr>
                   </thead>
 
-                  <tbody>
+                  <tbody className="[&_tr>td]:border-b [&_tr>td]:border-slate-100 [&_tr:last-child>td]:border-b-0">
                     {sorted.map((row, idx) => {
                       const produced  = getProduced(row)         // producedCompleted — matches PDF
                       const ip        = getInProgress(row)
@@ -847,30 +865,30 @@ export default function ReportsPage() {
                         <tr
                           key={`${row.orderId}-${row.itemId}`}
                           className={cn(
-                            "group border-b border-slate-100 transition-colors last:border-b-0 hover:bg-orange-50",
+                            "group transition-colors hover:bg-orange-50",
                             idx % 2 === 0 ? "bg-white" : "bg-orange-50/30"
                           )}
                         >
-                          <td className="py-3 pl-4 text-center text-[11px] font-medium text-slate-400">{idx + 1}</td>
+                          <td className="py-3 pl-4 pr-1 text-center align-middle text-[11px] font-medium text-slate-400">{idx + 1}</td>
 
-                          <td className="py-3 pl-3 pr-2">
+                          <td className="py-3 pl-3 pr-2 align-middle">
                             <div className="flex items-center gap-1.5">
                               <span className="h-4 w-[3px] rounded-r-full bg-orange-400" />
                               <span className="text-[12px] font-bold text-orange-600">{row.orderNumber}</span>
                             </div>
                           </td>
 
-                          <td className="whitespace-nowrap py-3 px-2 text-[11px] text-slate-500">{fmtDate(row.orderDate)}</td>
+                          <td className="whitespace-nowrap py-3 px-2 align-middle text-[11px] text-slate-500">{fmtDate(row.orderDate)}</td>
 
-                          <td className="max-w-[150px] py-3 px-2">
+                          <td className="max-w-0 py-3 px-2 align-middle">
                             <span className="block truncate text-[12px] font-medium text-slate-800">{row.customerName}</span>
                           </td>
 
-                          <td className="max-w-[170px] py-3 px-2">
+                          <td className="max-w-0 py-3 px-2 align-middle">
                             <span className="block truncate text-[12px] text-slate-700">{row.itemName}</span>
                           </td>
 
-                          <td className="py-3 px-2 text-center">
+                          <td className="py-3 px-2 text-center align-middle">
                             {batch !== "—" ? (
                               <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                                 {batch}
@@ -880,27 +898,29 @@ export default function ReportsPage() {
                             )}
                           </td>
 
-                          <td className="py-3 px-2 text-right text-[12px] font-medium text-slate-700">
+                          <td className="py-3 px-2 text-right align-middle tabular-nums text-[12px] font-medium text-slate-700">
                             {row.ordered.toLocaleString()}
                           </td>
 
-                          <td className="py-3 px-2 text-right text-[12px] font-semibold">
+                          <td className="py-3 px-2 text-right align-middle tabular-nums text-[12px] font-semibold">
                             {produced > 0
                               ? <span className="text-green-700">{produced.toLocaleString()}</span>
                               : <span className="font-normal text-slate-300">—</span>
                             }
                           </td>
 
-                          <td className="py-3 px-2 text-right text-[12px] font-semibold">
+                          <td className="py-3 px-2 text-right align-middle tabular-nums text-[12px] font-semibold">
                             {ip > 0
                               ? <span className="text-blue-600">{ip.toLocaleString()}</span>
                               : <span className="font-normal text-slate-300">—</span>
                             }
                           </td>
 
-                          <td className="py-3 px-2 text-right"><RemainingBadge value={remaining} /></td>
+                          <td className="py-3 px-2 text-right align-middle tabular-nums">
+                            <span className="inline-flex w-full justify-end"><RemainingBadge value={remaining} /></span>
+                          </td>
 
-                          <td className="py-3 px-4 text-center"><StatusBadge status={status} /></td>
+                          <td className="py-3 px-4 text-center align-middle"><StatusBadge status={status} /></td>
                         </tr>
                       )
                     })}
@@ -909,22 +929,22 @@ export default function ReportsPage() {
                   {/* Totals footer */}
                   <tfoot>
                     <tr className="bg-[#1e293b]">
-                      <td colSpan={6} className="py-3.5 pl-5 text-[11px] font-bold uppercase tracking-widest text-white/50">
+                      <td colSpan={6} className="py-3.5 pl-5 align-middle text-[11px] font-bold uppercase tracking-widest text-white/50">
                         Totals — {sorted.length} items
                       </td>
-                      <td className="py-3.5 px-2 text-right text-[13px] font-bold text-white">
+                      <td className="py-3.5 px-2 text-right align-middle tabular-nums text-[13px] font-bold text-white">
                         {sorted.reduce((s, r) => s + r.ordered, 0).toLocaleString()}
                       </td>
-                      <td className="py-3.5 px-2 text-right text-[13px] font-bold text-green-400">
+                      <td className="py-3.5 px-2 text-right align-middle tabular-nums text-[13px] font-bold text-green-400">
                         {stats.produced.toLocaleString()}
                       </td>
-                      <td className="py-3.5 px-2 text-right text-[13px] font-bold text-blue-400">
+                      <td className="py-3.5 px-2 text-right align-middle tabular-nums text-[13px] font-bold text-blue-400">
                         {sorted.reduce((s, r) => s + getInProgress(r), 0).toLocaleString()}
                       </td>
-                      <td className="py-3.5 px-2 text-right text-[13px] font-bold text-orange-400">
+                      <td className="py-3.5 px-2 text-right align-middle tabular-nums text-[13px] font-bold text-orange-400">
                         {stats.totalRem.toLocaleString()}
                       </td>
-                      <td />
+                      <td className="align-middle" />
                     </tr>
                   </tfoot>
                 </table>
