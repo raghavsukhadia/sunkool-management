@@ -85,6 +85,7 @@ export default function OrdersPage() {
   const searchParams = useSearchParams()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [showSearchPanel, setShowSearchPanel] = useState(false)
@@ -122,15 +123,10 @@ export default function OrdersPage() {
     loadOrders()
   }, [])
 
-  // When returning from an order detail page, this client component may keep its
-  // previous state (browser back/forward). Refresh on focus/visibility so statuses
-  // like Paid/Delivered show up immediately without manual refresh.
   useEffect(() => {
-    const onFocus = () => {
-      void loadOrders()
-    }
+    const onFocus = () => { void loadOrders(true) }
     const onVisibility = () => {
-      if (document.visibilityState === "visible") void loadOrders()
+      if (document.visibilityState === "visible") void loadOrders(true)
     }
     window.addEventListener("focus", onFocus)
     document.addEventListener("visibilitychange", onVisibility)
@@ -365,17 +361,17 @@ export default function OrdersPage() {
                                                            t: "s", s: sCenter                     },
           // CUSTOMER
           { v: row.customer_name         || "—",           t: "s", s: sBold                       },
-          { v: order?.customers?.phone   || "—",           t: "s", s: base                        },
-          { v: order?.customers?.email   || "—",           t: "s", s: base                        },
+          { v: row.customer_phone        || "—",           t: "s", s: base                        },
+          { v: row.customer_email        || "—",           t: "s", s: base                        },
           // ITEMS
           { v: row.item_details          || "—",           t: "s", s: base                        },
           // FINANCIAL
-          { v: orderVal,                                   t: "n", s: sAmtBold                    },
+          { v: orderVal,                                   t: "n", z: '"₹"#,##0.00', s: sAmtBold },
           { v: order?.cash_discount ? "Yes" : "No",        t: "s", s: sCenter                     },
           { v: row.invoice_number        || "—",           t: "s", s: sCenter                     },
-          { v: invoiced > 0 ? invoiced : "—",              t: invoiced > 0 ? "n" : "s", s: invoiced > 0 ? sGreen : sRight },
-          { v: paid     > 0 ? paid     : "—",              t: paid     > 0 ? "n" : "s", s: paid     > 0 ? sGreen : sRight },
-          { v: due      > 0 ? due      : "—",              t: due      > 0 ? "n" : "s", s: due      > 0 ? sRed   : sRight },
+          { v: invoiced > 0 ? invoiced : "—",              t: invoiced > 0 ? "n" : "s", ...(invoiced > 0 ? { z: '"₹"#,##0.00' } : {}), s: invoiced > 0 ? sGreen : sRight },
+          { v: paid     > 0 ? paid     : "—",              t: paid     > 0 ? "n" : "s", ...(paid     > 0 ? { z: '"₹"#,##0.00' } : {}), s: paid     > 0 ? sGreen : sRight },
+          { v: due      > 0 ? due      : "—",              t: due      > 0 ? "n" : "s", ...(due      > 0 ? { z: '"₹"#,##0.00' } : {}), s: due      > 0 ? sRed   : sRight },
           { v: payStatus,                                  t: "s", s: sCenter                     },
           // DISPATCH
           { v: row.dispatch_date         || "—",           t: "s", s: sCenter                     },
@@ -403,10 +399,10 @@ export default function OrdersPage() {
         const col = colLetter(i)
         // Col index map: 9=Order Value, 12=Total Invoiced, 13=Total Received, 14=Balance Due
         if (i === 0)  ws[`${col}${footerRow}`] = { v: "TOTALS", t: "s", s: footerBase }
-        else if (i === 9)  ws[`${col}${footerRow}`] = { v: ids.reduce((s,id)=>s+(orderLookup.get(id)?getOrderDisplayTotal(orderLookup.get(id)!):0),0), t:"n", s: footerAmt  }
-        else if (i === 12) ws[`${col}${footerRow}`] = { v: totalInvoiced, t:"n", s: footerGreen }
-        else if (i === 13) ws[`${col}${footerRow}`] = { v: totalPaid,     t:"n", s: footerGreen }
-        else if (i === 14) ws[`${col}${footerRow}`] = { v: totalDue,      t:"n", s: footerRed   }
+        else if (i === 9)  ws[`${col}${footerRow}`] = { v: ids.reduce((s,id)=>s+(orderLookup.get(id)?getOrderDisplayTotal(orderLookup.get(id)!):0),0), t:"n", z:'"₹"#,##0.00', s: footerAmt  }
+        else if (i === 12) ws[`${col}${footerRow}`] = { v: totalInvoiced, t:"n", z:'"₹"#,##0.00', s: footerGreen }
+        else if (i === 13) ws[`${col}${footerRow}`] = { v: totalPaid,     t:"n", z:'"₹"#,##0.00', s: footerGreen }
+        else if (i === 14) ws[`${col}${footerRow}`] = { v: totalDue,      t:"n", z:'"₹"#,##0.00', s: footerRed   }
         else               ws[`${col}${footerRow}`] = { v: "",            t:"s", s: footerBase  }
       })
 
@@ -459,11 +455,14 @@ export default function OrdersPage() {
     }
   }
 
-  const loadOrders = async () => {
-    setLoading(true)
+  const loadOrders = async (silent = false) => {
+    if (silent) {
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
     setError(null)
     try {
-      // 1. Fetch and show orders immediately — don't block on completed IDs
       const ordersResult = await getAllOrders()
       if (ordersResult.success && ordersResult.data) {
         setOrders(ordersResult.data as unknown as Order[])
@@ -473,10 +472,11 @@ export default function OrdersPage() {
     } catch (err: any) {
       setError(err.message || "An error occurred")
     } finally {
-      setLoading(false) // Orders are visible now
+      setLoading(false)
+      setRefreshing(false)
     }
 
-    // 2. Load completed IDs silently in the background
+    // Load completed IDs silently in the background
     try {
       const completedResult = await getCompletedOrderIds()
       if (completedResult.success && completedResult.data) {
@@ -640,10 +640,24 @@ export default function OrdersPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="mb-3 inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-sk-primary"></div>
-          <p className="text-sk-text-2">Loading orders...</p>
+      <div className="space-y-4 pb-8 lg:space-y-6">
+        <div className="hidden border-b border-sk-border pb-4 lg:flex lg:items-end lg:justify-between lg:gap-4">
+          <div className="space-y-3">
+            <div className="h-1 w-14 rounded-full bg-sk-primary" />
+            <div className="space-y-2">
+              <div className="h-8 w-40 animate-pulse rounded-md bg-slate-100" />
+              <div className="h-4 w-64 animate-pulse rounded-md bg-slate-100" />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <div className="h-9 w-28 animate-pulse rounded-md bg-slate-100" />
+            <div className="h-9 w-28 animate-pulse rounded-md bg-slate-100" />
+          </div>
+        </div>
+        <div className="space-y-3 rounded-xl border border-sk-border bg-white p-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="h-12 animate-pulse rounded-md bg-slate-100" style={{ opacity: 1 - i * 0.08 }} />
+          ))}
         </div>
       </div>
     )
@@ -651,6 +665,13 @@ export default function OrdersPage() {
 
   return (
     <div className="space-y-4 pb-8 lg:space-y-6">
+      {/* Refresh indicator — shown only during background reloads */}
+      {refreshing && (
+        <div className="fixed inset-x-0 top-0 z-50 h-0.5 overflow-hidden bg-transparent">
+          <div className="h-full animate-[shimmer_1.2s_ease-in-out_infinite] bg-sk-primary" style={{ width: "40%", animation: "pulse 1s ease-in-out infinite" }} />
+        </div>
+      )}
+
       {/* Header - desktop */}
       <div className="hidden border-b border-sk-border pb-4 lg:flex lg:items-end lg:justify-between lg:gap-4">
         <div className="space-y-3">
@@ -660,7 +681,10 @@ export default function OrdersPage() {
             <p className="mt-1.5 text-sm text-sk-text-2">Manage and track all orders across the pipeline.</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {refreshing && (
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-sk-primary border-t-transparent" />
+          )}
           <Button
             onClick={handleExport}
             disabled={exporting}

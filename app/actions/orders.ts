@@ -659,6 +659,8 @@ export type OrdersExportRow = {
   created_at: string
   dispatch_date: string
   customer_name: string
+  customer_phone: string
+  customer_email: string
   invoice_number: string | null
   order_status: string
   item_details: string
@@ -688,6 +690,8 @@ export async function getOrdersExportData(orderIds: string[]): Promise<{
     created_at: "",
     dispatch_date: "",
     customer_name: "",
+    customer_phone: "",
+    customer_email: "",
     invoice_number: null,
     order_status: "",
     item_details: "",
@@ -710,7 +714,9 @@ export async function getOrdersExportData(orderIds: string[]): Promise<{
       order_status,
       customers:customer_id (
         name,
-        address
+        address,
+        phone,
+        email
       )
     `)
     .in("id", orderIds)
@@ -728,7 +734,7 @@ export async function getOrdersExportData(orderIds: string[]): Promise<{
       created_at: string
       invoice_number: string | null
       order_status: string
-      customers?: { name?: string; address?: string } | null
+      customers?: { name?: string; address?: string; phone?: string; email?: string } | null
     }
     const customer = order.customers
     const createdAt = order.created_at
@@ -741,6 +747,8 @@ export async function getOrdersExportData(orderIds: string[]): Promise<{
       created_at: createdAt,
       dispatch_date: "",
       customer_name: customer?.name ?? "",
+      customer_phone: customer?.phone ?? "",
+      customer_email: customer?.email ?? "",
       invoice_number: order.invoice_number ?? null,
       order_status: order.order_status ?? "",
       item_details: "",
@@ -1840,6 +1848,7 @@ export async function updateOrderPayment(
   }
 
   revalidatePath(`/dashboard/orders/${orderId}`)
+  revalidatePath("/dashboard/orders")
   return { success: true, data }
 }
 
@@ -3192,6 +3201,7 @@ export async function createOrUpdateOrderInvoice(params: {
     })
 
     revalidatePath(`/dashboard/orders/${params.orderId}`)
+    revalidatePath("/dashboard/orders")
     return { success: true, data: updated }
   }
 
@@ -3278,6 +3288,7 @@ export async function createOrUpdateOrderInvoice(params: {
   })
 
   revalidatePath(`/dashboard/orders/${params.orderId}`)
+  revalidatePath("/dashboard/orders")
   return { success: true, data }
 }
 
@@ -3443,6 +3454,7 @@ export async function addOrderPayment(
   })
 
   revalidatePath(`/dashboard/orders/${orderId}`)
+  revalidatePath("/dashboard/orders")
   return { success: true, data }
 }
 
@@ -3470,6 +3482,7 @@ export async function deleteOrderPayment(paymentId: string) {
   }
 
   revalidatePath(`/dashboard/orders/${payment.order_id}`)
+  revalidatePath("/dashboard/orders")
   return { success: true }
 }
 

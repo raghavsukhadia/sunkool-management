@@ -21,7 +21,7 @@ export function BulkActionsBar({ selectedCount, onClear, onExport, onAddTag, onD
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" variant="outline" onClick={onExport}>
             <Download className="mr-1.5 h-4 w-4" />
-            Export CSV
+            Export Excel
           </Button>
           <Button type="button" size="sm" variant="outline" onClick={onAddTag}>
             <Tag className="mr-1.5 h-4 w-4" />

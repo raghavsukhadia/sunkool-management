@@ -106,7 +106,11 @@ function computeInsights(
 
   if (customer.unpaid_delivered > 0) {
     const unpaidVal = orders
-      .filter(o => o.order_status === "Delivered" && o.payment_status === "Pending")
+      .filter(o =>
+        o.payment_status === "Pending" ||
+        o.payment_status === "Delivered Unpaid" ||
+        o.payment_status === "Partial"
+      )
       .reduce((sum, o) => sum + (o.requested_payment_amount != null ? Number(o.requested_payment_amount) : Number(o.total_price ?? 0)), 0)
     insights.push({
       type: "warning",
@@ -205,7 +209,11 @@ export async function getCustomersWithStats(): Promise<{
         ? Number(order.requested_payment_amount)
         : Number(order.total_price ?? 0)
     s.lifetime_value += val
-    if (order.order_status === "Delivered" && order.payment_status === "Pending") {
+    const isUnpaid =
+      order.payment_status === "Pending" ||
+      order.payment_status === "Delivered Unpaid" ||
+      order.payment_status === "Partial"
+    if (isUnpaid) {
       s.unpaid_delivered += 1
       s.unpaid_delivered_amount += val
     }
@@ -313,7 +321,11 @@ export async function getCustomerById(id: string): Promise<{
         ? Number(order.requested_payment_amount)
         : Number(order.total_price ?? 0)
     lifetime_value += val
-    if (order.order_status === "Delivered" && order.payment_status === "Pending") {
+    const isUnpaid =
+      order.payment_status === "Pending" ||
+      order.payment_status === "Delivered Unpaid" ||
+      order.payment_status === "Partial"
+    if (isUnpaid) {
       unpaid_delivered++
       unpaid_delivered_amount += val
     }

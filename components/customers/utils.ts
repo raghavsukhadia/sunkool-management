@@ -16,10 +16,11 @@ export const STATUS_FILTERS: Array<"all" | CustomerStatusTag> = [
   "No Orders",
 ]
 
-export const COLUMN_LABELS: Record<SortKey | "status", string> = {
+export const COLUMN_LABELS: Record<SortKey | "status" | "orderFrequency", string> = {
   name: "Name",
   phone: "Phone",
   email: "Email",
+  orderFrequency: "Order Frequency",
   totalOrders: "Total Orders",
   totalValue: "Total Value",
   unpaidAmount: "Unpaid Amount",

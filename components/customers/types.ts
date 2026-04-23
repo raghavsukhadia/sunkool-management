@@ -63,7 +63,7 @@ export interface CustomerPreset {
 export type ColumnKey =
   | "name"
   | "phone"
-  | "email"
+  | "orderFrequency"
   | "totalOrders"
   | "totalValue"
   | "unpaidAmount"
