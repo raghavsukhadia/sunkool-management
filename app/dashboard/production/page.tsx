@@ -141,6 +141,10 @@ export default function ProductionPage() {
   const [nfpSortKey, setNfpSortKey] = useState<"itemName" | "inProductionQty" | "remainingQty" | "nfp">("nfp")
   const [nfpSortDir, setNfpSortDir] = useState<"asc" | "desc">("desc")
   const [nfpStatusFilter, setNfpStatusFilter] = useState<"all" | "in-production-only" | "remaining-only" | "both">("all")
+  const [neededSearch, setNeededSearch] = useState("")
+  const [neededSortKey, setNeededSortKey] = useState<"remainingQty" | "itemName">("remainingQty")
+  const [neededSortDir, setNeededSortDir] = useState<"asc" | "desc">("desc")
+  const [neededUrgencyFilter, setNeededUrgencyFilter] = useState<"all" | "high" | "medium" | "low">("all")
   const [selectedRow, setSelectedRow] = useState<ProductionQueueRow | null>(null)
   const [journeyOpen, setJourneyOpen] = useState(false)
   const neededFullscreenRef = useRef<HTMLDivElement>(null)
@@ -363,6 +367,33 @@ export default function ProductionPage() {
   const neededRemainingTotal = useMemo(
     () => neededList.reduce((s, r) => s + r.remainingQty, 0),
     [neededList]
+  )
+
+  const deferredNeededSearch = useDeferredValue(neededSearch)
+
+  const filteredSortedNeededList = useMemo(() => {
+    const search = deferredNeededSearch.trim().toLowerCase()
+    let rows: typeof neededList = neededList
+    if (search) rows = rows.filter((r) => r.itemName.toLowerCase().includes(search))
+    if (neededUrgencyFilter === "high") rows = rows.filter((r) => r.remainingQty >= 100)
+    else if (neededUrgencyFilter === "medium") rows = rows.filter((r) => r.remainingQty >= 25 && r.remainingQty < 100)
+    else if (neededUrgencyFilter === "low") rows = rows.filter((r) => r.remainingQty < 25)
+    return [...rows].sort((a, b) => {
+      if (neededSortKey === "itemName") {
+        return neededSortDir === "asc" ? a.itemName.localeCompare(b.itemName) : b.itemName.localeCompare(a.itemName)
+      }
+      return neededSortDir === "asc" ? a.remainingQty - b.remainingQty : b.remainingQty - a.remainingQty
+    })
+  }, [neededList, deferredNeededSearch, neededUrgencyFilter, neededSortKey, neededSortDir])
+
+  const neededFilteredLineTotal = useMemo(
+    () => filteredSortedNeededList.reduce((s, r) => s + r.lineCount, 0),
+    [filteredSortedNeededList]
+  )
+
+  const neededFilteredRemainingTotal = useMemo(
+    () => filteredSortedNeededList.reduce((s, r) => s + r.remainingQty, 0),
+    [filteredSortedNeededList]
   )
 
   // Under Production: items currently active in an in-production batch.
@@ -1820,7 +1851,7 @@ export default function ProductionPage() {
               <div className="flex items-center gap-2.5">
                 <h2 className="text-[16px] font-semibold text-slate-900">Production Needed</h2>
                 <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-[12px] font-semibold text-orange-600">
-                  {neededList.length} items
+                  {filteredSortedNeededList.length}{filteredSortedNeededList.length !== neededList.length ? ` / ${neededList.length}` : ""} items
                 </span>
               </div>
               <p className="mt-0.5 text-xs text-slate-400">
@@ -1854,6 +1885,116 @@ export default function ProductionPage() {
             </div>
           </div>
 
+          {/* Search & Smart Filters */}
+          <div className={cn(
+            "border-b border-slate-100 px-5 py-3 print:hidden",
+            isNeededFullscreen && "px-8"
+          )}>
+            {/* Search + sort row */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={neededSearch}
+                  onChange={(e) => setNeededSearch(e.target.value)}
+                  placeholder="Search items…"
+                  className="h-8 pl-8 text-[13px] placeholder:text-slate-400"
+                />
+                {neededSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setNeededSearch("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (neededSortKey === "remainingQty") {
+                    setNeededSortDir((d) => (d === "desc" ? "asc" : "desc"))
+                  } else {
+                    setNeededSortKey("remainingQty")
+                    setNeededSortDir("desc")
+                  }
+                }}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium transition-colors",
+                  neededSortKey === "remainingQty"
+                    ? "border-orange-300 bg-orange-50 text-orange-700"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                )}
+              >
+                <ArrowUpDown className="h-3.5 w-3.5" />
+                Qty {neededSortKey === "remainingQty" ? (neededSortDir === "desc" ? "↓" : "↑") : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (neededSortKey === "itemName") {
+                    setNeededSortDir((d) => (d === "desc" ? "asc" : "desc"))
+                  } else {
+                    setNeededSortKey("itemName")
+                    setNeededSortDir("asc")
+                  }
+                }}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium transition-colors",
+                  neededSortKey === "itemName"
+                    ? "border-slate-400 bg-slate-100 text-slate-700"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                )}
+              >
+                <ArrowUpDown className="h-3.5 w-3.5" />
+                A→Z {neededSortKey === "itemName" ? (neededSortDir === "asc" ? "↑" : "↓") : ""}
+              </button>
+            </div>
+
+            {/* Priority filter chips */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="mr-0.5 text-[11px] text-slate-400">Priority:</span>
+              {(["all", "high", "medium", "low"] as const).map((f) => {
+                const labels = { all: "All", high: "High ≥100", medium: "Med 25–99", low: "Low <25" }
+                const activeClass = {
+                  all: "border-slate-500 bg-slate-800 text-white",
+                  high: "border-red-500 bg-red-600 text-white",
+                  medium: "border-amber-500 bg-amber-500 text-white",
+                  low: "border-slate-400 bg-slate-200 text-slate-700",
+                }
+                const inactiveClass = {
+                  all: "border-slate-200 bg-white text-slate-500 hover:bg-slate-50",
+                  high: "border-red-200 bg-red-50 text-red-600 hover:bg-red-100",
+                  medium: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100",
+                  low: "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100",
+                }
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setNeededUrgencyFilter(f)}
+                    className={cn(
+                      "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+                      neededUrgencyFilter === f ? activeClass[f] : inactiveClass[f]
+                    )}
+                  >
+                    {labels[f]}
+                  </button>
+                )
+              })}
+              {(neededSearch || neededUrgencyFilter !== "all") && (
+                <button
+                  type="button"
+                  onClick={() => { setNeededSearch(""); setNeededUrgencyFilter("all") }}
+                  className="ml-auto flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] text-slate-500 hover:border-red-200 hover:text-red-500"
+                >
+                  <X className="h-3 w-3" /> Clear all
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Content */}
           <div className={cn(
             "p-4",
@@ -1865,9 +2006,15 @@ export default function ProductionPage() {
                 <p className="font-medium text-slate-600">All clear!</p>
                 <p className="mt-1 text-sm text-slate-400">No remaining production across all open orders.</p>
               </div>
+            ) : filteredSortedNeededList.length === 0 ? (
+              <div className="py-16 text-center">
+                <Search className="mx-auto mb-3 h-12 w-12 text-slate-300" />
+                <p className="font-medium text-slate-600">No items match</p>
+                <p className="mt-1 text-sm text-slate-400">Try a different search term or clear the filters.</p>
+              </div>
             ) : (
               (() => {
-                const sorted = [...neededList].sort((a, b) => b.remainingQty - a.remainingQty)
+                const sorted = filteredSortedNeededList
                 const mid = Math.ceil(sorted.length / 2)
                 const col1 = sorted.slice(0, mid)
                 const col2 = sorted.slice(mid)
@@ -1940,10 +2087,16 @@ export default function ProductionPage() {
               isNeededFullscreen && "px-8"
             )}>
               <p className="text-xs text-slate-400">
-                Sorted by remaining quantity (until DONE) · Click an item to open the queue filtered to that SKU
+                {neededSortKey === "remainingQty"
+                  ? `Sorted by remaining qty (${neededSortDir === "desc" ? "highest first" : "lowest first"})`
+                  : `Sorted by item name (${neededSortDir === "asc" ? "A → Z" : "Z → A"})`
+                } · Click an item to open the queue filtered to that SKU
               </p>
               <p className="text-xs font-semibold text-slate-600">
-                Total: {neededRemainingTotal.toLocaleString()} units · {neededClosureLineTotal.toLocaleString()} order line{neededClosureLineTotal === 1 ? "" : "s"} · {neededList.length} item type{neededList.length === 1 ? "" : "s"}
+                {filteredSortedNeededList.length !== neededList.length
+                  ? `Showing ${neededFilteredRemainingTotal.toLocaleString()} / ${neededRemainingTotal.toLocaleString()} units · ${filteredSortedNeededList.length} / ${neededList.length} item types`
+                  : `Total: ${neededRemainingTotal.toLocaleString()} units · ${neededClosureLineTotal.toLocaleString()} order line${neededClosureLineTotal === 1 ? "" : "s"} · ${neededList.length} item type${neededList.length === 1 ? "" : "s"}`
+                }
               </p>
             </div>
           )}
