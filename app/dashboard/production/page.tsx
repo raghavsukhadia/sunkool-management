@@ -64,7 +64,7 @@ function RemainingQuantityDisplay({
   row: ProductionQueueRow
   size?: "sm" | "md"
 }) {
-  const pill = size === "sm" ? "text-[11px]" : "text-[11px]"
+  const pill = size === "sm" ? "text-[10px]" : "text-[11px]"
   const n = getRemainingUntilDone(row)
 
   return (
@@ -121,6 +121,7 @@ export default function ProductionPage() {
   const [productionRecords, setProductionRecords] = useState<ProductionRecord[]>([])
   const [queueData, setQueueData] = useState<ProductionQueueResult | null>(null)
   const [kpiData, setKpiData] = useState<ProductionKpiData | null>(null)
+  const [queueLoadError, setQueueLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState<"pending" | "needed" | "under-production" | "nfp">("pending")
@@ -155,16 +156,20 @@ export default function ProductionPage() {
   const loadProductionData = useCallback(async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true)
     else setLoading(true)
+    setQueueLoadError(null)
     try {
       const [queueRes, recordsRes] = await Promise.all([getProductionQueue(), getProductionRecordsList()])
       if (queueRes.success) {
         setQueueData(queueRes.data)
         setKpiData(queueRes.data.kpiData)
+      } else {
+        setQueueLoadError(queueRes.error ?? "Failed to load production queue")
       }
       if (recordsRes.success) setProductionRecords(recordsRes.data as ProductionRecord[])
       setNeededLastUpdated(new Date())
     } catch (error) {
       console.error("Error fetching production data:", error)
+      setQueueLoadError(error instanceof Error ? error.message : "Unexpected error loading production data")
     } finally {
       if (isManualRefresh) setRefreshing(false)
       else setLoading(false)
@@ -1300,7 +1305,7 @@ export default function ProductionPage() {
       </div>
 
       {/* Tab Navigation */}
-      <div className="sticky top-[68px] z-20 rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex overflow-x-auto">
           {[
             { key: "pending" as const, icon: Clock, label: "Production Queue", count: sortedQueueRows.length, tabTitle: undefined as string | undefined },
@@ -1367,15 +1372,11 @@ export default function ProductionPage() {
           </CardContent>
         </Card>
       ) : filter === "pending" ? (
-        <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm">
+        <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
           <CardHeader className="border-b border-slate-200 bg-white px-5 py-4">
             <div className="flex flex-col gap-3 lg:gap-4">
               <div>
                 <CardTitle className="text-sm font-semibold text-slate-900">Production queue – complete orders, item-wise</CardTitle>
-                <p className="mt-1 text-xs text-slate-500">
-                  <span className="font-medium text-slate-600">Remaining</span> is units left until batches are marked DONE: ordered minus produced on{" "}
-                  <span className="font-medium text-slate-600">completed</span> batches only. Produced = Ordered − Remaining (until DONE).
-                </p>
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
@@ -1503,30 +1504,36 @@ export default function ProductionPage() {
                   </Button>
                 ) : null}
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
-                <label
-                  htmlFor="show-awaiting-closure"
-                  className="flex cursor-pointer items-center gap-2 text-xs text-slate-600"
-                >
-                  <input
-                    id="show-awaiting-closure"
-                    type="checkbox"
-                    checked={showLinesAwaitingClosure}
-                    onChange={(e) => setShowLinesAwaitingClosure(e.target.checked)}
-                    className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 accent-orange-500"
-                  />
-                  <span>Show lines awaiting batch closure (0 remaining until DONE on order)</span>
-                </label>
-              </div>
               </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            {!filteredQueueRows.length ? (
+            {queueLoadError ? (
+              <div className="py-12 text-center">
+                <p className="text-sm font-medium text-red-600">Failed to load production queue</p>
+                <p className="mt-1 text-xs text-slate-500">{queueLoadError}</p>
+                <button
+                  type="button"
+                  onClick={() => loadProductionData(true)}
+                  className="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : !filteredQueueRows.length ? (
               <div className="py-12 text-center">
                 <CheckCircle className="mx-auto mb-3 h-12 w-12 text-green-500" />
                 <p className="text-slate-500">{queueData?.rows?.length ? "No queue rows match your search and filters" : "No orders in production"}</p>
-                <p className="mt-1 text-sm text-slate-400">Only started production orders appear here with item-wise details.</p>
+                <p className="mt-1 text-sm text-slate-400">Only open orders with remaining production work appear here.</p>
+                {!queueData && !loading && (
+                  <button
+                    type="button"
+                    onClick={() => loadProductionData(true)}
+                    className="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Refresh
+                  </button>
+                )}
               </div>
             ) : (
               <>
@@ -1571,6 +1578,8 @@ export default function ProductionPage() {
                         </div>
                         <Link
                           href={`/dashboard/orders/${row.orderId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           onClick={(event) => event.stopPropagation()}
                           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition-colors hover:border-orange-500 hover:bg-orange-50 hover:text-orange-500"
                         >
@@ -1603,9 +1612,22 @@ export default function ProductionPage() {
                 </div>
 
                 {/* Desktop: table */}
-                <div className="hidden overflow-x-auto lg:block">
-                  <table className="w-full">
-                    <thead className="border-b-2 border-slate-200 bg-slate-50/80">
+                <div className="hidden lg:block">
+                  <table className="w-full min-w-[960px] table-fixed">
+                    <colgroup>
+                      <col className="w-9" />
+                      <col className="w-[82px]" />
+                      <col className="w-[100px]" />
+                      <col className="w-[152px]" />
+                      <col className="w-[90px]" />
+                      <col className="w-[162px]" />
+                      <col className="w-[74px]" />
+                      <col className="w-[74px]" />
+                      <col className="w-[58px]" />
+                      <col className="w-[80px]" />
+                      <col className="w-[66px]" />
+                    </colgroup>
+                    <thead className="border-b-2 border-slate-200 bg-slate-50/80 [&_th]:sticky [&_th]:top-[68px] [&_th]:z-20 [&_th]:bg-slate-50/95 [&_th]:backdrop-blur">
                       <tr>
                         <th className="h-10 w-10 px-3 text-center">
                           <input
@@ -1626,7 +1648,7 @@ export default function ProductionPage() {
                             )}
                           </button>
                         </th>
-                        <th className="h-10 max-w-[140px] px-3 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                        <th className="h-10 px-3 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500 whitespace-nowrap">
                           Active batch
                         </th>
                         <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
@@ -1639,7 +1661,7 @@ export default function ProductionPage() {
                             )}
                           </button>
                         </th>
-                        <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Order Date</th>
+                        <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500 whitespace-nowrap">Order Date</th>
                         <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <button type="button" onClick={() => handleSort("itemName")} className="inline-flex items-center gap-1 hover:text-slate-700">
                             Item
@@ -1742,14 +1764,16 @@ export default function ProductionPage() {
                                 {getQueueOrderDisplayLabel(row)}
                               </button>
                             </td>
-                            <td className="max-w-[140px] truncate px-3 py-0 text-[12px] text-slate-600" title={formatActiveBatches(row)}>
-                              {formatActiveBatches(row)}
+                            <td className="px-3 py-0 text-[12px] text-slate-600" title={formatActiveBatches(row)}>
+                              <span className="block truncate">{formatActiveBatches(row)}</span>
                             </td>
-                            <td className="max-w-[180px] truncate px-4 py-0 text-[13px] text-slate-600">{row.customerName}</td>
+                            <td className="px-4 py-0 text-[13px] text-slate-600">
+                              <span className="block truncate">{row.customerName}</span>
+                            </td>
                             <td className="whitespace-nowrap px-4 py-0 text-[12px] text-slate-400">
                               {row.orderDate ? new Date(row.orderDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                             </td>
-                            <td className="max-w-[240px] px-4 py-0 text-[13px] font-medium text-slate-900">
+                            <td className="px-4 py-0 text-[13px] font-medium text-slate-900">
                               <div className="flex min-w-0 items-center gap-2">
                                 <span className="truncate">{row.itemName}</span>
                               </div>
@@ -1776,8 +1800,10 @@ export default function ProductionPage() {
                             <td className="px-4 py-0 text-center">
                               <Link
                                 href={`/dashboard/orders/${row.orderId}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 onClick={(event) => event.stopPropagation()}
-                                title="Open order"
+                                title="Open order in new tab"
                                 className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition-all hover:border-orange-500 hover:bg-orange-50 hover:text-orange-500"
                               >
                                 <ExternalLink className="h-[13px] w-[13px]" />
@@ -2020,10 +2046,13 @@ export default function ProductionPage() {
                 const col2 = sorted.slice(mid)
 
                 const renderCol = (rows: { itemName: string; lineCount: number; remainingQty: number }[], offset: number) => (
-                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                  <div className="overflow-clip rounded-xl border border-slate-200 bg-white">
                     <table className="w-full">
-                      <thead>
-                        <tr className="border-b-2 border-slate-200 bg-slate-50">
+                      <thead className={cn(
+                        "[&_th]:sticky [&_th]:z-10 [&_th]:bg-slate-50/95 [&_th]:backdrop-blur [&_th]:border-b-2 [&_th]:border-slate-200",
+                        isNeededFullscreen ? "[&_th]:top-0" : "[&_th]:top-[68px]"
+                      )}>
+                        <tr>
                           <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400 w-8">#</th>
                           <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">Item</th>
                           <th
@@ -2152,10 +2181,10 @@ export default function ProductionPage() {
                   rows: { itemName: string; inProductionQty: number; batches: string[]; orderCount: number; customers: string[] }[],
                   offset: number
                 ) => (
-                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                  <div className="overflow-clip rounded-xl border border-slate-200 bg-white">
                     <table className="w-full">
-                      <thead>
-                        <tr className="border-b-2 border-slate-200 bg-slate-50">
+                      <thead className="[&_th]:sticky [&_th]:top-[68px] [&_th]:z-10 [&_th]:bg-slate-50/95 [&_th]:backdrop-blur [&_th]:border-b-2 [&_th]:border-slate-200">
+                        <tr>
                           <th className="w-8 px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">#</th>
                           <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">Item</th>
                           <th className="w-28 px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-slate-400">Batch</th>
@@ -2338,10 +2367,10 @@ export default function ProductionPage() {
                 <p className="mt-1 text-sm text-slate-400">All production is fully caught up.</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div>
                 <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50 text-left">
+                  <thead className="[&_th]:sticky [&_th]:top-[68px] [&_th]:z-10 [&_th]:bg-slate-50/95 [&_th]:backdrop-blur [&_th]:border-b [&_th]:border-slate-200">
+                    <tr className="text-left">
                       <th className="w-10 px-4 py-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400">#</th>
                       <th className="px-4 py-3">
                         <button type="button" onClick={() => handleNfpSort("itemName")} className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 hover:text-slate-700">

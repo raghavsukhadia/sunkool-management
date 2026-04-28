@@ -88,8 +88,8 @@ function NavItem({
         "group relative flex items-center gap-3 rounded-lg transition-all duration-150",
         collapsed ? "mx-2 justify-center px-0 py-2.5" : "mx-2 px-3 py-2.5",
         isActive
-          ? "bg-white/[0.10] text-white"
-          : "text-[#64748b] hover:bg-white/[0.06] hover:text-[#cbd5e1]",
+          ? "bg-white/[0.12] text-white"
+          : "text-[#94a3b8] hover:bg-white/[0.08] hover:text-[#e2e8f0]",
       )}
     >
       {/* Left accent bar */}
@@ -100,11 +100,11 @@ function NavItem({
       <Icon className={cn(
         "flex-shrink-0 transition-colors duration-150",
         collapsed ? "h-[18px] w-[18px]" : "h-[16px] w-[16px]",
-        isActive ? "text-sk-primary" : "text-[#475569] group-hover:text-[#94a3b8]",
+        isActive ? "text-sk-primary" : "text-[#94a3b8] group-hover:text-[#e2e8f0]",
       )} />
 
       <span className={cn(
-        "overflow-hidden whitespace-nowrap text-[13px] font-medium leading-none transition-all duration-300",
+        "overflow-hidden whitespace-nowrap text-[14.5px] font-semibold leading-none tracking-[0.01em] transition-all duration-300",
         collapsed ? "w-0 opacity-0" : "w-auto opacity-100",
       )}>
         {label}
@@ -124,7 +124,7 @@ function SectionLabel({ label, collapsed }: { label: string; collapsed: boolean 
         ? <div className="h-px w-5 bg-white/[0.08]" />
         : (
           <>
-            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#2d3a4a]">{label}</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[#475569]">{label}</span>
             <div className="flex-1 border-t border-white/[0.05]" />
           </>
         )
@@ -237,7 +237,6 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
     if (hoverTimer.current) clearTimeout(hoverTimer.current)
     if (collapsedRef.current) {
       setCollapsed(false)
-      localStorage.setItem(LS_KEY, "0")
     }
   }, [])
 
@@ -245,7 +244,6 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
     hoverTimer.current = setTimeout(() => {
       if (!collapsedRef.current) {
         setCollapsed(true)
-        localStorage.setItem(LS_KEY, "1")
       }
     }, 600)
   }, [])

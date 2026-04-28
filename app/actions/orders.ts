@@ -1639,9 +1639,9 @@ export async function updateDispatchStatus(
     return { success: false, error: "User not authenticated" }
   }
 
-  const invoiceRate = checkRateLimit(`invoice:upload:${user.id}`, 15, 60_000)
-  if (!invoiceRate.ok) {
-    return { success: false, error: "Too many file uploads. Please wait and try again." }
+  const dispatchStatusRate = checkRateLimit(`dispatch:status:${user.id}`, 30, 60_000)
+  if (!dispatchStatusRate.ok) {
+    return { success: false, error: "Too many status update requests. Please wait and try again." }
   }
 
   // Update dispatch status
@@ -2600,10 +2600,10 @@ export async function createProductionRecord(
     return { success: false, error: "User profile not found" }
   }
 
-  // Get order to get order number
+  // Get order to get order number and current status
   const { data: order, error: orderError } = await supabase
     .from("orders")
-    .select("internal_order_number")
+    .select("internal_order_number, order_status")
     .eq("id", orderId)
     .single()
 
@@ -2612,6 +2612,7 @@ export async function createProductionRecord(
   }
 
   const orderNumber = order.internal_order_number || `ORD-${orderId.substring(0, 8)}`
+  const currentOrderStatus = (order as { order_status?: string | null }).order_status ?? ""
 
   // Get existing production records for this order
   const { data: existingRecords, error: countError } = await supabase
@@ -2679,12 +2680,22 @@ export async function createProductionRecord(
     return { success: false, error: recordError.message }
   }
 
-  // Auto-advance order status to "In Progress" (same logic as pressing START)
-  await supabase
-    .from("orders")
-    .update({ order_status: "In Progress" })
-    .eq("id", orderId)
-    .eq("order_status", "New Order")
+  // Advance order status to "In Progress" when a production record is created.
+  // Skip if already in an open mid-flow status or if the order is Void.
+  const SKIP_ADVANCE_STATUSES = [
+    "In Progress",
+    "Ready for Dispatch",
+    "Invoiced",
+    "In Transit",
+    "Partial Delivered",
+    "Void",
+  ]
+  if (!SKIP_ADVANCE_STATUSES.includes(currentOrderStatus)) {
+    await supabase
+      .from("orders")
+      .update({ order_status: "In Progress" })
+      .eq("id", orderId)
+  }
 
   // Also create a production_pdfs record for backward compatibility
   if (pdfFileUrl && pdfFileName) {
@@ -2789,8 +2800,10 @@ export async function createProductionRecord(
     },
   })
 
-  // Reload order details so the new record is reflected in the UI.
+  // Reload order details and production queue so the new record is reflected everywhere.
   revalidatePath(`/dashboard/orders/${orderId}`)
+  revalidatePath("/dashboard/orders")
+  revalidatePath("/dashboard/production")
 
   return { success: true, data: productionRecord }
 }
@@ -2888,6 +2901,8 @@ export async function updateProductionRecordStatus(
       })
     }
     revalidatePath(`/dashboard/orders/${record.order_id}`)
+    revalidatePath("/dashboard/orders")
+    revalidatePath("/dashboard/production")
   }
 
   return { success: true }
@@ -3490,10 +3505,10 @@ export async function deleteOrderPayment(paymentId: string) {
 export async function deleteProductionRecord(recordId: string) {
   const supabase = await createClient()
 
-  // Get order_id and file info before deleting
+  // Get order_id, status, and file info before deleting
   const { data: productionRecord } = await supabase
     .from("production_records")
-    .select("order_id, pdf_file_url")
+    .select("order_id, pdf_file_url, status")
     .eq("id", recordId)
     .single()
 
@@ -3519,8 +3534,67 @@ export async function deleteProductionRecord(recordId: string) {
     return { success: false, error: error.message }
   }
 
-  if (productionRecord) {
-    revalidatePath(`/dashboard/orders/${productionRecord.order_id}`)
+  if (productionRecord?.order_id) {
+    const orderId = productionRecord.order_id
+    const deletedStatus = (productionRecord.status ?? "").toLowerCase().replace(/[_\s]+/g, " ")
+    const wasActive = deletedStatus === "in production" || deletedStatus === "in progress"
+
+    // If the deleted record was actively in production, check whether the order
+    // should revert to "New Order". This happens when:
+    //  - it was the last production record for the order
+    //  - the order status is still "In Progress" (set when the record was created)
+    //  - there are no dispatches (order hasn't been shipped yet)
+    if (wasActive) {
+      const OPEN_ORDER_STATUSES = [
+        "New Order",
+        "In Progress",
+        "Ready for Dispatch",
+        "Invoiced",
+        "In Transit",
+        "Partial Delivered",
+      ]
+
+      const [{ count: remainingCount }, { data: orderRow }, { count: dispatchCount }] = await Promise.all([
+        supabase
+          .from("production_records")
+          .select("*", { count: "exact", head: true })
+          .eq("order_id", orderId),
+        supabase
+          .from("orders")
+          .select("order_status")
+          .eq("id", orderId)
+          .single(),
+        supabase
+          .from("dispatches")
+          .select("*", { count: "exact", head: true })
+          .eq("order_id", orderId),
+      ])
+
+      const currentStatus = orderRow?.order_status ?? ""
+
+      if (remainingCount === 0) {
+        if (currentStatus === "In Progress" && dispatchCount === 0) {
+          // Revert back to New Order — no production records, never shipped
+          await supabase
+            .from("orders")
+            .update({ order_status: "New Order" })
+            .eq("id", orderId)
+            .eq("order_status", "In Progress")
+        } else if (!OPEN_ORDER_STATUSES.includes(currentStatus) && currentStatus !== "Void") {
+          // Order status is outside the open set (e.g. "Delivered") but all active
+          // production records are gone — restore to In Progress so it re-appears
+          // in the production queue and can be actioned.
+          await supabase
+            .from("orders")
+            .update({ order_status: "In Progress" })
+            .eq("id", orderId)
+        }
+      }
+    }
+
+    revalidatePath(`/dashboard/orders/${orderId}`)
+    revalidatePath("/dashboard/orders")
+    revalidatePath("/dashboard/production")
   }
 
   return { success: true }
