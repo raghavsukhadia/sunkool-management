@@ -212,6 +212,8 @@ export default function OrderDetailsPage() {
   const [paymentNotes, setPaymentNotes] = useState<string>("")
   const [followupFormById, setFollowupFormById] = useState<Record<string, { payment_received: boolean; payment_date: string; notes: string }>>({})
   const [savingFollowupId, setSavingFollowupId] = useState<string | null>(null)
+  const [editingOrderItemId, setEditingOrderItemId] = useState<string | null>(null)
+  const [editOrderItemQuantity, setEditOrderItemQuantity] = useState<string>("")
   const loadedTabsRef = useRef<Record<string, boolean>>({
     production: false,
     shipment: false,
@@ -1381,6 +1383,31 @@ export default function OrderDetailsPage() {
     }
   }
 
+  const startEditingOrderItem = (itemId: string, currentQuantity: number) => {
+    setEditingOrderItemId(itemId)
+    setEditOrderItemQuantity(String(currentQuantity))
+    setError(null)
+  }
+
+  const cancelEditingOrderItem = () => {
+    setEditingOrderItemId(null)
+    setEditOrderItemQuantity("")
+  }
+
+  const saveEditedOrderItemQuantity = async () => {
+    if (!editingOrderItemId) return
+
+    const parsedQuantity = Number(editOrderItemQuantity)
+    if (!Number.isInteger(parsedQuantity) || parsedQuantity <= 0) {
+      setError("Please enter a valid whole number greater than 0")
+      return
+    }
+
+    await handleUpdateQuantity(editingOrderItemId, parsedQuantity)
+    setEditingOrderItemId(null)
+    setEditOrderItemQuantity("")
+  }
+
   const handleRemoveItem = async (itemId: string, itemName?: string) => {
     try {
       const result = await removeItemFromOrder(itemId) as any
@@ -1988,25 +2015,66 @@ export default function OrderDetailsPage() {
                                 </p>
                               )}
                             </td>
-                            {/* Quantity stepper */}
+                            {/* Quantity controls */}
                             <td className="px-4 py-3">
-                              <div className="flex items-center justify-center gap-1.5">
-                                {!isOrderLocked && (
-                                  <button
-                                    onClick={() => handleUpdateQuantity(item.id, Math.max(1, item.quantity - 1))}
-                                    className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center font-bold text-base leading-none"
-                                    title="Decrease"
-                                  >−</button>
-                                )}
-                                <span className="w-8 text-center text-sm font-bold text-slate-800 tabular-nums">{item.quantity}</span>
-                                {!isOrderLocked && (
-                                  <button
-                                    onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
-                                    className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center font-bold text-base leading-none"
-                                    title="Increase"
-                                  >+</button>
-                                )}
-                              </div>
+                              {editingOrderItemId === item.id ? (
+                                <div className="flex items-center justify-center gap-2">
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    step={1}
+                                    value={editOrderItemQuantity}
+                                    onChange={(e) => setEditOrderItemQuantity(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") void saveEditedOrderItemQuantity()
+                                      if (e.key === "Escape") cancelEditingOrderItem()
+                                    }}
+                                    className="h-8 w-20 text-center"
+                                  />
+                                  <Button
+                                    size="sm"
+                                    className="h-8 px-2"
+                                    onClick={() => void saveEditedOrderItemQuantity()}
+                                  >
+                                    Save
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 px-2"
+                                    onClick={cancelEditingOrderItem}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-center gap-1.5">
+                                  {!isOrderLocked && (
+                                    <button
+                                      onClick={() => handleUpdateQuantity(item.id, Math.max(1, item.quantity - 1))}
+                                      className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center font-bold text-base leading-none"
+                                      title="Decrease"
+                                    >−</button>
+                                  )}
+                                  <span className="w-8 text-center text-sm font-bold text-slate-800 tabular-nums">{item.quantity}</span>
+                                  {!isOrderLocked && (
+                                    <button
+                                      onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
+                                      className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center font-bold text-base leading-none"
+                                      title="Increase"
+                                    >+</button>
+                                  )}
+                                  {!isOrderLocked && (
+                                    <button
+                                      onClick={() => startEditingOrderItem(item.id, item.quantity)}
+                                      className="w-7 h-7 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center"
+                                      title="Edit quantity"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             {/* Remove */}
                             <td className="px-4 py-3 text-right">
