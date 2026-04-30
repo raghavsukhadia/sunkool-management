@@ -902,83 +902,61 @@ export async function addItemToOrder(orderId: string, inventoryItemId: string, q
     return { success: false, error: "Inventory item not found" }
   }
 
-  // Product-only write path: resolve product from inventory item name.
-  const normalizedName = inventoryItem.item_name.trim().replace(/\s+/g, " ").toLowerCase()
-  const { data: productsByName, error: productLookupError } = await supabase
+  const itemName = (inventoryItem as { id: string; item_name: string }).item_name ?? "Item"
+
+  // Try to resolve a product by exact name match.
+  // Falls back to inventory_item_id when no product exists yet (XOR constraint allows either).
+  const normalizedName = itemName.trim().replace(/\s+/g, " ").toLowerCase()
+  const { data: productsByName } = await supabase
     .from("products")
     .select("id, name")
-    .ilike("name", inventoryItem.item_name.trim())
-
-  if (productLookupError) {
-    return { success: false, error: `Failed to resolve product mapping: ${productLookupError.message}` }
-  }
+    .ilike("name", itemName.trim())
 
   const matchedProducts = (productsByName ?? []).filter(
-    (product) => product.name.trim().replace(/\s+/g, " ").toLowerCase() === normalizedName
+    (p) => p.name.trim().replace(/\s+/g, " ").toLowerCase() === normalizedName
   )
 
-  if (matchedProducts.length !== 1) {
-    return {
-      success: false,
-      error:
-        matchedProducts.length === 0
-          ? "No product mapping found for this item. Run product backfill/mapping first."
-          : "Multiple product mappings found for this item name. Resolve duplicate product names first.",
-    }
+  if (matchedProducts.length > 1) {
+    return { success: false, error: "Multiple products share this item name — resolve duplicates in the product catalog first." }
   }
 
-  const productId = matchedProducts[0].id
+  const productId: string | null = matchedProducts.length === 1 ? matchedProducts[0].id : null
 
-  // Check if item already exists in order by resolved product id
+  // Duplicate check: look for an existing line that matches via product_id or inventory_item_id.
   const { data: existingItem } = await supabase
     .from("order_items")
     .select("id, quantity")
     .eq("order_id", orderId)
-    .eq("product_id", productId)
+    .eq(productId ? "product_id" : "inventory_item_id", productId ?? inventoryItemId)
     .maybeSingle()
 
   if (existingItem) {
-    // Update quantity
-    const newQuantity = existingItem.quantity + quantity
     const { error: updateError } = await supabase
       .from("order_items")
-      .update({ quantity: newQuantity })
+      .update({ quantity: existingItem.quantity + quantity })
       .eq("id", existingItem.id)
 
-    if (updateError) {
-      return { success: false, error: updateError.message }
-    }
+    if (updateError) return { success: false, error: updateError.message }
   } else {
-    // Insert new item using product_id (product-only contract)
     const { error: insertError } = await supabase
       .from("order_items")
       .insert({
         order_id: orderId,
-        inventory_item_id: null,
         product_id: productId,
-        quantity: quantity,
-        unit_price: 0, // Will be updated later if needed
+        inventory_item_id: productId ? null : inventoryItemId,
+        quantity,
+        unit_price: 0,
       })
 
-    if (insertError) {
-      return { success: false, error: insertError.message }
-    }
+    if (insertError) return { success: false, error: insertError.message }
   }
 
-  // Order stays in "New Order" when items are added; moves to "In Progress" when first production record is created
-
-  // Timeline: item added
-  const itemName = (inventoryItem as { id: string; item_name: string }).item_name ?? "Item"
   void logTimelineEvent(supabase, orderId, {
     event_type:  "item_added",
     title:       "Item Added",
     description: `${quantity} × ${itemName} added to order.`,
     actor:       "admin",
-    metadata: {
-      item_name:          itemName,
-      quantity,
-      product_id:         productId,
-    },
+    metadata: { item_name: itemName, quantity, product_id: productId, inventory_item_id: productId ? null : inventoryItemId },
   })
 
   revalidatePath(`/dashboard/orders/${orderId}`)
