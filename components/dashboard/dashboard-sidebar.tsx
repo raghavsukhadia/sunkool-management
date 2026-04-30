@@ -10,6 +10,7 @@ import {
   ShoppingCart,
   Package,
   Factory,
+  Lightbulb,
   Truck,
   DollarSign,
   Settings,
@@ -45,6 +46,7 @@ const NAV = [
       { href: "/dashboard/customers",  label: "Customers",  icon: Users        },
       { href: "/dashboard/items",      label: "Items",      icon: Layers       },
       { href: "/dashboard/reports",    label: "Reports",    icon: BarChart3    },
+      { href: "/dashboard/smart-insight", label: "Smart Insight", icon: Lightbulb },
     ],
   },
   {
@@ -67,6 +69,7 @@ function resolveTitle(pathname: string) {
   if (pathname.startsWith("/dashboard/management"))    return "Management"
   if (pathname.startsWith("/dashboard/items"))         return "Items"
   if (pathname.startsWith("/dashboard/reports"))       return "Reports"
+  if (pathname.startsWith("/dashboard/smart-insight")) return "Smart Insight"
   return "Order Management"
 }
 

@@ -20,6 +20,7 @@ const KPI_PRODUCTION_STATUSES = [
   "completed",
   "Completed",
 ] as const
+const ORDER_ID_IN_CLAUSE_CHUNK_SIZE = 120
 
 type QueueRecordRow = {
   production_type: string
@@ -191,6 +192,67 @@ export async function getProductionQueue(options?: {
   const orderIdsWithProduction = new Set(orderIds)
   const noProductionOrders = (newOrdersResult.data || []).filter((o) => !orderIdsWithProduction.has(o.id))
 
+  // PostgREST can fail large .in(...) filters with long URL/query strings.
+  // Chunk order_id lists to keep pending queue fetches reliable as order volume grows.
+  const fetchOrderItemsByOrderIds = async (ids: string[]) => {
+    if (ids.length === 0) {
+      return {
+        data: [] as Array<{
+          id: string
+          order_id: string
+          quantity: number
+          inventory_item_id: string | null
+          product_id: string | null
+        }>,
+        error: null as { message: string } | null,
+      }
+    }
+    const rows: Array<{
+      id: string
+      order_id: string
+      quantity: number
+      inventory_item_id: string | null
+      product_id: string | null
+    }> = []
+    for (let i = 0; i < ids.length; i += ORDER_ID_IN_CLAUSE_CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + ORDER_ID_IN_CLAUSE_CHUNK_SIZE)
+      const { data, error } = await supabase
+        .from("order_items")
+        .select("id, order_id, quantity, inventory_item_id, product_id")
+        .in("order_id", chunk)
+        .order("created_at", { ascending: true })
+        .range(0, 9999)
+      if (error) return { data: [], error }
+      rows.push(...(data || []))
+    }
+    return { data: rows, error: null as { message: string } | null }
+  }
+
+  const fetchProductionRowsByOrderIds = async (
+    ids: string[],
+    statuses?: readonly string[]
+  ) => {
+    if (ids.length === 0) {
+      return { data: [] as Array<Record<string, unknown>>, error: null as { message: string } | null }
+    }
+    const rows: Array<Record<string, unknown>> = []
+    for (let i = 0; i < ids.length; i += ORDER_ID_IN_CLAUSE_CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + ORDER_ID_IN_CLAUSE_CHUNK_SIZE)
+      let query = supabase
+        .from("production_records")
+        .select("order_id, production_type, selected_quantities, status, updated_at, created_at, production_number")
+        .in("order_id", chunk)
+        .range(0, 9999)
+      if (statuses && statuses.length > 0) {
+        query = query.in("status", [...statuses])
+      }
+      const { data, error } = await query
+      if (error) return { data: [], error }
+      rows.push(...(data || []))
+    }
+    return { data: rows, error: null as { message: string } | null }
+  }
+
   // Fetch in-production orders/items + no-production items in parallel (step 2).
   const fetchInProduction = orderIds.length > 0
     ? Promise.all([
@@ -200,43 +262,24 @@ export async function getProductionQueue(options?: {
           .in("id", orderIds)
           .order("internal_order_number", { ascending: true })
           .range(0, 9999),
-        supabase
-          .from("order_items")
-          .select("id, order_id, quantity, inventory_item_id, product_id")
-          .in("order_id", orderIds)
-          .order("created_at", { ascending: true })
-          .range(0, 9999),
+        fetchOrderItemsByOrderIds(orderIds),
       ])
     : Promise.resolve([{ data: [], error: null }, { data: [], error: null }] as const)
 
   const noProductionOrderIds_raw = noProductionOrders.map((o) => o.id)
   const fetchNoProductionItems = noProductionOrderIds_raw.length > 0
-    ? supabase
-        .from("order_items")
-        .select("id, order_id, quantity, inventory_item_id, product_id")
-        .in("order_id", noProductionOrderIds_raw)
-        .order("created_at", { ascending: true })
-        .range(0, 9999)
+    ? fetchOrderItemsByOrderIds(noProductionOrderIds_raw)
     : Promise.resolve({ data: [] as Array<{ id: string; order_id: string; quantity: number; inventory_item_id: string | null; product_id: string | null }>, error: null })
 
   // Fetch any existing production records (completed/pending) for no-active-production orders.
   // Needed for "Partial Delivered" orders that have prior completed batches — so remaining qty is correct.
   const fetchNoProductionRecords = noProductionOrderIds_raw.length > 0
-    ? supabase
-        .from("production_records")
-        .select("order_id, production_type, selected_quantities, status, updated_at, created_at, production_number")
-        .in("order_id", noProductionOrderIds_raw)
-        .range(0, 9999)
+    ? fetchProductionRowsByOrderIds(noProductionOrderIds_raw)
     : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null })
 
   const fetchTotalsForQueueOrders =
     orderIds.length > 0
-      ? supabase
-          .from("production_records")
-          .select("order_id, production_type, selected_quantities, status, updated_at, created_at, production_number")
-          .in("order_id", orderIds)
-          .in("status", [...QUEUE_VISIBLE_PRODUCTION_STATUSES, "completed", "Completed"])
-          .range(0, 9999)
+      ? fetchProductionRowsByOrderIds(orderIds, [...QUEUE_VISIBLE_PRODUCTION_STATUSES, "completed", "Completed"])
       : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null })
 
   const [[ordersResult, itemsResult], noProductionItemsResult, totalsResult, noProductionRecordsResult] = await Promise.all([
@@ -248,7 +291,9 @@ export async function getProductionQueue(options?: {
 
   if (ordersResult.error) return { success: false, error: ordersResult.error.message }
   if (itemsResult.error) return { success: false, error: itemsResult.error.message }
+  if (noProductionItemsResult.error) return { success: false, error: noProductionItemsResult.error.message }
   if (totalsResult.error) return { success: false, error: totalsResult.error.message }
+  if (noProductionRecordsResult.error) return { success: false, error: noProductionRecordsResult.error.message }
 
   const orders = ordersResult.data || []
   const orderItems = itemsResult.data || []

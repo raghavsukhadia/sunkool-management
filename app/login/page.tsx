@@ -33,6 +33,8 @@ const QUOTES = [
   }
 ]
 
+const HERO_POINTS = ["Order-to-dispatch tracking", "Production-ready workflows", "Multi-user operations"]
+
 export const dynamic = "force-dynamic"
 
 export default function LoginPage() {
@@ -91,47 +93,51 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
       {/* Left Side - Hero/Background */}
-      <div className="hidden lg:flex flex-col justify-between bg-zinc-900 p-10 text-white relative overflow-hidden">
-        <div className="absolute inset-0 bg-zinc-900">
-          {/* Abstract Geometric Pattern with Gradient Mesh */}
-          <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-gradient-to-b from-indigo-500/20 to-transparent rounded-full blur-3xl transform translate-x-1/2 -translate-y-1/2"></div>
-          <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-gradient-to-t from-purple-500/20 to-transparent rounded-full blur-3xl transform -translate-x-1/2 translate-y-1/2"></div>
-
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full mix-blend-multiply filter blur-3xl animate-blob"></div>
-          <div className="absolute top-1/3 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000"></div>
-
-          <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-[0.03]"></div>
+      <div className="hidden lg:flex flex-col justify-between bg-[#060b1b] p-10 text-white relative overflow-hidden">
+        <div className="absolute inset-0">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.16),transparent_40%),radial-gradient(circle_at_bottom_left,rgba(168,85,247,0.16),transparent_42%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(15,23,42,0.9),rgba(2,6,23,0.96))]" />
+          <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-[0.06]" />
         </div>
 
-        <div className="relative z-10">
+        <div className="relative z-10 rounded-2xl border border-white/15 bg-white/5 px-6 py-5 backdrop-blur-sm">
           <SunkoolLogo variant="light" size="lg" />
+          <p className="mt-4 text-xs tracking-[0.28em] text-slate-300/90">ORDER MANAGEMENT SYSTEM</p>
         </div>
 
-        <div className="relative z-10 max-w-lg">
-          <blockquote className={`space-y-6 transition-all duration-1000 transform ${fade ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+        <div className="relative z-10 max-w-xl space-y-8">
+          <blockquote className={`space-y-6 transition-all duration-700 transform ${fade ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}>
             <div className="space-y-4">
-              <p className="text-3xl font-light leading-tight tracking-tight">
+              <p className="text-3xl font-medium leading-tight tracking-tight text-white/95">
                 &ldquo;{QUOTES[currentQuoteIndex].title}&rdquo;
               </p>
               {QUOTES[currentQuoteIndex].subtitle && (
-                <p className="text-lg text-zinc-400 font-normal leading-relaxed">
+                <p className="text-base text-slate-300 font-normal leading-relaxed">
                   {QUOTES[currentQuoteIndex].subtitle}
                 </p>
               )}
             </div>
-            <footer className="flex items-center gap-4 pt-4 border-t border-white/10">
-              <div className="size-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white shadow-lg">
+            <footer className="flex items-center gap-4 pt-4 border-t border-white/15">
+              <div className="size-11 rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center font-bold text-white shadow-lg shadow-cyan-700/30">
                 {QUOTES[currentQuoteIndex].initials}
               </div>
               <div>
-                <div className="font-semibold text-lg text-white">Sunkool Management</div>
-                <div className="text-sm text-zinc-400">Growth & Efficiency</div>
+                <div className="font-semibold text-base text-white">Sunkool Management</div>
+                <div className="text-sm text-slate-400">Growth-focused operations workspace</div>
               </div>
             </footer>
           </blockquote>
+
+          <div className="grid grid-cols-1 gap-3">
+            {HERO_POINTS.map((point) => (
+              <div key={point} className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200/95">
+                {point}
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="relative z-10 text-sm text-zinc-500 flex justify-between items-center">
+        <div className="relative z-10 text-sm text-slate-400 flex justify-between items-center">
           <span>© {new Date().getFullYear()} Sunkool Management Inc.</span>
           <div className="flex gap-4">
             <Link href="#" className="hover:text-white transition-colors">Privacy</Link>
