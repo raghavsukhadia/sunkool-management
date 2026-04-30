@@ -1,10 +1,17 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Package, Truck, Users } from "lucide-react"
+import { Package, Truck, Users, UserCog } from "lucide-react"
 import { ManagementSignOut } from "@/components/dashboard/ManagementSignOut"
+import { createClient } from "@/lib/supabase/server"
 
-export default function ManagementPage() {
+const ADMIN_EMAIL = "raghav@sunkool.in"
+
+export default async function ManagementPage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const isAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
+
   return (
     <div className="space-y-6 lg:space-y-8">
       <div>
@@ -57,6 +64,23 @@ export default function ManagementPage() {
             </Link>
           </CardContent>
         </Card>
+
+        {isAdmin && (
+          <Card className="hover:shadow-md transition-shadow border-l-4 border-l-orange-600">
+            <CardHeader className="p-4 lg:p-6">
+              <CardTitle className="flex items-center text-lg">
+                <UserCog className="w-5 h-5 mr-2 text-orange-600" />
+                Users
+              </CardTitle>
+              <CardDescription>Manage application users and passwords</CardDescription>
+            </CardHeader>
+            <CardContent className="p-4 pt-0 lg:p-6 lg:pt-0">
+              <Link href="/dashboard/management/users">
+                <Button className="w-full min-h-[44px]">Manage Users</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div className="border-t border-slate-200 pt-6">
@@ -67,4 +91,3 @@ export default function ManagementPage() {
     </div>
   )
 }
-

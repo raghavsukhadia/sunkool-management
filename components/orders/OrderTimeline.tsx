@@ -246,6 +246,43 @@ function MetadataPills({ metadata }: { metadata: Record<string, unknown> }) {
   )
 }
 
+// ─── Actor badge ─────────────────────────────────────────────────────────────
+
+function getInitials(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .map(w => w[0]?.toUpperCase() ?? "")
+    .join("")
+    .slice(0, 2) || "?"
+}
+
+function ActorBadge({ name, actor }: { name: string | null; actor: string }) {
+  const displayName = name || (actor === "system" ? "System" : actor.charAt(0).toUpperCase() + actor.slice(1))
+  const initials    = getInitials(displayName)
+  const isSystem    = !name && (actor === "system" || actor === "admin")
+
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className={`
+          inline-flex h-4 w-4 flex-shrink-0 items-center justify-center
+          rounded-full text-[8px] font-bold leading-none ring-1
+          ${isSystem
+            ? "bg-slate-200 text-slate-500 ring-slate-300/60"
+            : "bg-blue-100 text-blue-700 ring-blue-200/60"
+          }
+        `}
+      >
+        {initials}
+      </span>
+      <span className={`font-medium ${isSystem ? "text-slate-400" : "text-slate-600"}`}>
+        {displayName}
+      </span>
+    </span>
+  )
+}
+
 // ─── Single event row ─────────────────────────────────────────────────────────
 
 interface TimelineRowProps {
@@ -316,12 +353,8 @@ function TimelineRow({ entry, isFirst, isLast }: TimelineRowProps) {
             <MetadataPills metadata={entry.metadata} />
 
             {/* Actor + relative timestamp */}
-            <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-400">
-              {entry.actor_name ? (
-                <span className="font-medium text-slate-500">{entry.actor_name}</span>
-              ) : (
-                <span className="capitalize">{entry.actor}</span>
-              )}
+            <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-400">
+              <ActorBadge name={entry.actor_name} actor={entry.actor} />
               <span>·</span>
               <span title={formatAbsolute(entry.timestamp)}>
                 {formatRelative(entry.timestamp)}

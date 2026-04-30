@@ -19,7 +19,7 @@ export interface TimelineEventInput {
   title:        string
   description?: string | null
   actor?:       TimelineActor
-  /** UUID of the profiles row that triggered the event. */
+  /** UUID of the profiles row that triggered the event. Omit to auto-resolve. */
   actor_id?:    string | null
   metadata?:    Record<string, unknown>
   /** Override timestamp (ISO string). Omit to use DB server now(). */
@@ -32,6 +32,11 @@ export interface TimelineEventInput {
  * Always call with `void` — do not await unless you need confirmation:
  *   `void logTimelineEvent(supabase, orderId, { ... })`
  *
+ * Actor resolution: the function always looks up the currently authenticated
+ * user's profile so the timeline records the real person who performed each
+ * action. Any hardcoded `actor_id` passed in the event is overridden when a
+ * live user session is present.
+ *
  * @param supabase - Pass the caller's existing client so no new session is created.
  * @param orderId  - The order this event belongs to.
  * @param event    - Event payload.
@@ -42,19 +47,45 @@ export async function logTimelineEvent(
   event: TimelineEventInput,
 ): Promise<void> {
   try {
+    // Defaults — used as fallback when no user session is found.
+    let actorId:    string | null = event.actor_id ?? null
+    let actorLabel: string        = event.actor    ?? "system"
+
+    // Always attempt to resolve the authenticated user's profile.
+    // This overwrites any hardcoded values so every event is attributed
+    // to the actual person who performed the action.
+    try {
+      const { data: authData } = await supabase.auth.getUser()
+      const userId = authData?.user?.id
+
+      if (userId) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id, role")
+          .eq("id", userId)
+          .maybeSingle()
+
+        if (profile) {
+          actorId    = profile.id
+          actorLabel = profile.role as TimelineActor   // 'admin' | 'user'
+        }
+      }
+    } catch {
+      // Non-fatal: if resolution fails keep the provided/default values.
+    }
+
     const { error } = await supabase.from("order_timeline").insert({
       order_id:    orderId,
       event_type:  event.event_type,
       title:       event.title,
       description: event.description ?? null,
-      actor:       event.actor    ?? "system",
-      actor_id:    event.actor_id ?? null,
+      actor:       actorLabel,
+      actor_id:    actorId,
       metadata:    event.metadata ?? {},
       ...(event.timestamp ? { timestamp: event.timestamp } : {}),
     })
 
     if (error) {
-      // Surface the DB error without crashing the caller.
       console.warn("[Timeline] Insert failed:", {
         event_type: event.event_type,
         order_id:   orderId,
@@ -62,7 +93,6 @@ export async function logTimelineEvent(
       })
     }
   } catch (err) {
-    // Catch network / unexpected errors.
     console.warn("[Timeline] Unexpected error:", {
       event_type: event.event_type,
       order_id:   orderId,

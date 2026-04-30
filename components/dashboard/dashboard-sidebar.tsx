@@ -136,17 +136,21 @@ function SectionLabel({ label, collapsed }: { label: string; collapsed: boolean 
 // ─── UserFooter ──────────────────────────────────────────────────────────────
 function UserFooter({
   email,
+  name,
   collapsed,
   onSignOut,
 }: {
   email: string
+  name: string
   collapsed: boolean
   onSignOut: () => void
 }) {
-  const initials = email
-    ? email.split("@")[0].split(/[._-]/).map(p => p[0]?.toUpperCase() ?? "").join("").slice(0, 2) || "U"
-    : "U"
-  const displayName = email ? email.split("@")[0].replace(/[._-]/g, " ") : "User"
+  const displayName = name || (email ? email.split("@")[0].replace(/[._-]/g, " ") : "User")
+  const initials = displayName
+    .split(" ")
+    .map(w => w[0]?.toUpperCase() ?? "")
+    .join("")
+    .slice(0, 2) || "U"
 
   return (
     <div
@@ -157,7 +161,7 @@ function UserFooter({
         <button
           onClick={onSignOut}
           title="Sign Out"
-          className="flex w-full items-center justify-center rounded-lg py-2 text-[#475569] transition-all duration-150 hover:bg-white/[0.06] hover:text-[#f87171]"
+          className="flex w-full items-center justify-center rounded-lg py-2 text-[#94a3b8] transition-all duration-150 hover:bg-white/[0.06] hover:text-[#f87171]"
         >
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-sk-primary/20 text-[11px] font-bold text-sk-primary">
             {initials}
@@ -172,15 +176,15 @@ function UserFooter({
 
           {/* Name + email */}
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[12px] font-semibold capitalize text-[#cbd5e1]">{displayName}</p>
-            <p className="truncate text-[10px] text-[#334155]">{email}</p>
+            <p className="truncate text-[13px] font-semibold capitalize text-[#e2e8f0]">{displayName}</p>
+            <p className="truncate text-[10px] text-[#94a3b8]">{email}</p>
           </div>
 
           {/* Sign out icon */}
           <button
             onClick={onSignOut}
             title="Sign Out"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#334155] transition-all duration-150 hover:bg-white/[0.06] hover:text-[#f87171]"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#94a3b8] transition-all duration-150 hover:bg-white/[0.06] hover:text-[#f87171]"
           >
             <LogOut className="h-3.5 w-3.5" />
           </button>
@@ -200,6 +204,7 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
   const [collapsed, setCollapsed] = useState(false)
   const [mounted,   setMounted]   = useState(false)
   const [userEmail, setUserEmail] = useState("")
+  const [userName,  setUserName]  = useState("")
 
   const collapsedRef = useRef(collapsed)
   collapsedRef.current = collapsed
@@ -212,6 +217,7 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
 
     auth.getUser().then(({ data }) => {
       if (data?.user?.email) setUserEmail(data.user.email)
+      if (data?.user?.user_metadata?.name) setUserName(data.user.user_metadata.name as string)
     })
   }, [auth])
 
@@ -374,6 +380,7 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
           {/* ── User footer ───────────────────────────────────────────────── */}
           <UserFooter
             email={userEmail}
+            name={userName}
             collapsed={collapsed}
             onSignOut={handleSignOut}
           />

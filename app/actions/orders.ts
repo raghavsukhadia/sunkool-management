@@ -902,12 +902,39 @@ export async function addItemToOrder(orderId: string, inventoryItemId: string, q
     return { success: false, error: "Inventory item not found" }
   }
 
-  // Check if item already exists in order (check both product_id and inventory_item_id)
+  // Product-only write path: resolve product from inventory item name.
+  const normalizedName = inventoryItem.item_name.trim().replace(/\s+/g, " ").toLowerCase()
+  const { data: productsByName, error: productLookupError } = await supabase
+    .from("products")
+    .select("id, name")
+    .ilike("name", inventoryItem.item_name.trim())
+
+  if (productLookupError) {
+    return { success: false, error: `Failed to resolve product mapping: ${productLookupError.message}` }
+  }
+
+  const matchedProducts = (productsByName ?? []).filter(
+    (product) => product.name.trim().replace(/\s+/g, " ").toLowerCase() === normalizedName
+  )
+
+  if (matchedProducts.length !== 1) {
+    return {
+      success: false,
+      error:
+        matchedProducts.length === 0
+          ? "No product mapping found for this item. Run product backfill/mapping first."
+          : "Multiple product mappings found for this item name. Resolve duplicate product names first.",
+    }
+  }
+
+  const productId = matchedProducts[0].id
+
+  // Check if item already exists in order by resolved product id
   const { data: existingItem } = await supabase
     .from("order_items")
     .select("id, quantity")
     .eq("order_id", orderId)
-    .or(`inventory_item_id.eq.${inventoryItemId},product_id.eq.${inventoryItemId}`)
+    .eq("product_id", productId)
     .maybeSingle()
 
   if (existingItem) {
@@ -922,13 +949,13 @@ export async function addItemToOrder(orderId: string, inventoryItemId: string, q
       return { success: false, error: updateError.message }
     }
   } else {
-    // Insert new item using inventory_item_id
+    // Insert new item using product_id (product-only contract)
     const { error: insertError } = await supabase
       .from("order_items")
       .insert({
         order_id: orderId,
-        inventory_item_id: inventoryItemId,
-        product_id: null, // Using inventory_item_id instead
+        inventory_item_id: null,
+        product_id: productId,
         quantity: quantity,
         unit_price: 0, // Will be updated later if needed
       })
@@ -950,7 +977,7 @@ export async function addItemToOrder(orderId: string, inventoryItemId: string, q
     metadata: {
       item_name:          itemName,
       quantity,
-      inventory_item_id:  inventoryItemId,
+      product_id:         productId,
     },
   })
 

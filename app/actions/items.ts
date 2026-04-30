@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { createDispatch } from "./orders"
 
 export type DispatchStatus = "not_dispatched" | "partial" | "fully_dispatched"
 
@@ -11,6 +12,7 @@ export interface ItemOrderEntry {
   internal_order_number: string | null
   sales_order_number: string | null
   order_status: string
+  payment_status: string
   order_created_at: string
   customer_id: string | null
   customer_name: string
@@ -29,10 +31,12 @@ export interface ItemOrderEntry {
 
 /** One unique product / inventory item with all its order history */
 export interface ItemSummary {
-  item_key: string          // product_id or inventory_item_id
+  item_key: string          // product_id
   item_name: string
   item_sku: string | null
   item_category: string | null
+  description: string | null
+  tags: string[]
 
   // Aggregates across all orders
   total_orders: number
@@ -118,10 +122,11 @@ type RawOrderItem = {
   quantity: number
   unit_price: number | null
   subtotal: number | null
-  inventory_item_id: string | null
   product_id: string | null
+  inventory_item_id: string | null
   created_at: string
   orders: any
+  inventory_items: { id: string; item_name: string } | { id: string; item_name: string }[] | null
 }
 
 const DEFAULT_PAGE_SIZE = 25
@@ -132,16 +137,21 @@ const ITEM_SELECT = `
   quantity,
   unit_price,
   subtotal,
-  inventory_item_id,
   product_id,
+  inventory_item_id,
   created_at,
   orders:order_id (
     id,
     internal_order_number,
     sales_order_number,
     order_status,
+    payment_status,
     created_at,
     customers:customer_id ( id, name, phone )
+  ),
+  inventory_items:inventory_item_id (
+    id,
+    item_name
   )
 `
 
@@ -310,91 +320,117 @@ async function fetchOrderItemsForList() {
   const { data: orderItems, error } = await supabase
     .from("order_items")
     .select(ITEM_SELECT)
+    .or("product_id.not.is.null,inventory_item_id.not.is.null")
     .order("created_at", { ascending: false })
+
+  // #region agent log
+  fetch("http://127.0.0.1:7283/ingest/8aee2203-9b99-4ec2-b9d6-3286a96aa65d", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ae1a3c" },
+    body: JSON.stringify({
+      sessionId: "ae1a3c",
+      runId: "initial",
+      hypothesisId: "H1",
+      location: "app/actions/items.ts:fetchOrderItemsForList",
+      message: "Fetched product-backed order_items",
+      data: {
+        fetchedRows: (orderItems ?? []).length,
+        hasError: Boolean(error),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {})
+  // #endregion
 
   return { supabase, orderItems: (orderItems ?? []) as RawOrderItem[], error }
 }
 
-async function fetchOrderItemsForKey(key: string) {
-  const supabase = await createClient()
-  const [inventoryRowsResult, productRowsResult] = await Promise.all([
-    supabase.from("order_items").select(ITEM_SELECT).eq("inventory_item_id", key).order("created_at", { ascending: false }),
-    supabase
-      .from("order_items")
-      .select(ITEM_SELECT)
-      .eq("product_id", key)
-      .is("inventory_item_id", null)
-      .order("created_at", { ascending: false }),
-  ])
-
-  const invRows = (inventoryRowsResult.data ?? []) as RawOrderItem[]
-  const prodRows = (productRowsResult.data ?? []) as RawOrderItem[]
-  const mergedById = new Map<string, RawOrderItem>()
-  for (const row of [...invRows, ...prodRows]) mergedById.set(row.id, row)
-  return {
-    supabase,
-    orderItems: [...mergedById.values()],
-    error: inventoryRowsResult.error ?? productRowsResult.error ?? null,
-  }
-}
-
 async function buildItemSummaries(orderItems: RawOrderItem[], supabase: Awaited<ReturnType<typeof createClient>>) {
-  if (orderItems.length === 0) return []
+  const linkedOrderItems = orderItems.filter((oi) => Boolean(oi.product_id) || Boolean(oi.inventory_item_id))
+  // #region agent log
+  fetch("http://127.0.0.1:7283/ingest/8aee2203-9b99-4ec2-b9d6-3286a96aa65d", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ae1a3c" },
+    body: JSON.stringify({
+      sessionId: "ae1a3c",
+      runId: "initial",
+      hypothesisId: "H2",
+      location: "app/actions/items.ts:buildItemSummaries",
+      message: "Input rows vs product-backed rows",
+      data: {
+        inputRows: orderItems.length,
+        productBackedRows: linkedOrderItems.length,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {})
+  // #endregion
+  if (linkedOrderItems.length === 0) return []
 
-  const invIds = [...new Set(orderItems.filter((oi) => oi.inventory_item_id).map((oi) => oi.inventory_item_id as string))]
-  const prodIds = [...new Set(orderItems.filter((oi) => oi.product_id && !oi.inventory_item_id).map((oi) => oi.product_id as string))]
+  const prodIds = [...new Set(linkedOrderItems.map((oi) => oi.product_id).filter(Boolean) as string[])]
 
-  const [invResult, prodResult] = await Promise.all([
-    invIds.length > 0
-      ? supabase.from("inventory_items").select("id, item_name, parent_item_id").in("id", invIds)
-      : Promise.resolve({ data: [] as any[] }),
+  const [prodResult] = await Promise.all([
     prodIds.length > 0
       ? supabase.from("products").select("id, name, sku, category").in("id", prodIds)
       : Promise.resolve({ data: [] as any[] }),
   ])
-
-  const invMap = new Map<string, { item_name: string; parent_item_id: string | null }>()
-  for (const row of invResult.data || []) {
-    invMap.set(row.id, { item_name: row.item_name ?? "", parent_item_id: row.parent_item_id ?? null })
-  }
-
-  const parentIds = [
-    ...new Set(
-      [...invMap.values()]
-        .filter((value) => value.parent_item_id && !invMap.has(value.parent_item_id))
-        .map((value) => value.parent_item_id as string)
-    ),
-  ]
-
-  if (parentIds.length > 0) {
-    const { data: parents } = await supabase.from("inventory_items").select("id, item_name, parent_item_id").in("id", parentIds)
-    for (const row of parents || []) invMap.set(row.id, { item_name: row.item_name ?? "", parent_item_id: null })
-  }
 
   const prodMap = new Map<string, { name: string; sku: string | null; category: string | null }>()
   for (const row of prodResult.data || []) {
     prodMap.set(row.id, { name: row.name ?? "", sku: row.sku ?? null, category: row.category ?? null })
   }
 
-  function resolveItem(invId: string | null, prodId: string | null): { name: string; sku: string | null; category: string | null } {
-    if (invId) {
-      const inv = invMap.get(invId)
-      if (inv) {
-        if (inv.parent_item_id) {
-          const parent = invMap.get(inv.parent_item_id)
-          return { name: parent ? `${parent.item_name} → ${inv.item_name}` : inv.item_name, sku: null, category: null }
+  function resolveItem(input: RawOrderItem): {
+    key: string
+    name: string
+    sku: string | null
+    category: string | null
+    description: string | null
+    tags: string[]
+  } {
+    if (input.product_id) {
+      const prod = prodMap.get(input.product_id)
+      if (prod) {
+        return {
+          key: `product:${input.product_id}`,
+          name: prod.name,
+          sku: prod.sku,
+          category: prod.category,
+          description: null,
+          tags: [],
         }
-        return { name: inv.item_name, sku: null, category: null }
+      }
+      return {
+        key: `product:${input.product_id}`,
+        name: "Unknown Product",
+        sku: null,
+        category: null,
+        description: null,
+        tags: [],
       }
     }
-    if (prodId) {
-      const prod = prodMap.get(prodId)
-      if (prod) return { name: prod.name, sku: prod.sku, category: prod.category }
+    const inventoryItem = firstOrNull(input.inventory_items)
+    if (input.inventory_item_id) {
+      return {
+        key: `inventory:${input.inventory_item_id}`,
+        name: inventoryItem?.item_name ?? "Unknown Inventory Item",
+        sku: null,
+        category: "Inventory",
+        description: null,
+        tags: ["legacy-inventory"],
+      }
     }
-    return { name: "Unknown Item", sku: null, category: null }
+    return {
+      key: `order-item:${input.id}`,
+      name: "Unknown Item",
+      sku: null,
+      category: null,
+      description: null,
+      tags: [],
+    }
   }
 
-  const orderItemIds = orderItems.map((oi) => oi.id)
+  const orderItemIds = linkedOrderItems.map((oi) => oi.id)
   const { data: dispatchRows } = await supabase
     .from("dispatch_items")
     .select(`
@@ -410,7 +446,7 @@ async function buildItemSummaries(orderItems: RawOrderItem[], supabase: Awaited<
     .in("order_item_id", orderItemIds)
 
   type DispatchAgg = {
-    dispatched: number
+    net: number
     returned: number
     latestDate: string | null
     latestTracking: string | null
@@ -420,15 +456,14 @@ async function buildItemSummaries(orderItems: RawOrderItem[], supabase: Awaited<
   for (const row of dispatchRows || []) {
     const orderItemId = row.order_item_id as string
     if (!dispatchAggByOrderItem.has(orderItemId)) {
-      dispatchAggByOrderItem.set(orderItemId, { dispatched: 0, returned: 0, latestDate: null, latestTracking: null, latestCourier: null })
+      dispatchAggByOrderItem.set(orderItemId, { net: 0, returned: 0, latestDate: null, latestTracking: null, latestCourier: null })
     }
     const agg = dispatchAggByOrderItem.get(orderItemId)!
     const dispatch = row.dispatches as any
     const qty = Number(row.quantity || 0)
-    if (dispatch?.dispatch_type === "return") {
-      agg.returned += qty
-    } else {
-      agg.dispatched += qty
+    agg.net += qty
+    if (qty < 0) agg.returned += Math.abs(qty)
+    if (qty > 0) {
       const dispatchDate = dispatch?.dispatch_date ?? null
       if (dispatchDate && (!agg.latestDate || dispatchDate > agg.latestDate)) {
         agg.latestDate = dispatchDate
@@ -441,24 +476,24 @@ async function buildItemSummaries(orderItems: RawOrderItem[], supabase: Awaited<
   const grouped = new Map<
     string,
     {
-      resolved: { name: string; sku: string | null; category: string | null }
+      resolved: { name: string; sku: string | null; category: string | null; description: string | null; tags: string[] }
       entries: ItemOrderEntry[]
     }
   >()
 
-  for (const oi of orderItems) {
-    const key = oi.inventory_item_id ?? oi.product_id ?? oi.id
-    const resolved = resolveItem(oi.inventory_item_id, oi.product_id)
+  for (const oi of linkedOrderItems) {
+    const resolved = resolveItem(oi)
+    const key = resolved.key
     const order = firstOrNull(oi.orders)
     const customer = firstOrNull(order?.customers)
     const dispatchAgg = dispatchAggByOrderItem.get(oi.id) ?? {
-      dispatched: 0,
+      net: 0,
       returned: 0,
       latestDate: null,
       latestTracking: null,
       latestCourier: null,
     }
-    const netDispatched = Math.max(0, dispatchAgg.dispatched - dispatchAgg.returned)
+    const netDispatched = Math.max(0, dispatchAgg.net)
     const remaining = Math.max(0, Number(oi.quantity) - netDispatched)
     let dispatchStatus: DispatchStatus = "not_dispatched"
     if (netDispatched > 0 && remaining > 0) dispatchStatus = "partial"
@@ -470,6 +505,7 @@ async function buildItemSummaries(orderItems: RawOrderItem[], supabase: Awaited<
       internal_order_number: order?.internal_order_number ?? null,
       sales_order_number: order?.sales_order_number ?? null,
       order_status: order?.order_status ?? "Unknown",
+      payment_status: order?.payment_status ?? "Pending",
       order_created_at: order?.created_at ?? oi.created_at,
       customer_id: customer?.id ?? null,
       customer_name: customer?.name ?? "—",
@@ -507,6 +543,8 @@ async function buildItemSummaries(orderItems: RawOrderItem[], supabase: Awaited<
       item_name: resolved.name,
       item_sku: resolved.sku,
       item_category: resolved.category,
+      description: resolved.description,
+      tags: resolved.tags,
       total_orders: entries.length,
       total_quantity: totalQty,
       total_value: totalValue,
@@ -542,6 +580,25 @@ export async function getAllItems(): Promise<{
 
   const items = await buildItemSummaries(orderItems, supabase)
   const stats = calcStats(items, orderItems.length)
+  // #region agent log
+  fetch("http://127.0.0.1:7283/ingest/8aee2203-9b99-4ec2-b9d6-3286a96aa65d", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ae1a3c" },
+    body: JSON.stringify({
+      sessionId: "ae1a3c",
+      runId: "initial",
+      hypothesisId: "H3",
+      location: "app/actions/items.ts:getAllItems",
+      message: "Built all item summaries",
+      data: {
+        orderItemsCount: orderItems.length,
+        itemSummariesCount: items.length,
+        uniqueItemsStat: stats.unique_items,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {})
+  // #endregion
   return { success: true, data: items, stats, error: null }
 }
 
@@ -584,6 +641,29 @@ export async function getItemsList(query?: ItemsListQuery): Promise<{
   filtered = sortItems(filtered, normalized.sortKey, normalized.sortDir)
 
   const totalRows = filtered.length
+  // #region agent log
+  fetch("http://127.0.0.1:7283/ingest/8aee2203-9b99-4ec2-b9d6-3286a96aa65d", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ae1a3c" },
+    body: JSON.stringify({
+      sessionId: "ae1a3c",
+      runId: "initial",
+      hypothesisId: "H4",
+      location: "app/actions/items.ts:getItemsList",
+      message: "Post-filter item counts",
+      data: {
+        allItemsCount: allItems.length,
+        searchedCount: searchedItems.length,
+        filteredCount: filtered.length,
+        dispatchStatus: normalized.dispatchStatus ?? "all",
+        category: normalized.category ?? "all",
+        hasCustomerFilter: Boolean(normalized.customerId),
+        hasSearch: Boolean(normalized.search),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {})
+  // #endregion
   const totalPages = Math.max(1, Math.ceil(totalRows / normalized.pageSize))
   const page = Math.min(normalized.page, totalPages)
   const start = (page - 1) * normalized.pageSize
@@ -653,14 +733,41 @@ export async function getItemByKey(key: string): Promise<{
   data: ItemSummary | null
   error: string | null
 }> {
-  const { supabase, orderItems, error } = await fetchOrderItemsForKey(key)
+  const isTypedKey = key.includes(":")
+  const [kind, rawId] = isTypedKey ? key.split(":", 2) : ["product", key]
+  const supabase = await createClient()
+  const query = supabase.from("order_items").select(ITEM_SELECT).order("created_at", { ascending: false })
+  const result =
+    kind === "inventory"
+      ? await query.eq("inventory_item_id", rawId).is("product_id", null)
+      : await query.eq("product_id", rawId)
+  const { data, error } = result
+  const orderItems = (data ?? []) as RawOrderItem[]
   if (error) return { success: false, data: null, error: error.message }
   if (orderItems.length === 0) return { success: false, data: null, error: "Item not found" }
 
   const items = await buildItemSummaries(orderItems, supabase)
-  const found = items.find((item) => item.item_key === key) ?? null
+  const normalizedKey = isTypedKey ? key : `product:${rawId}`
+  const found = items.find((item) => item.item_key === normalizedKey) ?? null
   if (!found) return { success: false, data: null, error: "Item not found" }
   return { success: true, data: found, error: null }
+}
+
+export async function markItemOrderDispatched(input: {
+  orderId: string
+  orderItemId: string
+  itemId: string
+  qtyDispatched: number
+}) {
+  const result = await createDispatch(
+    input.orderId,
+    "partial",
+    [{ order_item_id: input.orderItemId, quantity: input.qtyDispatched }]
+  )
+  if (!result.success) {
+    return { success: false, error: result.error ?? "Failed to dispatch item" }
+  }
+  return { success: true, data: result.data, error: null }
 }
 
 export async function getItemsFilterOptions(): Promise<{
@@ -672,5 +779,51 @@ export async function getItemsFilterOptions(): Promise<{
   return {
     customers: listResult.data.facets.customers.map((customer) => ({ id: customer.value, name: customer.label })),
     categories: listResult.data.facets.categories.map((category) => category.value),
+  }
+}
+
+export async function getItemsProductBackfillDiagnostics(): Promise<{
+  success: boolean
+  data: {
+    product_backed_count: number
+    inventory_backed_count: number
+    invalid_rows_count: number
+  } | null
+  error: string | null
+}> {
+  const supabase = await createClient()
+
+  const [productBacked, inventoryBacked, invalidRows] = await Promise.all([
+    supabase
+      .from("order_items")
+      .select("id", { count: "exact", head: true })
+      .not("product_id", "is", null),
+    supabase
+      .from("order_items")
+      .select("id", { count: "exact", head: true })
+      .is("product_id", null)
+      .not("inventory_item_id", "is", null),
+    supabase
+      .from("order_items")
+      .select("id", { count: "exact", head: true })
+      .is("product_id", null)
+      .is("inventory_item_id", null),
+  ])
+
+  const error =
+    productBacked.error?.message ?? inventoryBacked.error?.message ?? invalidRows.error?.message ?? null
+
+  if (error) {
+    return { success: false, data: null, error }
+  }
+
+  return {
+    success: true,
+    data: {
+      product_backed_count: productBacked.count ?? 0,
+      inventory_backed_count: inventoryBacked.count ?? 0,
+      invalid_rows_count: invalidRows.count ?? 0,
+    },
+    error: null,
   }
 }
