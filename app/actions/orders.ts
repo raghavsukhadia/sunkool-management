@@ -930,6 +930,8 @@ export async function addItemToOrder(orderId: string, inventoryItemId: string, q
     .eq(productId ? "product_id" : "inventory_item_id", productId ?? inventoryItemId)
     .maybeSingle()
 
+  let orderItemIdForTimeline: string | null = null
+
   if (existingItem) {
     const { error: updateError } = await supabase
       .from("order_items")
@@ -937,8 +939,9 @@ export async function addItemToOrder(orderId: string, inventoryItemId: string, q
       .eq("id", existingItem.id)
 
     if (updateError) return { success: false, error: updateError.message }
+    orderItemIdForTimeline = existingItem.id
   } else {
-    const { error: insertError } = await supabase
+    const { data: insertedRow, error: insertError } = await supabase
       .from("order_items")
       .insert({
         order_id: orderId,
@@ -947,8 +950,11 @@ export async function addItemToOrder(orderId: string, inventoryItemId: string, q
         quantity,
         unit_price: 0,
       })
+      .select("id")
+      .single()
 
     if (insertError) return { success: false, error: insertError.message }
+    orderItemIdForTimeline = insertedRow?.id ?? null
   }
 
   void logTimelineEvent(supabase, orderId, {
@@ -956,7 +962,13 @@ export async function addItemToOrder(orderId: string, inventoryItemId: string, q
     title:       "Item Added",
     description: `${quantity} × ${itemName} added to order.`,
     actor:       "admin",
-    metadata: { item_name: itemName, quantity, product_id: productId, inventory_item_id: productId ? null : inventoryItemId },
+    metadata: {
+      item_name: itemName,
+      quantity,
+      product_id: productId,
+      inventory_item_id: productId ? null : inventoryItemId,
+      ...(orderItemIdForTimeline ? { order_item_id: orderItemIdForTimeline } : {}),
+    },
   })
 
   revalidatePath(`/dashboard/orders/${orderId}`)
@@ -1068,13 +1080,12 @@ export async function removeItemFromOrder(orderItemId: string) {
   }
 
   if (orderItem) {
-    // Timeline: item removed
     void logTimelineEvent(supabase, orderItem.order_id, {
       event_type:  "item_removed",
       title:       "Item Removed",
       description: "An item was removed from the order.",
       actor:       "admin",
-      metadata:    {},
+      metadata:    { order_item_id: orderItemId },
     })
     revalidatePath(`/dashboard/orders/${orderItem.order_id}`)
   }

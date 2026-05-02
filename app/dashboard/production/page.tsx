@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Package, Clock, CheckCircle, ExternalLink, Printer, Search, Maximize2, Minimize2, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Check, X, FileDown, Factory, Layers } from "lucide-react"
+import { Package, Clock, CheckCircle, ExternalLink, Printer, Search, Maximize2, Minimize2, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Check, X, FileDown, Factory, Layers, Columns2 } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import {
@@ -18,6 +18,7 @@ import {
   type ProductionQueueResult,
 } from "@/app/actions/production"
 import { OrderJourneySheet } from "@/components/production/OrderJourneySheet"
+import { PRODUCTION_QUEUE_COLUMNS, usePersistedColumnWidths } from "@/hooks/usePersistedColumnWidths"
 
 /** Remaining (until DONE) — uses `remainingUntilDone` from the server. */
 function getRemainingUntilDone(row: ProductionQueueRow): number {
@@ -117,6 +118,36 @@ type QueueSortKey = "orderNumber" | "customerName" | "itemName" | "ordered" | "p
 type QueueSortDirection = "asc" | "desc"
 type KpiFilter = "none" | "pendingItems" | "inProduction" | "delayed"
 
+function QueueColumnResizeGrip({
+  onResizeStart,
+  onReset,
+}: {
+  onResizeStart: (clientX: number) => void
+  onReset: () => void
+}) {
+  return (
+    <span
+      role="separator"
+      aria-orientation="vertical"
+      title="Drag to resize. Double-click to reset this column."
+      className="absolute right-0 top-0 z-30 flex h-full w-2 cursor-col-resize touch-none justify-end select-none"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.preventDefault()
+        e.stopPropagation()
+        onResizeStart(e.clientX)
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onReset()
+      }}
+    >
+      <span className="h-full w-px shrink-0 bg-slate-200/80 hover:bg-orange-400" aria-hidden />
+    </span>
+  )
+}
+
 export default function ProductionPage() {
   const [productionRecords, setProductionRecords] = useState<ProductionRecord[]>([])
   const [queueData, setQueueData] = useState<ProductionQueueResult | null>(null)
@@ -152,6 +183,11 @@ export default function ProductionPage() {
   const [checkedItemIds, setCheckedItemIds] = useState<Set<string>>(new Set())
   const [queuePage, setQueuePage] = useState(0)
   const QUEUE_PAGE_SIZE = 100
+
+  const queueColumnWidths = usePersistedColumnWidths(
+    "sunkool:production-queue:col-widths",
+    PRODUCTION_QUEUE_COLUMNS
+  )
 
   const loadProductionData = useCallback(async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true)
@@ -1493,6 +1529,17 @@ export default function ProductionPage() {
                   </DropdownMenu>
                 </div>
 
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => queueColumnWidths.resetAll()}
+                  className="h-9 gap-1.5 rounded-lg border-slate-200 text-xs text-slate-600 hover:border-orange-200 hover:bg-orange-50/50 hover:text-orange-700"
+                  title="Restore default table column widths"
+                >
+                  <Columns2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="hidden sm:inline">Reset columns</span>
+                </Button>
+
                 {hasActiveQueueFilters ? (
                   <Button
                     variant="outline"
@@ -1613,23 +1660,18 @@ export default function ProductionPage() {
 
                 {/* Desktop: table */}
                 <div className="hidden lg:block">
-                  <table className="w-full min-w-[960px] table-fixed">
+                  <table
+                    className={cn("w-full table-fixed", queueColumnWidths.isResizing && "cursor-col-resize")}
+                    style={{ minWidth: Math.max(960, queueColumnWidths.minTableWidth) }}
+                  >
                     <colgroup>
-                      <col className="w-9" />
-                      <col className="w-[82px]" />
-                      <col className="w-[100px]" />
-                      <col className="w-[152px]" />
-                      <col className="w-[90px]" />
-                      <col className="w-[162px]" />
-                      <col className="w-[74px]" />
-                      <col className="w-[74px]" />
-                      <col className="w-[58px]" />
-                      <col className="w-[80px]" />
-                      <col className="w-[66px]" />
+                      {PRODUCTION_QUEUE_COLUMNS.map((c) => (
+                        <col key={c.id} style={queueColumnWidths.colStyle(c.id)} />
+                      ))}
                     </colgroup>
-                    <thead className="border-b-2 border-slate-200 bg-slate-50/80 [&_th]:sticky [&_th]:top-[68px] [&_th]:z-20 [&_th]:bg-slate-50/95 [&_th]:backdrop-blur">
+                    <thead className="border-b-2 border-slate-200 bg-slate-50/80 [&_th]:sticky [&_th]:top-[68px] [&_th]:z-20 [&_th]:min-w-0 [&_th]:overflow-hidden [&_th]:bg-slate-50/95 [&_th]:backdrop-blur">
                       <tr>
-                        <th className="h-10 w-10 px-3 text-center">
+                        <th className="h-10 min-w-0 overflow-hidden px-3 text-center">
                           <input
                             type="checkbox"
                             checked={isAllChecked}
@@ -1638,93 +1680,167 @@ export default function ProductionPage() {
                             className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-orange-500"
                           />
                         </th>
-                        <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
-                          <button type="button" onClick={() => handleSort("orderNumber")} className="inline-flex items-center gap-1 hover:text-slate-700">
-                            Order #
-                            {queueSortKey === "orderNumber" ? (
-                              queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                            )}
+                        <th className="relative h-10 min-w-0 overflow-hidden px-3 py-0 pr-5 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                          <button
+                            type="button"
+                            onClick={() => handleSort("orderNumber")}
+                            className="flex w-full min-w-0 items-center gap-1 text-left hover:text-slate-700"
+                          >
+                            <span className="min-w-0 flex-1 truncate">Order #</span>
+                            <span className="shrink-0">
+                              {queueSortKey === "orderNumber" ? (
+                                queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+                              ) : (
+                                <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                              )}
+                            </span>
                           </button>
+                          <QueueColumnResizeGrip
+                            onResizeStart={(x) => queueColumnWidths.beginResize("orderNumber", x)}
+                            onReset={() => queueColumnWidths.resetColumn("orderNumber")}
+                          />
                         </th>
-                        <th className="h-10 px-3 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500 whitespace-nowrap">
-                          Active batch
+                        <th className="relative h-10 min-w-0 overflow-hidden px-2 py-0 pr-5 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                          <span className="block w-full min-w-0 truncate">Active batch</span>
+                          <QueueColumnResizeGrip
+                            onResizeStart={(x) => queueColumnWidths.beginResize("activeBatch", x)}
+                            onReset={() => queueColumnWidths.resetColumn("activeBatch")}
+                          />
                         </th>
-                        <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
-                          <button type="button" onClick={() => handleSort("customerName")} className="inline-flex items-center gap-1 hover:text-slate-700">
-                            Customer
-                            {queueSortKey === "customerName" ? (
-                              queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                            )}
+                        <th className="relative h-10 min-w-0 overflow-hidden px-3 py-0 pr-5 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                          <button
+                            type="button"
+                            onClick={() => handleSort("customerName")}
+                            className="flex w-full min-w-0 items-center gap-1 text-left hover:text-slate-700"
+                          >
+                            <span className="min-w-0 flex-1 truncate">Customer</span>
+                            <span className="shrink-0">
+                              {queueSortKey === "customerName" ? (
+                                queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+                              ) : (
+                                <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                              )}
+                            </span>
                           </button>
+                          <QueueColumnResizeGrip
+                            onResizeStart={(x) => queueColumnWidths.beginResize("customerName", x)}
+                            onReset={() => queueColumnWidths.resetColumn("customerName")}
+                          />
                         </th>
-                        <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500 whitespace-nowrap">Order Date</th>
-                        <th className="h-10 px-4 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
-                          <button type="button" onClick={() => handleSort("itemName")} className="inline-flex items-center gap-1 hover:text-slate-700">
-                            Item
-                            {queueSortKey === "itemName" ? (
-                              queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                            )}
+                        <th className="relative h-10 min-w-0 overflow-hidden px-3 py-0 pr-5 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                          <span className="block w-full min-w-0 truncate">Order Date</span>
+                          <QueueColumnResizeGrip
+                            onResizeStart={(x) => queueColumnWidths.beginResize("orderDate", x)}
+                            onReset={() => queueColumnWidths.resetColumn("orderDate")}
+                          />
+                        </th>
+                        <th className="relative h-10 min-w-0 overflow-hidden px-3 py-0 pr-5 text-left text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                          <button
+                            type="button"
+                            onClick={() => handleSort("itemName")}
+                            className="flex w-full min-w-0 items-center gap-1 text-left hover:text-slate-700"
+                          >
+                            <span className="min-w-0 flex-1 truncate">Item</span>
+                            <span className="shrink-0">
+                              {queueSortKey === "itemName" ? (
+                                queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+                              ) : (
+                                <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                              )}
+                            </span>
                           </button>
+                          <QueueColumnResizeGrip
+                            onResizeStart={(x) => queueColumnWidths.beginResize("itemName", x)}
+                            onReset={() => queueColumnWidths.resetColumn("itemName")}
+                          />
                         </th>
-                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                        <th className="relative h-10 min-w-0 overflow-hidden px-2 py-0 pr-5 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <button
                             type="button"
                             onClick={() => handleSort("ordered")}
-                            className="mx-auto inline-flex items-center gap-1 hover:text-slate-700"
+                            className="flex w-full min-w-0 items-center justify-center hover:text-slate-700"
                           >
-                            Ordered
-                            {queueSortKey === "ordered" ? (
-                              queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                            )}
+                            <span className="flex min-w-0 max-w-full items-center gap-0.5">
+                              <span className="min-w-0 truncate">Ordered</span>
+                              <span className="shrink-0">
+                                {queueSortKey === "ordered" ? (
+                                  queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+                                ) : (
+                                  <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                                )}
+                              </span>
+                            </span>
                           </button>
+                          <QueueColumnResizeGrip
+                            onResizeStart={(x) => queueColumnWidths.beginResize("ordered", x)}
+                            onReset={() => queueColumnWidths.resetColumn("ordered")}
+                          />
                         </th>
-                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                        <th className="relative h-10 min-w-0 overflow-hidden px-2 py-0 pr-5 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <button
                             type="button"
                             onClick={() => handleSort("produced")}
                             title="Produced on completed batches = Ordered − Remaining (until DONE)."
-                            className="mx-auto inline-flex items-center gap-1 hover:text-slate-700"
+                            className="flex w-full min-w-0 items-center justify-center hover:text-slate-700"
                           >
-                            Produced
-                            {queueSortKey === "produced" ? (
-                              queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                            )}
+                            <span className="flex min-w-0 max-w-full items-center gap-0.5">
+                              <span className="min-w-0 truncate">Produced</span>
+                              <span className="shrink-0">
+                                {queueSortKey === "produced" ? (
+                                  queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+                                ) : (
+                                  <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                                )}
+                              </span>
+                            </span>
                           </button>
+                          <QueueColumnResizeGrip
+                            onResizeStart={(x) => queueColumnWidths.beginResize("produced", x)}
+                            onReset={() => queueColumnWidths.resetColumn("produced")}
+                          />
                         </th>
-                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                        <th className="relative h-10 min-w-0 overflow-hidden px-2 py-0 pr-5 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <span
                             title="Requested Production — quantity allocated in active (in-production) checklists, not yet completed."
-                            className="mx-auto inline-flex cursor-default items-center gap-1"
+                            className="block w-full min-w-0 cursor-default truncate text-center"
                           >
                             RP
                           </span>
+                          <QueueColumnResizeGrip
+                            onResizeStart={(x) => queueColumnWidths.beginResize("rp", x)}
+                            onReset={() => queueColumnWidths.resetColumn("rp")}
+                          />
                         </th>
-                        <th className="h-10 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                        <th className="relative h-10 min-w-0 overflow-hidden px-2 py-0 pr-5 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
                           <button
                             type="button"
                             onClick={() => handleSort("remaining")}
                             title="Ordered minus produced on completed batches only. In-progress batches do not reduce this until marked DONE."
-                            className="mx-auto inline-flex items-center gap-1 hover:text-slate-700"
+                            className="flex w-full min-w-0 items-center justify-center hover:text-slate-700"
                           >
-                            Remaining
-                            {queueSortKey === "remaining" ? (
-                              queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                            )}
+                            <span className="flex min-w-0 max-w-full items-center gap-0.5">
+                              <span className="min-w-0 truncate">Remaining</span>
+                              <span className="shrink-0">
+                                {queueSortKey === "remaining" ? (
+                                  queueSortDirection === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+                                ) : (
+                                  <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                                )}
+                              </span>
+                            </span>
                           </button>
+                          <QueueColumnResizeGrip
+                            onResizeStart={(x) => queueColumnWidths.beginResize("remaining", x)}
+                            onReset={() => queueColumnWidths.resetColumn("remaining")}
+                          />
                         </th>
-                        <th className="h-10 w-20 px-4 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">Link</th>
+                        <th className="relative h-10 min-w-0 overflow-hidden px-2 py-0 pr-5 text-center text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                          <span className="block w-full min-w-0 truncate text-center">Link</span>
+                          <QueueColumnResizeGrip
+                            onResizeStart={(x) => queueColumnWidths.beginResize("link", x)}
+                            onReset={() => queueColumnWidths.resetColumn("link")}
+                          />
+                        </th>
                       </tr>
                     </thead>
                     <tbody>

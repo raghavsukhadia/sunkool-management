@@ -9,6 +9,10 @@ export type DispatchStatus = "not_dispatched" | "partial" | "fully_dispatched"
 export interface ItemOrderEntry {
   order_item_id: string
   order_id: string
+  /** Present when this line is tied to a catalog product (matches timeline `metadata.product_id`). */
+  product_id: string | null
+  /** Present for legacy inventory-backed lines (matches timeline `metadata.inventory_item_id`). */
+  inventory_item_id: string | null
   internal_order_number: string | null
   sales_order_number: string | null
   order_status: string
@@ -58,6 +62,8 @@ export interface ItemsStats {
   total_value: number
   fully_dispatched_items: number
   pending_items: number
+  total_dispatched: number
+  total_remaining: number
 }
 
 export type ItemMatchReason = "item" | "sku" | "category" | "customer" | "order"
@@ -182,6 +188,14 @@ function normalizeQuery(query?: ItemsListQuery) {
 }
 
 function calcStats(items: ItemSummary[], totalOrders = 0): ItemsStats {
+  let total_dispatched = 0
+  let total_remaining = 0
+
+  for (const item of items) {
+    total_dispatched += item.total_dispatched
+    total_remaining += item.total_remaining
+  }
+
   return {
     unique_items: items.length,
     total_orders: totalOrders || items.reduce((sum, item) => sum + item.total_orders, 0),
@@ -189,6 +203,8 @@ function calcStats(items: ItemSummary[], totalOrders = 0): ItemsStats {
     total_value: items.reduce((sum, item) => sum + item.total_value, 0),
     fully_dispatched_items: items.filter((item) => item.total_remaining === 0 && item.total_dispatched > 0).length,
     pending_items: items.filter((item) => item.total_remaining > 0).length,
+    total_dispatched,
+    total_remaining,
   }
 }
 
@@ -494,14 +510,34 @@ async function buildItemSummaries(orderItems: RawOrderItem[], supabase: Awaited<
       latestCourier: null,
     }
     const netDispatched = Math.max(0, dispatchAgg.net)
-    const remaining = Math.max(0, Number(oi.quantity) - netDispatched)
+    let remaining = Math.max(0, Number(oi.quantity) - netDispatched)
     let dispatchStatus: DispatchStatus = "not_dispatched"
     if (netDispatched > 0 && remaining > 0) dispatchStatus = "partial"
     else if (netDispatched > 0 && remaining === 0) dispatchStatus = "fully_dispatched"
 
+    const orderStatusLower = (order?.order_status ?? "").toLowerCase()
+    const treatAsDelivered = orderStatusLower.includes("delivered")
+    const treatAsCancelled = orderStatusLower.includes("void") || orderStatusLower.includes("cancel")
+
+    let qtyNetDispatched = netDispatched
+    let qtyRemaining = remaining
+    let effectiveDispatchStatus = dispatchStatus
+
+    // `orders.order_status` can be Delivered while `dispatch_items` is missing or incomplete — align
+    // line KPIs only when that mismatch leaves remaining qty > 0.
+    if (treatAsDelivered && qtyRemaining > 0) {
+      qtyNetDispatched = Number(oi.quantity)
+      qtyRemaining = 0
+      effectiveDispatchStatus = "fully_dispatched"
+    } else if (treatAsCancelled && qtyRemaining > 0) {
+      qtyRemaining = 0
+    }
+
     const entry: ItemOrderEntry = {
       order_item_id: oi.id,
       order_id: oi.order_id,
+      product_id: oi.product_id ?? null,
+      inventory_item_id: oi.inventory_item_id ?? null,
       internal_order_number: order?.internal_order_number ?? null,
       sales_order_number: order?.sales_order_number ?? null,
       order_status: order?.order_status ?? "Unknown",
@@ -513,10 +549,10 @@ async function buildItemSummaries(orderItems: RawOrderItem[], supabase: Awaited<
       quantity: Number(oi.quantity),
       unit_price: Number(oi.unit_price ?? 0),
       subtotal: Number(oi.subtotal ?? Number(oi.quantity) * Number(oi.unit_price ?? 0)),
-      qty_net_dispatched: netDispatched,
+      qty_net_dispatched: qtyNetDispatched,
       qty_returned: dispatchAgg.returned,
-      qty_remaining: remaining,
-      dispatch_status: dispatchStatus,
+      qty_remaining: qtyRemaining,
+      dispatch_status: effectiveDispatchStatus,
       latest_dispatch_date: dispatchAgg.latestDate,
       latest_tracking_number: dispatchAgg.latestTracking,
       latest_courier_name: dispatchAgg.latestCourier,
@@ -573,7 +609,7 @@ export async function getAllItems(): Promise<{
     return {
       success: true,
       data: [],
-      stats: { unique_items: 0, total_orders: 0, total_quantity: 0, total_value: 0, fully_dispatched_items: 0, pending_items: 0 },
+      stats: { unique_items: 0, total_orders: 0, total_quantity: 0, total_value: 0, fully_dispatched_items: 0, pending_items: 0, total_dispatched: 0, total_remaining: 0 },
       error: null,
     }
   }

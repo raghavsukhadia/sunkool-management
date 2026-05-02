@@ -1,7 +1,6 @@
 import type { DispatchStatus, ItemOrderEntry } from "@/app/actions/items"
 
 export type OrderSummaryStatus = "all" | "pending" | "confirmed" | "dispatched" | "delivered" | "cancelled"
-export type PaymentBreakdownKey = "paid" | "partial" | "unpaid" | "refunded"
 export type StockState = "in_stock" | "low_stock" | "out_of_stock"
 
 export interface QuantityMetrics {
@@ -12,12 +11,64 @@ export interface QuantityMetrics {
   qty_available: number
 }
 
+/** Order-line quantity split for the item detail dashboard (partition of all line quantities). */
+export interface OrderQuantityDashboard {
+  totalOrdered: number
+  notDelivered: number
+  delivered: number
+  cancelled: number
+}
+
 function clamp(value: number) {
   return Math.max(0, value)
 }
 
 export function getNetDispatched(orders: ItemOrderEntry[]) {
   return orders.reduce((sum, order) => sum + clamp(order.qty_net_dispatched), 0)
+}
+
+/**
+ * Sums line `quantity` across all order lines (same as item aggregate when all lines are loaded).
+ * Splits: not delivered = qty on lines still pending / confirmed / in dispatch (not delivered, not cancelled);
+ * delivered = full line qty where order is delivered; cancelled = full line qty where cancelled/void.
+ */
+export function getOrderQuantityDashboard(orders: ItemOrderEntry[]): OrderQuantityDashboard {
+  let totalOrdered = 0
+  let notDelivered = 0
+  let delivered = 0
+  let cancelled = 0
+  for (const order of orders) {
+    const q = clamp(order.quantity)
+    totalOrdered += q
+    const status = getOrderSummaryStatus(order)
+    if (status === "cancelled") cancelled += q
+    else if (status === "delivered") delivered += q
+    else notDelivered += q
+  }
+  return { totalOrdered, notDelivered, delivered, cancelled }
+}
+
+export function getPendingQuantity(orders: ItemOrderEntry[]) {
+  return orders.reduce((sum, order) => {
+    const status = getOrderSummaryStatus(order)
+    if (status === "delivered" || status === "cancelled") return sum
+    return sum + clamp(order.quantity)
+  }, 0)
+}
+
+export function getInShipmentQuantity(orders: ItemOrderEntry[]) {
+  return orders.reduce((sum, order) => {
+    if (getOrderSummaryStatus(order) !== "dispatched") return sum
+    return sum + clamp(order.qty_net_dispatched)
+  }, 0)
+}
+
+export function getProductionQuantity(orders: ItemOrderEntry[]) {
+  return orders.reduce((sum, order) => {
+    const status = getOrderSummaryStatus(order)
+    if (status === "delivered" || status === "cancelled" || status === "dispatched") return sum
+    return sum + clamp(order.qty_remaining)
+  }, 0)
 }
 
 export function getReservedQuantity(orders: ItemOrderEntry[]) {
@@ -59,11 +110,19 @@ export function getOrderSummaryStatus(order: ItemOrderEntry): Exclude<OrderSumma
   return "pending"
 }
 
-export function getPaymentBucket(status: string): PaymentBreakdownKey {
-  if (status === "Paid") return "paid"
-  if (status === "Partial") return "partial"
-  if (status === "Refunded") return "refunded"
-  return "unpaid"
+export type QuantityDashboardFilterKey = keyof OrderQuantityDashboard
+
+/** Which order lines match a quantity-dashboard tile (same rules as getOrderQuantityDashboard buckets). */
+export function orderMatchesQuantityDashboardFilter(
+  order: ItemOrderEntry,
+  filter: QuantityDashboardFilterKey
+): boolean {
+  if (filter === "totalOrdered") return true
+  const s = getOrderSummaryStatus(order)
+  if (filter === "notDelivered") return s === "pending" || s === "confirmed" || s === "dispatched"
+  if (filter === "delivered") return s === "delivered"
+  if (filter === "cancelled") return s === "cancelled"
+  return true
 }
 
 export function applyDispatchOptimisticUpdate(

@@ -1,10 +1,9 @@
 "use client"
 
-import { Package, ShoppingCart, Clock3, TrendingUp } from "lucide-react"
+import { Package, BarChart3, Truck, Layers } from "lucide-react"
 import type { ItemsStats } from "@/app/actions/items"
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import { formatCurrency } from "./items-utils"
 
 function StatCard({
   label,
@@ -38,35 +37,44 @@ function StatCard({
 }
 
 export function ItemsStatsStrip({ stats }: { stats: ItemsStats }) {
+  const fulfillmentRate =
+    stats.total_quantity > 0 ? Math.round((stats.total_dispatched / stats.total_quantity) * 100) : 0
+  const fulfillmentAccent =
+    fulfillmentRate >= 80
+      ? "bg-emerald-50 text-emerald-600"
+      : fulfillmentRate >= 50
+        ? "bg-amber-50 text-amber-600"
+        : "bg-rose-50 text-rose-600"
+
   return (
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       <StatCard
-        label="Unique Items"
+        label="Active Products"
         value={String(stats.unique_items)}
-        sub={`${stats.total_orders} total line items`}
+        sub={`${stats.total_orders} order lines`}
         icon={Package}
         accent="bg-sk-primary/10 text-sk-primary"
       />
       <StatCard
-        label="Total Quantity"
+        label="Total Ordered"
         value={String(stats.total_quantity)}
-        sub="Units across filtered results"
-        icon={ShoppingCart}
+        sub={`Units across ${stats.unique_items} products`}
+        icon={Layers}
         accent="bg-violet-50 text-violet-600"
       />
       <StatCard
-        label="Pending Dispatch"
-        value={String(stats.pending_items)}
-        sub={`${stats.fully_dispatched_items} fully dispatched`}
-        icon={Clock3}
-        accent="bg-amber-50 text-amber-600"
+        label="Fulfillment Rate"
+        value={stats.total_quantity > 0 ? `${fulfillmentRate}%` : "—"}
+        sub={`${stats.total_dispatched} of ${stats.total_quantity} units shipped`}
+        icon={BarChart3}
+        accent={fulfillmentAccent}
       />
       <StatCard
-        label="Total Value"
-        value={formatCurrency(stats.total_value)}
-        sub="Across filtered results"
-        icon={TrendingUp}
-        accent="bg-emerald-50 text-emerald-600"
+        label="Units to Dispatch"
+        value={String(stats.total_remaining)}
+        sub={`${stats.pending_items} items with open demand`}
+        icon={Truck}
+        accent="bg-amber-50 text-amber-600"
       />
     </div>
   )

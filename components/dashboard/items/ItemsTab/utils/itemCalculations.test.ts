@@ -27,6 +27,8 @@ test("applyDispatchOptimisticUpdate updates dispatched and remaining", () => {
   const order = {
     order_item_id: "oi1",
     order_id: "o1",
+    product_id: "p1" as string | null,
+    inventory_item_id: null as string | null,
     internal_order_number: "SK1",
     sales_order_number: null,
     order_status: "Ready for Dispatch",
