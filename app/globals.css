@@ -104,4 +104,25 @@
     background-image: linear-gradient(to right, rgb(0 0 0 / 0.05) 1px, transparent 1px),
       linear-gradient(to bottom, rgb(0 0 0 / 0.05) 1px, transparent 1px);
   }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@layer base {
+  /* Prevent tap flash on mobile */
+  a, button, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Smooth scroll globally */
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
 }

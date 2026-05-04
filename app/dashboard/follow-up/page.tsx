@@ -55,6 +55,10 @@ export default function FollowUpPage() {
       await fetchFollowups()
     }
     load()
+
+    const onAutoRefresh = () => { void fetchFollowups() }
+    window.addEventListener("sk:autorefresh", onAutoRefresh)
+    return () => window.removeEventListener("sk:autorefresh", onAutoRefresh)
   }, [])
 
   const handleSaveFollowup = async (followupId: string, form: FollowupForm) => {
@@ -132,7 +136,7 @@ export default function FollowUpPage() {
       </div>
 
       {/* Filter Buttons */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button
           variant={filter === "all" ? "default" : "outline"}
           onClick={() => setFilter("all")}

@@ -128,11 +128,14 @@ export default function OrdersPage() {
     const onVisibility = () => {
       if (document.visibilityState === "visible") void loadOrders(true)
     }
+    const onAutoRefresh = () => { void loadOrders(true) }
     window.addEventListener("focus", onFocus)
     document.addEventListener("visibilitychange", onVisibility)
+    window.addEventListener("sk:autorefresh", onAutoRefresh)
     return () => {
       window.removeEventListener("focus", onFocus)
       document.removeEventListener("visibilitychange", onVisibility)
+      window.removeEventListener("sk:autorefresh", onAutoRefresh)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

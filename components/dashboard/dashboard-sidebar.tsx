@@ -22,16 +22,18 @@ import {
   Plus,
   Layers,
   BarChart3,
+  RefreshCw,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MobileBottomNav } from "@/components/dashboard/MobileBottomNav"
 import { Button } from "@/components/ui/button"
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const SIDEBAR_EXPANDED  = 240
-const SIDEBAR_COLLAPSED = 64
-const LS_KEY            = "sk_sidebar_collapsed"
-const EASE              = "cubic-bezier(0.4,0,0.2,1)"
+const SIDEBAR_EXPANDED   = 240
+const SIDEBAR_COLLAPSED  = 64
+const LS_KEY             = "sk_sidebar_collapsed"
+const EASE               = "cubic-bezier(0.4,0,0.2,1)"
+const REFRESH_INTERVAL_S = 180 // 3 minutes
 
 // ─── Nav structure ───────────────────────────────────────────────────────────
 const NAV = [
@@ -204,10 +206,13 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
   const supabase = useMemo(() => createClient(), [])
   const auth = supabase.auth
 
-  const [collapsed, setCollapsed] = useState(false)
-  const [mounted,   setMounted]   = useState(false)
-  const [userEmail, setUserEmail] = useState("")
-  const [userName,  setUserName]  = useState("")
+  const [collapsed,        setCollapsed]        = useState(false)
+  const [mounted,          setMounted]          = useState(false)
+  const [userEmail,        setUserEmail]        = useState("")
+  const [userName,         setUserName]         = useState("")
+  const [isDesktop,        setIsDesktop]        = useState(false)
+  const [refreshCountdown, setRefreshCountdown] = useState(REFRESH_INTERVAL_S)
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false)
 
   const collapsedRef = useRef(collapsed)
   collapsedRef.current = collapsed
@@ -224,6 +229,34 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
     })
   }, [auth])
 
+  // ── Track desktop vs mobile ────────────────────────────────────────────────
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)")
+    setIsDesktop(mq.matches)
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+    mq.addEventListener("change", handler)
+    return () => mq.removeEventListener("change", handler)
+  }, [])
+
+  // ── Auto-refresh every 3 minutes ──────────────────────────────────────────
+  useEffect(() => {
+    let s = REFRESH_INTERVAL_S
+    setRefreshCountdown(s)
+    const tick = setInterval(() => {
+      s -= 1
+      setRefreshCountdown(s)
+      if (s <= 0) {
+        s = REFRESH_INTERVAL_S
+        setRefreshCountdown(s)
+        setIsAutoRefreshing(true)
+        router.refresh()
+        window.dispatchEvent(new CustomEvent("sk:autorefresh"))
+        setTimeout(() => setIsAutoRefreshing(false), 1500)
+      }
+    }, 1000)
+    return () => clearInterval(tick)
+  }, [router])
+
   // ── Manual toggle ──────────────────────────────────────────────────────────
   const toggleCollapsed = () => {
     setCollapsed(prev => {
@@ -237,6 +270,14 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
     await auth.signOut()
     router.push("/login")
     router.refresh()
+  }
+
+  const handleManualRefresh = () => {
+    setIsAutoRefreshing(true)
+    setRefreshCountdown(REFRESH_INTERVAL_S)
+    router.refresh()
+    window.dispatchEvent(new CustomEvent("sk:autorefresh"))
+    setTimeout(() => setIsAutoRefreshing(false), 1500)
   }
 
   // Sidebar hover: expand on enter, collapse on leave
@@ -394,33 +435,52 @@ export default function DashboardSidebar({ children }: { children: React.ReactNo
       <div
         className="flex min-h-screen min-w-0 flex-col"
         style={{
-          paddingLeft: mounted ? sidebarW : SIDEBAR_EXPANDED,
+          paddingLeft: isDesktop ? (mounted ? sidebarW : SIDEBAR_EXPANDED) : 0,
           transition: `padding-left 280ms ${EASE}`,
         }}
       >
         {/* ── Top bar ───────────────────────────────────────────────────── */}
         <header className="sticky top-0 z-30 border-b border-sk-border bg-white/95 backdrop-blur-sm">
-          <div className="flex items-center justify-between px-6 py-3">
+          <div className="flex items-center justify-between px-4 py-2.5 lg:px-6 lg:py-3">
             <div className="min-w-0">
-              <h1 className="truncate text-[18px] font-semibold text-sk-text-1">
+              <h1 className="truncate text-[16px] font-semibold text-sk-text-1 lg:text-[18px]">
                 {resolveTitle(pathname)}
               </h1>
-              <p className="text-[11px] font-medium text-sk-text-3" suppressHydrationWarning>
+              <p className="hidden text-[11px] font-medium text-sk-text-3 sm:block" suppressHydrationWarning>
                 {todayLabel}
               </p>
             </div>
-            <Link href="/dashboard/orders/new">
-              <Button className="h-9 gap-2 bg-sk-primary px-4 text-[13px] font-medium text-white hover:bg-sk-primary-dk">
-                <Plus className="h-4 w-4" />
-                New Order
-              </Button>
-            </Link>
+            <div className="flex items-center gap-2">
+              {/* Auto-refresh countdown — visible on sm+ */}
+              <button
+                onClick={handleManualRefresh}
+                title={
+                  isAutoRefreshing
+                    ? "Refreshing..."
+                    : `Auto-refresh in ${Math.floor(refreshCountdown / 60)}:${String(refreshCountdown % 60).padStart(2, "0")} — click to refresh now`
+                }
+                className="hidden items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] text-sk-text-3 transition-colors hover:bg-sk-page-bg hover:text-sk-text-2 sm:flex"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", isAutoRefreshing && "animate-spin text-sk-primary")} />
+                <span className="tabular-nums">
+                  {isAutoRefreshing
+                    ? "Refreshing…"
+                    : `${Math.floor(refreshCountdown / 60)}:${String(refreshCountdown % 60).padStart(2, "0")}`}
+                </span>
+              </button>
+              <Link href="/dashboard/orders/new">
+                <Button className="h-8 gap-1.5 bg-sk-primary px-3 text-[12px] font-medium text-white hover:bg-sk-primary-dk sm:h-9 sm:px-4 sm:text-[13px]">
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">New Order</span>
+                </Button>
+              </Link>
+            </div>
           </div>
         </header>
 
         {/* ── Page ─────────────────────────────────────────────────────── */}
-        <main className="flex-1 bg-sk-page-bg pb-20 lg:pb-0">
-          <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main className="flex-1 bg-sk-page-bg pb-24 lg:pb-0">
+          <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
             {children}
           </div>
         </main>

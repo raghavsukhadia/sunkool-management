@@ -66,7 +66,7 @@ function KPICard({
           <p className="text-[11px] uppercase tracking-[0.08em] text-sk-text-3">{title}</p>
           <Icon className="h-5 w-5 text-sk-text-3" />
         </div>
-        <div className="text-[40px] font-semibold leading-none text-sk-text-1" suppressHydrationWarning>
+        <div className="text-[30px] font-semibold leading-none text-sk-text-1 md:text-[40px]" suppressHydrationWarning>
           {value}
         </div>
         <div className={`mt-2 flex items-center gap-1 text-[12px] ${deltaColor}`}>
@@ -115,6 +115,10 @@ export default function DashboardPage() {
       setExtraLoading(false)
     }
     load()
+
+    const onAutoRefresh = () => { void load() }
+    window.addEventListener("sk:autorefresh", onAutoRefresh)
+    return () => window.removeEventListener("sk:autorefresh", onAutoRefresh)
   }, [])
 
   return (
@@ -171,7 +175,7 @@ export default function DashboardPage() {
 
       {!statsLoading && <OrderPipeline stats={stats} />}
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Link
           href="/dashboard/orders/new"
           className="rounded-[10px] border border-sk-border bg-white px-4 py-[14px]"
