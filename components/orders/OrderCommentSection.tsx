@@ -526,7 +526,7 @@ export function OrderCommentSection({
       <div className="flex items-center gap-2">
         <MessageSquare className="w-5 h-5 text-orange-500" />
         <h3 className="text-base font-semibold text-slate-800">
-          Comments &amp; Attachments
+          Remarks &amp; Attachments
         </h3>
         {!loading && (
           <span className="ml-1 inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">
@@ -556,7 +556,7 @@ export function OrderCommentSection({
         ) : comments.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-2">
             <MessageSquare className="w-8 h-8 opacity-30" />
-            <p className="text-sm">No comments yet. Be the first to add one.</p>
+            <p className="text-sm">No remarks yet. Be the first to add one.</p>
           </div>
         ) : (
           comments.map((c) => (
@@ -608,7 +608,7 @@ export function OrderCommentSection({
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleSubmit()
             }}
-            placeholder="Write a comment… (Ctrl+Enter to send)"
+            placeholder="Write a remark… (Ctrl+Enter to send)"
             rows={3}
             className="w-full resize-none px-4 pt-3 pb-2 text-sm text-slate-700 placeholder-slate-400 bg-transparent focus:outline-none"
           />
@@ -636,9 +636,6 @@ export function OrderCommentSection({
               <Paperclip className="w-3.5 h-3.5" />
               Attach
             </button>
-            <span className="text-[11px] text-slate-400 hidden sm:inline">
-              Image · Video · Audio · Docs
-            </span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -663,9 +660,6 @@ export function OrderCommentSection({
         </div>
       </div>
 
-      <p className="text-[11px] text-slate-400 -mt-3">
-        Drag &amp; drop files into the box, or click &quot;Attach&quot;. Supports images, videos, audio and documents up to 50 MB.
-      </p>
     </div>
   )
 }

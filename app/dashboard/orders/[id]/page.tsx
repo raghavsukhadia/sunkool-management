@@ -52,7 +52,8 @@ import {
   deleteOrderPayment,
 } from "@/app/actions/orders"
 import { TimelineDrawer } from "@/components/orders/TimelineDrawer"
-import { OrderCommentSection } from "@/components/orders/OrderCommentSection"
+import { OrderCommentSheet } from "@/components/orders/OrderCommentSheet"
+import { LatestRemarkPopup } from "@/components/orders/LatestRemarkPopup"
 import { getCourierCompanies } from "@/app/actions/management"
 import {
   ShoppingCart,
@@ -84,7 +85,6 @@ import {
   RefreshCw,
   CreditCard,
   Receipt,
-  MessageSquare,
 } from "lucide-react"
 import { producedQtyForLineItem } from "@/lib/production-quantity"
 
@@ -203,6 +203,7 @@ export default function OrderDetailsPage() {
   const [showCreateInvoiceForm, setShowCreateInvoiceForm] = useState(false)
   const [paymentTimelineOpen, setPaymentTimelineOpen] = useState(true)
   const [commentCount, setCommentCount] = useState(0)
+  const [remarkSheetOpen, setRemarkSheetOpen] = useState(false)
   const [orderPayments, setOrderPayments] = useState<any[]>([])
   const [loadingPayments, setLoadingPayments] = useState(false)
   const [addingPayment, setAddingPayment] = useState(false)
@@ -1529,6 +1530,13 @@ export default function OrderDetailsPage() {
         {/* Action buttons — right-aligned, compact */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <TimelineDrawer orderId={orderId} orderNumber={order.internal_order_number} />
+          <OrderCommentSheet
+            orderId={orderId}
+            commentCount={commentCount}
+            onCountChange={setCommentCount}
+            open={remarkSheetOpen}
+            onOpenChange={setRemarkSheetOpen}
+          />
 
           <button
             onClick={handleDownloadLatestTrackingSlip}
@@ -1783,19 +1791,6 @@ export default function OrderDetailsPage() {
               Payment Followup
             </TabsTrigger>
           )}
-
-          <TabsTrigger
-            value="comments"
-            className="relative flex-shrink-0 rounded-none border-b-2 border-transparent px-5 py-3 font-medium text-sm text-slate-400 hover:text-orange-500 hover:bg-orange-50 transition-none data-[state=active]:border-b-2 data-[state=active]:border-orange-500 data-[state=active]:text-orange-500 data-[state=active]:bg-transparent flex items-center"
-          >
-            <MessageSquare className="w-4 h-4 mr-2" />
-            Comments
-            {commentCount > 0 && (
-              <span className="ml-2 inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold bg-orange-500 text-white" title={`${commentCount} comment${commentCount !== 1 ? "s" : ""}`}>
-                {commentCount}
-              </span>
-            )}
-          </TabsTrigger>
 
         </TabsList>
 
@@ -4007,13 +4002,6 @@ export default function OrderDetailsPage() {
           </TabsContent>
         )}
 
-        {/* Comments Tab */}
-        <TabsContent value="comments" className="mt-6">
-          <div className="mx-auto max-w-[860px] px-1">
-            <OrderCommentSection orderId={orderId} onCountChange={setCommentCount} />
-          </div>
-        </TabsContent>
-
       </Tabs>
 
       {/* Dispatch Modal */}
@@ -4416,6 +4404,12 @@ export default function OrderDetailsPage() {
           </div>
         </>
       )}
+
+      {/* Latest remark popup — floats bottom-right on every order open */}
+      <LatestRemarkPopup
+        orderId={orderId}
+        onOpen={() => setRemarkSheetOpen(true)}
+      />
     </div>
   )
 }
